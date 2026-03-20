@@ -97,11 +97,17 @@ async function main(): Promise<void> {
   // 4b. Seed default workspace persona files from workspace-defaults/
   {
     const fs = await import('node:fs');
-    let workspace = config.agent?.workspace || path.join(stateDir, 'workspace');
+    let workspace = config.agent?.workspace || 'workspace';
+    // Resolve relative workspace paths against stateDir (not CWD)
+    if (!path.isAbsolute(workspace)) {
+      workspace = path.join(stateDir, workspace);
+    }
+    config.agent.workspace = workspace;
     try {
       fs.mkdirSync(workspace, { recursive: true });
     } catch {
       workspace = path.join(stateDir, 'workspace');
+      config.agent.workspace = workspace;
     }
     fs.mkdirSync(workspace, { recursive: true });
 
