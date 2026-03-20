@@ -331,6 +331,7 @@
               <div class="server-actions">
                 <button
                   class="btn btn-sm"
+                  aria-label="{(server.status === 'connected' || server.status === 'connecting' || server.status === 'installing') ? 'Disable' : 'Enable'} MCP server {server.id}"
                   onclick={() => handleToggle(server.id, server.status)}
                   disabled={actionInProgress === `toggle-${server.id}` || server.status === 'installing'}
                 >
@@ -338,6 +339,7 @@
                 </button>
                 <button
                   class="btn btn-sm"
+                  aria-label="Reconnect MCP server {server.id}"
                   onclick={() => handleReconnect(server.id)}
                   disabled={actionInProgress === `reconnect-${server.id}` || server.status === 'installing'}
                 >
@@ -345,12 +347,14 @@
                 </button>
                 <button
                   class="btn btn-sm"
+                  aria-label="Edit environment variables for {server.id}"
                   onclick={() => toggleEnvEditor(server)}
                 >
                   Env{server.envKeys && server.envKeys.length > 0 ? ` (${server.envKeys.length})` : ''}
                 </button>
                 <button
                   class="btn btn-sm btn-danger"
+                  aria-label="Remove MCP server {server.id}"
                   onclick={() => handleRemove(server.id)}
                   disabled={actionInProgress === server.id}
                 >
@@ -403,6 +407,7 @@
                   <div class="env-actions">
                     <button
                       class="btn btn-sm"
+                      aria-label="Add environment variable"
                       onclick={() => {
                         if (envEditorValues._newKey) {
                           const key = envEditorValues._newKey;
@@ -418,6 +423,7 @@
                     </button>
                     <button
                       class="btn btn-sm btn-primary"
+                      aria-label="Save environment variables and reconnect"
                       onclick={() => handleSaveEnv(server.id)}
                       disabled={actionInProgress === `env-${server.id}`}
                     >
@@ -466,6 +472,7 @@
                 <div class="install-form-actions">
                   <button
                     class="btn btn-sm btn-primary"
+                    aria-label="Install MCP server {entry.name || entry.id}"
                     onclick={() => handleInstallWithEnv(entry)}
                     disabled={actionInProgress === entry.id}
                   >
@@ -473,6 +480,7 @@
                   </button>
                   <button
                     class="btn btn-sm"
+                    aria-label="Cancel installation"
                     onclick={() => { installFormOpen = null; installFormValues = {}; }}
                   >
                     Cancel
@@ -485,6 +493,7 @@
                 {#if !entry.installed}
                   <button
                     class="btn btn-sm btn-primary"
+                    aria-label="Install {entry.name || entry.id}"
                     onclick={() => openInstallForm(entry)}
                     disabled={actionInProgress === entry.id}
                   >

@@ -371,6 +371,7 @@
           <div class="provider-actions">
             <button
               class="btn btn-sm"
+              aria-label="Test connection to {provider.name}"
               onclick={() => handleTest(provider.id)}
               disabled={testingProvider[provider.id]}
             >
@@ -383,6 +384,7 @@
             </button>
             <button
               class="btn btn-sm"
+              aria-label="{showCredForm[provider.id] ? 'Cancel configuring' : 'Configure'} {provider.name}"
               onclick={() => toggleCredForm(provider.id)}
             >
               {showCredForm[provider.id] ? 'Cancel' : 'Configure'}
@@ -435,6 +437,7 @@
               <div class="cred-actions">
                 <button
                   class="btn btn-sm btn-primary"
+                  aria-label="Save {provider.name} credentials"
                   onclick={() => handleSaveCredentials(provider.id)}
                   disabled={savingCred === provider.id}
                 >
@@ -488,6 +491,7 @@
                             {#if !isDefault}
                               <button
                                 class="btn btn-xs"
+                                aria-label="Set {model.name || model.id} as default model"
                                 onclick={() => {
                                   if (hasKnownCaps(model.capabilities)) {
                                     handleSetDefault(provider.id, model.id);
@@ -503,6 +507,7 @@
                             {#if !isFallback}
                               <button
                                 class="btn btn-xs"
+                                aria-label="Set {model.name || model.id} as fallback model"
                                 onclick={() => {
                                   if (hasKnownCaps(model.capabilities)) {
                                     handleSetFallback(provider.id, model.id);
@@ -517,6 +522,7 @@
                             {/if}
                             <button
                               class="btn btn-xs"
+                              aria-label="Edit capabilities for {model.name || model.id}"
                               onclick={() => startEditCaps(provider.id, model.id, model.capabilities || {})}
                             >Edit</button>
                           </div>
@@ -542,10 +548,10 @@
                                 <label class="caps-check"><input type="checkbox" bind:checked={capsForm.supportsToolCalling} /> Tools</label>
                               </div>
                               <div class="caps-row">
-                                <button class="btn btn-xs btn-primary" onclick={handleSaveCaps} disabled={savingCaps}>
+                                <button class="btn btn-xs btn-primary" aria-label="Save model capabilities" onclick={handleSaveCaps} disabled={savingCaps}>
                                   {savingCaps ? 'Saving...' : pendingModelAction ? `Save & Set as ${pendingModelAction.type === 'default' ? 'Default' : 'Fallback'}` : 'Save'}
                                 </button>
-                                <button class="btn btn-xs" onclick={() => { editingCaps = null; }}>Cancel</button>
+                                <button class="btn btn-xs" aria-label="Cancel editing capabilities" onclick={() => { editingCaps = null; }}>Cancel</button>
                                 {#if capsMsg}<span class="caps-msg">{capsMsg}</span>{/if}
                               </div>
                             </div>
@@ -915,24 +921,5 @@
     background: rgba(251, 191, 36, 0.08);
     border-radius: var(--radius);
     margin-bottom: 4px;
-  }
-  .btn-xs {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: var(--radius);
-    background: var(--bg-void);
-    border: 1px solid var(--border);
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all var(--duration) var(--ease);
-    font-family: var(--font);
-  }
-  .btn-xs:hover:not(:disabled) {
-    background: var(--bg-overlay);
-    color: var(--text-primary);
-  }
-  .btn-xs:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 </style>

@@ -22,6 +22,8 @@
   let qrDataUrl = $state<string | null>(null);
   let loading = $state(true);
   let unpairing = $state(false);
+  let confirmUnpair = $state(false);
+  let confirmUnpairTimer: ReturnType<typeof setTimeout> | null = null;
   let error = $state<string | null>(null);
   let pollInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -99,8 +101,19 @@
     } catch { /* non-critical */ }
   }
 
-  async function handleUnpair() {
-    if (!confirm('Disconnect WhatsApp and clear credentials?')) return;
+  function requestUnpair() {
+    if (confirmUnpair) {
+      performUnpair();
+      return;
+    }
+    confirmUnpair = true;
+    if (confirmUnpairTimer) clearTimeout(confirmUnpairTimer);
+    confirmUnpairTimer = setTimeout(() => { confirmUnpair = false; }, 3000);
+  }
+
+  async function performUnpair() {
+    confirmUnpair = false;
+    if (confirmUnpairTimer) clearTimeout(confirmUnpairTimer);
     unpairing = true;
     try {
       await unpairWhatsApp();
@@ -214,7 +227,7 @@
           </div>
           <div class="field-control">
             {#if !showTokenForm}
-              <button class="btn btn-sm" onclick={() => { showTokenForm = true; }}>
+              <button class="btn btn-sm" aria-label={telegram.connected ? 'Change Telegram bot token' : 'Set Telegram bot token'} onclick={() => { showTokenForm = true; }}>
                 {telegram.connected ? 'Change Token' : 'Set Token'}
               </button>
             {:else}
@@ -412,8 +425,8 @@
       {#if whatsapp.status === 'connected'}
         <div class="card action-card">
           <p class="action-desc">Disconnect WhatsApp and clear stored credentials.</p>
-          <button class="btn btn-danger" onclick={handleUnpair} disabled={unpairing}>
-            {unpairing ? 'Disconnecting...' : 'Disconnect & Unpair'}
+          <button class="btn btn-danger" aria-label={confirmUnpair ? 'Confirm disconnect WhatsApp' : 'Disconnect WhatsApp'} onclick={requestUnpair} disabled={unpairing}>
+            {unpairing ? 'Disconnecting...' : confirmUnpair ? 'Confirm?' : 'Disconnect & Unpair'}
           </button>
         </div>
       {/if}

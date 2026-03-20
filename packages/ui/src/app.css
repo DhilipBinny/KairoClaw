@@ -15,8 +15,8 @@
 
   /* Text — warm off-white */
   --text-primary: #f0f0f5;
-  --text-secondary: #9395a5;
-  --text-muted: #5c5e6e;
+  --text-secondary: #a8aab8;
+  --text-muted: #7a7c8e;
   --text-ghost: #3a3c4a;
 
   /* Accent — electric indigo */
@@ -52,7 +52,7 @@
   --agent-subtle: rgba(251, 146, 60, 0.1);
 
   /* Borders — transparent white */
-  --border: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.10);
   --border-subtle: rgba(255, 255, 255, 0.03);
   --border-accent: rgba(99, 102, 241, 0.3);
 
@@ -192,6 +192,12 @@ a:hover {
 .btn-danger:hover {
   background: rgba(244, 63, 94, 0.15);
   border-color: rgba(244, 63, 94, 0.35);
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: var(--radius);
 }
 
 .input {
@@ -449,4 +455,77 @@ select.input {
   animation: spin 0.6s linear infinite;
   display: inline-block;
   flex-shrink: 0;
+}
+
+/* ═══════════════ EMPTY STATE ═══════════════ */
+.empty-state-msg {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ═══════════════ RESPONSIVE: TABLET ═══════════════ */
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 220px;
+  }
+}
+
+/* ═══════════════ RESPONSIVE: MOBILE ═══════════════ */
+@media (max-width: 768px) {
+  .admin-layout {
+    flex-direction: column;
+  }
+  .admin-layout .admin-nav {
+    width: 100%;
+    height: auto;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .admin-layout .admin-nav .nav-items {
+    display: flex;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    padding: 4px;
+  }
+  .admin-layout .admin-nav .nav-group-label,
+  .admin-layout .admin-nav .nav-divider {
+    display: none;
+  }
+  .admin-layout .admin-nav .nav-item {
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .admin-layout .admin-nav .nav-header {
+    padding: 10px 12px;
+  }
+  .admin-layout .admin-nav .nav-footer {
+    display: none;
+  }
+  .admin-layout .admin-content {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .page-header {
+    padding: 0;
+  }
+  .card {
+    padding: 14px;
+  }
+  .btn {
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+  .input {
+    font-size: 13px;
+  }
+  .qr-image {
+    max-width: 100%;
+    height: auto;
+  }
 }

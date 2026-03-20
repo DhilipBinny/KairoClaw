@@ -22,6 +22,8 @@
   let sessions: SessionRow[] = $state([]);
   let loading = $state(true);
   let searchQuery = $state('');
+  let confirmDeleteId = $state<string | null>(null);
+  let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedSession: string | null = $state(null);
   let selectedMessages: SessionMessage[] = $state([]);
   let loadingMessages = $state(false);
@@ -61,8 +63,19 @@
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this session and all its messages?')) return;
+  function requestDeleteSession(id: string) {
+    if (confirmDeleteId === id) {
+      performDeleteSession(id);
+      return;
+    }
+    confirmDeleteId = id;
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+    confirmDeleteTimer = setTimeout(() => { confirmDeleteId = null; }, 3000);
+  }
+
+  async function performDeleteSession(id: string) {
+    confirmDeleteId = null;
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
     deleteInProgress = id;
     try {
       await deleteSession(id);
@@ -118,12 +131,20 @@
 
       {#if loading}
         <div class="loading"><span class="spinner"></span> Loading...</div>
+      {:else if filteredSessions.length === 0}
+        <div class="empty">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-ghost)">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          {searchQuery ? 'No sessions match your search.' : 'No sessions found. Start a conversation to see sessions here.'}
+        </div>
       {:else}
         <div class="sessions-list">
           {#each filteredSessions as session (session.id)}
             <button
               class="session-row"
               class:active={selectedSession === session.id}
+              aria-label="View session {session.id.slice(0, 16)}"
               onclick={() => viewSession(session.id)}
             >
               <div class="session-row-header">
@@ -135,8 +156,6 @@
                 {new Date(session.updated_at || session.created_at).toLocaleString()}
               </div>
             </button>
-          {:else}
-            <div class="empty">No sessions found</div>
           {/each}
         </div>
       {/if}
@@ -152,10 +171,11 @@
           </div>
           <button
             class="btn btn-sm btn-danger"
-            onclick={() => handleDelete(selectedSession!)}
+            aria-label={confirmDeleteId === selectedSession ? 'Confirm delete session' : 'Delete session'}
+            onclick={() => requestDeleteSession(selectedSession!)}
             disabled={deleteInProgress === selectedSession}
           >
-            {deleteInProgress === selectedSession ? 'Deleting...' : 'Delete'}
+            {deleteInProgress === selectedSession ? 'Deleting...' : confirmDeleteId === selectedSession ? 'Confirm?' : 'Delete'}
           </button>
         </div>
 
