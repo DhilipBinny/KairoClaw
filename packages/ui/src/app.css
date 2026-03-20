@@ -612,24 +612,39 @@ select.input {
     max-height: none;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+  .admin-layout .admin-nav .nav-header {
+    display: flex;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-subtle);
   }
   .admin-layout .admin-nav .nav-items {
     display: flex;
     flex-wrap: wrap;
     overflow-x: auto;
-    padding: 4px;
+    padding: 6px 8px;
+    gap: 4px;
+    flex: 0;
   }
   .admin-layout .admin-nav .nav-group-label,
   .admin-layout .admin-nav .nav-divider {
     display: none;
   }
   .admin-layout .admin-nav .nav-item {
-    padding: 6px 10px;
+    padding: 6px 12px;
     font-size: 12px;
     white-space: nowrap;
+    margin-bottom: 0;
+    border-left: none;
+    border-radius: 6px;
   }
-  .admin-layout .admin-nav .nav-header {
-    padding: 10px 12px;
+  .admin-layout .admin-nav .nav-item.active {
+    border-left: none;
+    padding-left: 12px;
+  }
+  .admin-layout .admin-nav .nav-active-dot {
+    display: none;
   }
   .admin-layout .admin-nav .nav-footer {
     display: none;
