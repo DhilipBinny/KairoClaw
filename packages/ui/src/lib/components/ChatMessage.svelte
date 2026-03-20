@@ -1,6 +1,49 @@
 <script lang="ts">
   import ToolCall from './ToolCall.svelte';
   import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType } from '$lib/stores/chat.svelte';
+  import { marked } from 'marked';
+  import hljs from 'highlight.js/lib/core';
+  import javascript from 'highlight.js/lib/languages/javascript';
+  import python from 'highlight.js/lib/languages/python';
+  import typescript from 'highlight.js/lib/languages/typescript';
+  import bash from 'highlight.js/lib/languages/bash';
+  import json_lang from 'highlight.js/lib/languages/json';
+  import css_lang from 'highlight.js/lib/languages/css';
+  import xml from 'highlight.js/lib/languages/xml';
+  import sql from 'highlight.js/lib/languages/sql';
+
+  hljs.registerLanguage('javascript', javascript);
+  hljs.registerLanguage('js', javascript);
+  hljs.registerLanguage('python', python);
+  hljs.registerLanguage('py', python);
+  hljs.registerLanguage('typescript', typescript);
+  hljs.registerLanguage('ts', typescript);
+  hljs.registerLanguage('bash', bash);
+  hljs.registerLanguage('sh', bash);
+  hljs.registerLanguage('shell', bash);
+  hljs.registerLanguage('json', json_lang);
+  hljs.registerLanguage('css', css_lang);
+  hljs.registerLanguage('html', xml);
+  hljs.registerLanguage('xml', xml);
+  hljs.registerLanguage('sql', sql);
+
+  const renderer = new marked.Renderer();
+  renderer.code = function({ text, lang }: { text: string; lang?: string }) {
+    let highlighted: string;
+    if (lang && hljs.getLanguage(lang)) {
+      highlighted = hljs.highlight(text, { language: lang }).value;
+    } else {
+      highlighted = hljs.highlightAuto(text).value;
+    }
+    return `<pre><code class="hljs language-${lang || ''}">${highlighted}</code></pre>`;
+  };
+
+  marked.setOptions({ breaks: true, gfm: true, renderer });
+
+  function renderMarkdown(text: string): string {
+    if (!text) return '';
+    return marked.parse(text) as string;
+  }
 
   interface Props {
     message: ChatMessageType;
@@ -37,57 +80,39 @@
 
   let toolGroups = $derived(groupToolCalls(message.toolCalls || []));
 
-  /**
-   * Simple markdown-to-HTML renderer.
-   */
-  function renderMarkdown(text: string): string {
-    if (!text) return '';
-
-    let html = text;
-
-    // Escape HTML
-    html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    // Code blocks
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, lang, code) => {
-      return `<pre><code class="language-${lang}">${code.trim()}</code></pre>`;
-    });
-
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-    // Bold and italic
-    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-    // Blockquotes
-    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-    // Horizontal rules
-    html = html.replace(/^---$/gm, '<hr>');
-
-    // Unordered lists
-    html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-
-    // Ordered lists
-    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-    // Paragraphs
-    html = html.replace(/^(?!<[hupblo]|<li|<hr|<blockquote|<pre)(.+)$/gm, '<p>$1</p>');
-    html = html.replace(/<p><\/p>/g, '');
-
-    return html;
+  function relativeTime(ts: number): string {
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return new Date(ts).toLocaleString();
   }
+
+  let messageBodyRef: HTMLDivElement | undefined = $state();
+
+  $effect(() => {
+    if (!messageBodyRef) return;
+    // Re-run when content changes
+    const _ = message.content;
+    // Use tick to wait for DOM update
+    setTimeout(() => {
+      const pres = messageBodyRef!.querySelectorAll('pre');
+      pres.forEach(pre => {
+        if (pre.querySelector('.copy-code-btn')) return;
+        const btn = document.createElement('button');
+        btn.className = 'copy-code-btn';
+        btn.textContent = 'Copy';
+        btn.addEventListener('click', () => {
+          const code = pre.querySelector('code')?.textContent || pre.textContent || '';
+          navigator.clipboard.writeText(code);
+          btn.textContent = 'Copied!';
+          setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+        });
+        pre.style.position = 'relative';
+        pre.appendChild(btn);
+      });
+    }, 0);
+  });
 </script>
 
 <div
@@ -95,11 +120,12 @@
   class:user={message.role === 'user'}
   class:assistant={message.role === 'assistant'}
   class:error={isError}
+  title={relativeTime(message.timestamp)}
 >
   <div class="message-avatar">
     {#if message.role === 'user'}
       <div class="avatar user-avatar">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
           <circle cx="12" cy="7" r="4"></circle>
         </svg>
@@ -107,7 +133,7 @@
     {:else}
       <div class="avatar assistant-avatar" class:error-avatar={isError}>
         {#if isError}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="15" y1="9" x2="9" y2="15"></line>
             <line x1="9" y1="9" x2="15" y2="15"></line>
@@ -119,7 +145,7 @@
     {/if}
   </div>
 
-  <div class="message-body">
+  <div class="message-body" bind:this={messageBodyRef}>
     {#if message.thinkingContent}
       <details class="thinking-section" open={message.isThinking}>
         <summary class="thinking-summary">
@@ -165,6 +191,11 @@
       {#if isError && onRetry}
         <button class="action-btn retry-btn" title="Retry" onclick={() => onRetry?.(message)}>
           Retry
+        </button>
+      {/if}
+      {#if message.role === 'assistant' && !isError && message.content}
+        <button class="action-btn" title="Copy message" onclick={() => navigator.clipboard.writeText(message.content)}>
+          Copy
         </button>
       {/if}
       {#if onDelete}
@@ -342,5 +373,29 @@
     background: var(--red-subtle);
     border-color: rgba(244, 63, 94, 0.2);
     color: var(--red);
+  }
+  :global(.copy-code-btn) {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: var(--font);
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  :global(pre:hover .copy-code-btn) {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .message-actions {
+      opacity: 1;
+    }
   }
 </style>

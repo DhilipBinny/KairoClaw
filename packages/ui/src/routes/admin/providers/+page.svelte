@@ -110,6 +110,9 @@
     }
   }
 
+  // Password visibility
+  let showPassword: Record<string, boolean> = $state({});
+
   // Credential form state
   let showCredForm: Record<string, boolean> = $state({});
   let credForm: Record<string, Record<string, string>> = $state({});
@@ -411,12 +414,22 @@
                 {#if credForm[provider.id].authType === 'apiKey'}
                   <div class="cred-field">
                     <label class="cred-label" for="anthropic-apikey">API Key</label>
-                    <input id="anthropic-apikey" type="password" class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="sk-ant-..." />
+                    <div class="cred-input-row">
+                      <input id="anthropic-apikey" type={showPassword['anthropic-apikey'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="sk-ant-..." />
+                      <button class="btn btn-xs" type="button" onclick={() => showPassword['anthropic-apikey'] = !showPassword['anthropic-apikey']}>
+                        {showPassword['anthropic-apikey'] ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
                   </div>
                 {:else}
                   <div class="cred-field">
                     <label class="cred-label" for="anthropic-token">Auth Token</label>
-                    <input id="anthropic-token" type="password" class="cred-input" bind:value={credForm[provider.id].authToken} placeholder="Auth token..." />
+                    <div class="cred-input-row">
+                      <input id="anthropic-token" type={showPassword['anthropic-token'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].authToken} placeholder="Auth token..." />
+                      <button class="btn btn-xs" type="button" onclick={() => showPassword['anthropic-token'] = !showPassword['anthropic-token']}>
+                        {showPassword['anthropic-token'] ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
                   </div>
                 {/if}
                 <div class="cred-field">
@@ -426,7 +439,12 @@
               {:else if provider.id === 'openai'}
                 <div class="cred-field">
                   <label class="cred-label" for="openai-apikey">API Key</label>
-                  <input id="openai-apikey" type="password" class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="sk-..." />
+                  <div class="cred-input-row">
+                    <input id="openai-apikey" type={showPassword['openai-apikey'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="sk-..." />
+                    <button class="btn btn-xs" type="button" onclick={() => showPassword['openai-apikey'] = !showPassword['openai-apikey']}>
+                      {showPassword['openai-apikey'] ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
                 </div>
               {:else if provider.id === 'ollama'}
                 <div class="cred-field">
@@ -731,6 +749,14 @@
     font-weight: 500;
     color: var(--text-muted);
     margin-bottom: 4px;
+  }
+  .cred-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cred-input-row .cred-input {
+    flex: 1;
   }
   .cred-input {
     width: 100%;

@@ -16,7 +16,7 @@
   /* Text — warm off-white */
   --text-primary: #f0f0f5;
   --text-secondary: #a8aab8;
-  --text-muted: #7a7c8e;
+  --text-muted: #9395a5;
   --text-ghost: #3a3c4a;
 
   /* Accent — electric indigo */
@@ -310,6 +310,25 @@ select.input {
   font-size: 13px;
   line-height: 1.5;
 }
+/* highlight.js atom-one-dark theme */
+.markdown-content .hljs { color: #abb2bf; }
+.markdown-content .hljs-keyword, .markdown-content .hljs-selector-tag, .markdown-content .hljs-literal, .markdown-content .hljs-section, .markdown-content .hljs-link { color: #c678dd; }
+.markdown-content .hljs-function .hljs-keyword { color: #c678dd; }
+.markdown-content .hljs-string, .markdown-content .hljs-attr { color: #98c379; }
+.markdown-content .hljs-number, .markdown-content .hljs-addition { color: #d19a66; }
+.markdown-content .hljs-built_in, .markdown-content .hljs-builtin-name { color: #e6c07b; }
+.markdown-content .hljs-comment, .markdown-content .hljs-quote { color: #5c6370; font-style: italic; }
+.markdown-content .hljs-meta { color: #61aeee; }
+.markdown-content .hljs-deletion { color: #e06c75; }
+.markdown-content .hljs-title { color: #61aeee; }
+.markdown-content .hljs-type, .markdown-content .hljs-class .hljs-title { color: #e6c07b; }
+.markdown-content .hljs-variable, .markdown-content .hljs-template-variable { color: #e06c75; }
+.markdown-content .hljs-tag { color: #e06c75; }
+.markdown-content .hljs-name { color: #e06c75; }
+.markdown-content .hljs-attribute { color: #d19a66; }
+.markdown-content .hljs-regexp { color: #98c379; }
+.markdown-content .hljs-symbol { color: #56b6c2; }
+.markdown-content .hljs-params { color: #abb2bf; }
 .markdown-content blockquote {
   border-left: 3px solid var(--accent);
   padding-left: 12px;
@@ -333,6 +352,7 @@ select.input {
   background: var(--bg-raised);
   font-weight: 600;
 }
+.markdown-content del { text-decoration: line-through; color: var(--text-muted); }
 .markdown-content strong { font-weight: 600; }
 .markdown-content em { font-style: italic; }
 .markdown-content hr {
@@ -528,4 +548,12 @@ select.input {
     max-width: 100%;
     height: auto;
   }
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.input.error, .input[aria-invalid="true"] {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.1);
 }

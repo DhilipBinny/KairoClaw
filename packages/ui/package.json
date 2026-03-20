@@ -11,6 +11,8 @@
     "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.5",
     "svelte": "^5.0.0"
   },
   "devDependencies": {

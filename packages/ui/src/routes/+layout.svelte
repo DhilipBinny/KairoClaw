@@ -4,6 +4,7 @@
   import { getHealth } from '$lib/api';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
+  import Toast from '$lib/components/Toast.svelte';
 
   let { children } = $props();
 
@@ -30,6 +31,8 @@
   });
 </script>
 
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
 {#if isLoading}
   <div class="loading-screen">
     <div class="loading-logo">A</div>
@@ -37,6 +40,7 @@
   </div>
 {:else if isAuthenticated || String(page.url?.pathname) === '/login' || String(page.url?.pathname) === '/setup'}
   {@render children()}
+  <Toast />
 {:else}
   <div class="loading-screen">
     <div class="loading-text">Redirecting...</div>
@@ -44,6 +48,23 @@
 {/if}
 
 <style>
+  .skip-link {
+    position: absolute;
+    top: -100%;
+    left: 16px;
+    z-index: 9999;
+    padding: 8px 16px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 8px;
+    font-size: 14px;
+    text-decoration: none;
+    transition: top 0.2s ease;
+  }
+  .skip-link:focus {
+    top: 16px;
+  }
+
   .loading-screen {
     display: flex;
     flex-direction: column;

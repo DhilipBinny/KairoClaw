@@ -381,6 +381,8 @@
             <button
               class="toggle-btn"
               class:active={!!getVal('agent.thinking.enabled')}
+              role="switch"
+              aria-checked={!!getVal('agent.thinking.enabled')}
               disabled={!!saving['agent.thinking.enabled']}
               onclick={() => saveToggle('agent.thinking.enabled', !!getVal('agent.thinking.enabled'))}
               aria-label="Toggle extended thinking"
@@ -430,6 +432,8 @@
               <button
                 class="toggle-btn"
                 class:active={!!getVal('agent.thinking.showThinking.web')}
+                role="switch"
+                aria-checked={!!getVal('agent.thinking.showThinking.web')}
                 disabled={!!saving['agent.thinking.showThinking.web']}
                 onclick={() => saveToggle('agent.thinking.showThinking.web', !!getVal('agent.thinking.showThinking.web'))}
                 aria-label="Toggle web thinking visibility"
@@ -453,6 +457,8 @@
               <button
                 class="toggle-btn"
                 class:active={!!getVal('agent.thinking.showThinking.telegram')}
+                role="switch"
+                aria-checked={!!getVal('agent.thinking.showThinking.telegram')}
                 disabled={!!saving['agent.thinking.showThinking.telegram']}
                 onclick={() => saveToggle('agent.thinking.showThinking.telegram', !!getVal('agent.thinking.showThinking.telegram'))}
                 aria-label="Toggle Telegram thinking visibility"
@@ -476,6 +482,8 @@
               <button
                 class="toggle-btn"
                 class:active={!!getVal('agent.thinking.showThinking.whatsapp')}
+                role="switch"
+                aria-checked={!!getVal('agent.thinking.showThinking.whatsapp')}
                 disabled={!!saving['agent.thinking.showThinking.whatsapp']}
                 onclick={() => saveToggle('agent.thinking.showThinking.whatsapp', !!getVal('agent.thinking.showThinking.whatsapp'))}
                 aria-label="Toggle WhatsApp thinking visibility"
@@ -579,6 +587,8 @@
                   <button
                     class="toggle-btn"
                     class:active={!!getVal(`tools.${tool.key}.${field.key}`)}
+                    role="switch"
+                    aria-checked={!!getVal(`tools.${tool.key}.${field.key}`)}
                     disabled={!!saving[`tools.${tool.key}.${field.key}`]}
                     onclick={() => saveToggle(`tools.${tool.key}.${field.key}`, !!getVal(`tools.${tool.key}.${field.key}`))}
                     aria-label="Toggle {tool.label}"
@@ -603,6 +613,8 @@
                   <button
                     class="toggle-btn"
                     class:active={!!getVal(`tools.${tool.key}.${field.key}`)}
+                    role="switch"
+                    aria-checked={!!getVal(`tools.${tool.key}.${field.key}`)}
                     disabled={!!saving[`tools.${tool.key}.${field.key}`]}
                     onclick={() => saveToggle(`tools.${tool.key}.${field.key}`, !!getVal(`tools.${tool.key}.${field.key}`))}
                     aria-label="Toggle {field.label || field.key}"

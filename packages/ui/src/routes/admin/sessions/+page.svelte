@@ -151,7 +151,7 @@
                 <Badge variant={channelVariant(session.channel)}>{session.channel}</Badge>
                 <span class="session-turns">{session.turns} turns</span>
               </div>
-              <div class="session-id">{session.id.slice(0, 16)}...</div>
+              <div class="session-id" title={session.id}>{session.id.slice(0, 16)}...</div>
               <div class="session-date">
                 {new Date(session.updated_at || session.created_at).toLocaleString()}
               </div>
@@ -167,7 +167,7 @@
         <div class="messages-header">
           <div class="messages-header-info">
             <h3>Session</h3>
-            <code class="messages-session-id">{selectedSession.slice(0, 24)}...</code>
+            <code class="messages-session-id" title={selectedSession}>{selectedSession.slice(0, 24)}...</code>
           </div>
           <button
             class="btn btn-sm btn-danger"

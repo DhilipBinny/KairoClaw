@@ -3,6 +3,7 @@
   import { getConfig, getChannelsStatus, getWhatsAppQR, unpairWhatsApp, updateConfig, saveChannelCredentials, testTelegramBot, getPendingSenders, approveSender, rejectSender } from '$lib/api';
   import type { PendingSender } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
+  import ChipInput from '$lib/components/ChipInput.svelte';
 
   interface TelegramStatus {
     enabled: boolean;
@@ -31,6 +32,7 @@
   let pollInterval: ReturnType<typeof setInterval> | undefined;
 
   // Telegram bot token form
+  let showBotToken = $state(false);
   let showTokenForm = $state(false);
   let botTokenInput = $state('');
   let savingToken = $state(false);
@@ -194,8 +196,8 @@
     return text.split(',').map(s => s.trim()).filter(Boolean);
   }
 
-  async function saveList(dotPath: string, text: string) {
-    const list = parseList(text);
+  async function saveList(dotPath: string, values: string[]) {
+    const list = values;
     saving[dotPath] = true;
     feedback[dotPath] = undefined as unknown as { msg: string; ok: boolean };
     try {
@@ -376,12 +378,14 @@
         <!-- Enable toggle -->
         <div class="field-row">
           <div class="field-info">
-            <span class="field-label">Enabled</span>
+            <label class="field-label">Enabled</label>
           </div>
           <div class="field-control">
             <button
               class="toggle-btn"
               class:active={!!getVal('channels.telegram.enabled')}
+              role="switch"
+              aria-checked={!!getVal('channels.telegram.enabled')}
               disabled={!!saving['channels.telegram.enabled']}
               onclick={() => saveToggle('channels.telegram.enabled', !!getVal('channels.telegram.enabled'))}
             >
@@ -394,7 +398,7 @@
         <!-- Bot token -->
         <div class="field-row">
           <div class="field-info">
-            <span class="field-label">Bot Token</span>
+            <label class="field-label">Bot Token</label>
             <span class="field-hint">From <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a></span>
           </div>
           <div class="field-control">
@@ -412,7 +416,10 @@
               {/if}
             {:else}
               <div class="inline-form">
-                <input type="password" class="input input-sm" bind:value={botTokenInput} placeholder="123456:ABC-..." />
+                <input type={showBotToken ? 'text' : 'password'} class="input input-sm" bind:value={botTokenInput} placeholder="123456:ABC-..." />
+                <button class="btn btn-xs" type="button" onclick={() => showBotToken = !showBotToken}>
+                  {showBotToken ? 'Hide' : 'Show'}
+                </button>
                 <button class="btn btn-sm btn-primary" onclick={handleSaveBotToken} disabled={savingToken}>
                   {savingToken ? 'Saving...' : 'Save'}
                 </button>
@@ -440,7 +447,7 @@
         <!-- Status info -->
         {#if telegram.enabled && telegram.connected}
           <div class="field-row">
-            <span class="field-label">Bot Username</span>
+            <label class="field-label">Bot Username</label>
             <span class="field-value mono">@{telegram.botUsername}</span>
           </div>
           <div class="channel-hint success">
@@ -477,11 +484,13 @@
           <div class="subsettings">
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Groups</span>
+                <label class="field-label">Groups</label>
                 <span class="field-hint">Allow group conversations</span>
               </div>
               <div class="field-control">
                 <button class="toggle-btn" class:active={!!getVal('channels.telegram.groupsEnabled')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.telegram.groupsEnabled')}
                   disabled={!!saving['channels.telegram.groupsEnabled']}
                   onclick={() => saveToggle('channels.telegram.groupsEnabled', !!getVal('channels.telegram.groupsEnabled'))}>
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -491,11 +500,13 @@
             </div>
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Require Mention</span>
+                <label class="field-label">Require Mention</label>
                 <span class="field-hint">Only respond when @mentioned or replied to</span>
               </div>
               <div class="field-control">
                 <button class="toggle-btn" class:active={!!getVal('channels.telegram.groupRequireMention')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.telegram.groupRequireMention')}
                   disabled={!!saving['channels.telegram.groupRequireMention']}
                   onclick={() => saveToggle('channels.telegram.groupRequireMention', !!getVal('channels.telegram.groupRequireMention'))}>
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -506,21 +517,16 @@
             <!-- AllowFrom -->
             <div class="field-row allow-from-row">
               <div class="field-info">
-                <span class="field-label">Allowed Users</span>
+                <label class="field-label">Allowed Users</label>
                 <span class="field-hint">Restrict who can talk to your bot. Leave empty to allow everyone.</span>
               </div>
-              <div class="field-control">
-                <div class="input-action">
-                  <input
-                    class="input input-sm"
-                    type="text"
-                    value={formatList(getVal('channels.telegram.allowFrom'))}
-                    placeholder="e.g. 110432895"
-                    onblur={(e) => saveList('channels.telegram.allowFrom', (e.target as HTMLInputElement).value)}
-                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                  />
-                  {#if saving['channels.telegram.allowFrom']}<span class="spinner-sm"></span>{/if}
-                </div>
+              <div class="field-control chip-field-control">
+                <ChipInput
+                  value={Array.isArray(getVal('channels.telegram.allowFrom')) ? (getVal('channels.telegram.allowFrom') as string[]).map(String) : []}
+                  placeholder="e.g. 110432895"
+                  onchange={(v) => saveList('channels.telegram.allowFrom', v)}
+                />
+                {#if saving['channels.telegram.allowFrom']}<span class="spinner-sm"></span>{/if}
                 {#if feedback['channels.telegram.allowFrom']?.msg}
                   <span class="field-msg" class:ok={feedback['channels.telegram.allowFrom'].ok}>{feedback['channels.telegram.allowFrom'].msg}</span>
                 {/if}
@@ -534,7 +540,7 @@
             <!-- Outbound Security -->
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Outbound Policy</span>
+                <label class="field-label">Outbound Policy</label>
                 <span class="field-hint">Controls who the bot can send messages TO</span>
               </div>
               <div class="field-control">
@@ -553,21 +559,16 @@
             {#if getVal('channels.telegram.outboundPolicy') === 'session-only'}
               <div class="field-row">
                 <div class="field-info">
-                  <span class="field-label">Outbound Allowlist</span>
+                  <label class="field-label">Outbound Allowlist</label>
                   <span class="field-hint">Extra chat IDs the bot can message (beyond active sessions)</span>
                 </div>
-                <div class="field-control">
-                  <div class="input-action">
-                    <input
-                      class="input input-sm"
-                      type="text"
-                      value={formatList(getVal('channels.telegram.outboundAllowlist'))}
-                      placeholder="e.g. -1001234567890"
-                      onblur={(e) => saveList('channels.telegram.outboundAllowlist', (e.target as HTMLInputElement).value)}
-                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    />
-                    {#if saving['channels.telegram.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
-                  </div>
+                <div class="field-control chip-field-control">
+                  <ChipInput
+                    value={Array.isArray(getVal('channels.telegram.outboundAllowlist')) ? (getVal('channels.telegram.outboundAllowlist') as string[]).map(String) : []}
+                    placeholder="e.g. -1001234567890"
+                    onchange={(v) => saveList('channels.telegram.outboundAllowlist', v)}
+                  />
+                  {#if saving['channels.telegram.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
                   {#if feedback['channels.telegram.outboundAllowlist']?.msg}
                     <span class="field-msg" class:ok={feedback['channels.telegram.outboundAllowlist'].ok}>{feedback['channels.telegram.outboundAllowlist'].msg}</span>
                   {/if}
@@ -624,12 +625,14 @@
         <!-- Enable toggle -->
         <div class="field-row">
           <div class="field-info">
-            <span class="field-label">Enabled</span>
+            <label class="field-label">Enabled</label>
           </div>
           <div class="field-control">
             <button
               class="toggle-btn"
               class:active={!!getVal('channels.whatsapp.enabled')}
+              role="switch"
+              aria-checked={!!getVal('channels.whatsapp.enabled')}
               disabled={!!saving['channels.whatsapp.enabled']}
               onclick={() => saveToggle('channels.whatsapp.enabled', !!getVal('channels.whatsapp.enabled'))}
             >
@@ -642,12 +645,12 @@
         <!-- Connection info -->
         {#if whatsapp.enabled && whatsapp.status === 'connected'}
           <div class="field-row">
-            <span class="field-label">Phone</span>
+            <label class="field-label">Phone</label>
             <span class="field-value mono">+{whatsapp.phone}</span>
           </div>
           {#if whatsapp.name}
             <div class="field-row">
-              <span class="field-label">Name</span>
+              <label class="field-label">Name</label>
               <span class="field-value">{whatsapp.name}</span>
             </div>
           {/if}
@@ -670,11 +673,13 @@
           <div class="subsettings">
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Groups</span>
+                <label class="field-label">Groups</label>
                 <span class="field-hint">Allow group conversations</span>
               </div>
               <div class="field-control">
                 <button class="toggle-btn" class:active={!!getVal('channels.whatsapp.groupsEnabled')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.whatsapp.groupsEnabled')}
                   disabled={!!saving['channels.whatsapp.groupsEnabled']}
                   onclick={() => saveToggle('channels.whatsapp.groupsEnabled', !!getVal('channels.whatsapp.groupsEnabled'))}>
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -684,11 +689,13 @@
             </div>
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Require Mention</span>
+                <label class="field-label">Require Mention</label>
                 <span class="field-hint">Only respond when mentioned in groups</span>
               </div>
               <div class="field-control">
                 <button class="toggle-btn" class:active={!!getVal('channels.whatsapp.groupRequireMention')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.whatsapp.groupRequireMention')}
                   disabled={!!saving['channels.whatsapp.groupRequireMention']}
                   onclick={() => saveToggle('channels.whatsapp.groupRequireMention', !!getVal('channels.whatsapp.groupRequireMention'))}>
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -698,11 +705,13 @@
             </div>
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Read Receipts</span>
+                <label class="field-label">Read Receipts</label>
                 <span class="field-hint">Send blue ticks for read messages</span>
               </div>
               <div class="field-control">
                 <button class="toggle-btn" class:active={!!getVal('channels.whatsapp.sendReadReceipts')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.whatsapp.sendReadReceipts')}
                   disabled={!!saving['channels.whatsapp.sendReadReceipts']}
                   onclick={() => saveToggle('channels.whatsapp.sendReadReceipts', !!getVal('channels.whatsapp.sendReadReceipts'))}>
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
@@ -713,21 +722,16 @@
             <!-- AllowFrom -->
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Allowed Phones</span>
+                <label class="field-label">Allowed Phones</label>
                 <span class="field-hint">Restrict who can DM your bot. Leave empty to allow everyone.</span>
               </div>
-              <div class="field-control">
-                <div class="input-action">
-                  <input
-                    class="input input-sm"
-                    type="text"
-                    value={formatList(getVal('channels.whatsapp.allowFrom'))}
-                    placeholder="e.g. 971501234567"
-                    onblur={(e) => saveList('channels.whatsapp.allowFrom', (e.target as HTMLInputElement).value)}
-                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                  />
-                  {#if saving['channels.whatsapp.allowFrom']}<span class="spinner-sm"></span>{/if}
-                </div>
+              <div class="field-control chip-field-control">
+                <ChipInput
+                  value={Array.isArray(getVal('channels.whatsapp.allowFrom')) ? (getVal('channels.whatsapp.allowFrom') as string[]).map(String) : []}
+                  placeholder="e.g. 971501234567"
+                  onchange={(v) => saveList('channels.whatsapp.allowFrom', v)}
+                />
+                {#if saving['channels.whatsapp.allowFrom']}<span class="spinner-sm"></span>{/if}
                 {#if feedback['channels.whatsapp.allowFrom']?.msg}
                   <span class="field-msg" class:ok={feedback['channels.whatsapp.allowFrom'].ok}>{feedback['channels.whatsapp.allowFrom'].msg}</span>
                 {/if}
@@ -740,21 +744,16 @@
             </div>
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Allowed Groups</span>
+                <label class="field-label">Allowed Groups</label>
                 <span class="field-hint">Restrict which groups the bot responds in. Leave empty to allow all.</span>
               </div>
-              <div class="field-control">
-                <div class="input-action">
-                  <input
-                    class="input input-sm"
-                    type="text"
-                    value={formatList(getVal('channels.whatsapp.groupAllowFrom'))}
-                    placeholder="Group JIDs"
-                    onblur={(e) => saveList('channels.whatsapp.groupAllowFrom', (e.target as HTMLInputElement).value)}
-                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                  />
-                  {#if saving['channels.whatsapp.groupAllowFrom']}<span class="spinner-sm"></span>{/if}
-                </div>
+              <div class="field-control chip-field-control">
+                <ChipInput
+                  value={Array.isArray(getVal('channels.whatsapp.groupAllowFrom')) ? (getVal('channels.whatsapp.groupAllowFrom') as string[]).map(String) : []}
+                  placeholder="Group JIDs"
+                  onchange={(v) => saveList('channels.whatsapp.groupAllowFrom', v)}
+                />
+                {#if saving['channels.whatsapp.groupAllowFrom']}<span class="spinner-sm"></span>{/if}
                 {#if feedback['channels.whatsapp.groupAllowFrom']?.msg}
                   <span class="field-msg" class:ok={feedback['channels.whatsapp.groupAllowFrom'].ok}>{feedback['channels.whatsapp.groupAllowFrom'].msg}</span>
                 {/if}
@@ -768,7 +767,7 @@
             <!-- Outbound Security -->
             <div class="field-row">
               <div class="field-info">
-                <span class="field-label">Outbound Policy</span>
+                <label class="field-label">Outbound Policy</label>
                 <span class="field-hint">Controls who the bot can send messages TO</span>
               </div>
               <div class="field-control">
@@ -787,21 +786,16 @@
             {#if getVal('channels.whatsapp.outboundPolicy') === 'session-only'}
               <div class="field-row">
                 <div class="field-info">
-                  <span class="field-label">Outbound Allowlist</span>
+                  <label class="field-label">Outbound Allowlist</label>
                   <span class="field-hint">Extra JIDs the bot can message (beyond active sessions)</span>
                 </div>
-                <div class="field-control">
-                  <div class="input-action">
-                    <input
-                      class="input input-sm"
-                      type="text"
-                      value={formatList(getVal('channels.whatsapp.outboundAllowlist'))}
-                      placeholder="e.g. 6591234567@s.whatsapp.net"
-                      onblur={(e) => saveList('channels.whatsapp.outboundAllowlist', (e.target as HTMLInputElement).value)}
-                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                    />
-                    {#if saving['channels.whatsapp.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
-                  </div>
+                <div class="field-control chip-field-control">
+                  <ChipInput
+                    value={Array.isArray(getVal('channels.whatsapp.outboundAllowlist')) ? (getVal('channels.whatsapp.outboundAllowlist') as string[]).map(String) : []}
+                    placeholder="e.g. 6591234567@s.whatsapp.net"
+                    onchange={(v) => saveList('channels.whatsapp.outboundAllowlist', v)}
+                  />
+                  {#if saving['channels.whatsapp.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
                   {#if feedback['channels.whatsapp.outboundAllowlist']?.msg}
                     <span class="field-msg" class:ok={feedback['channels.whatsapp.outboundAllowlist'].ok}>{feedback['channels.whatsapp.outboundAllowlist'].msg}</span>
                   {/if}
@@ -932,7 +926,7 @@
   .subsettings { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
 
   .inline-form { display: flex; align-items: center; gap: 6px; }
-  .inline-form .input-sm { width: 220px; padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
+  .inline-form .input-sm { max-width: 220px; width: 100%; padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
 
   .toggle-btn { display: flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 0; color: inherit; }
   .toggle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -958,9 +952,12 @@
   .action-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
 
   .input-action { display: flex; align-items: center; gap: 6px; width: 100%; }
-  .input-action .input-sm { flex: 1; min-width: 180px; padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
+  .input-action .input-sm { flex: 1; min-width: min(180px, 100%); padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
   .spinner-sm { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ChipInput field control */
+  .chip-field-control { flex-direction: column; align-items: flex-start; gap: 4px; min-width: min(240px, 100%); }
 
   /* Token display */
   .token-masked { font-size: 12px; color: var(--text-muted); letter-spacing: 0.5px; }
@@ -1008,4 +1005,9 @@
   .discovered-card { padding: 16px 22px; margin-bottom: 24px; border: 1px solid var(--border-subtle); }
 
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  @media (max-width: 768px) {
+    .field-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .field-control { width: 100%; }
+  }
 </style>
