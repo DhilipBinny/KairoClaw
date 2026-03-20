@@ -73,6 +73,20 @@
     config = { ...config };
   }
 
+  async function saveField(dotPath: string, value: unknown) {
+    saving[dotPath] = true;
+    feedback[dotPath] = undefined as unknown as { msg: string; ok: boolean };
+    try {
+      await updateConfig(dotPath, value);
+      setLocalVal(dotPath, value);
+      feedback[dotPath] = { msg: 'Saved', ok: true };
+    } catch (e: unknown) {
+      feedback[dotPath] = { msg: e instanceof Error ? e.message : 'Failed', ok: false };
+    } finally {
+      saving[dotPath] = false;
+    }
+  }
+
   async function saveToggle(dotPath: string, currentValue: boolean) {
     const newValue = !currentValue;
     saving[dotPath] = true;
@@ -517,6 +531,49 @@
                 Easiest way: leave this empty, message your bot, then click <strong>Add to allowlist</strong> on the <strong>Discovered Users</strong> card above. Or paste IDs manually &mdash; message <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer">@userinfobot</a> to find yours.
               </p>
             </div>
+            <!-- Outbound Security -->
+            <div class="field-row">
+              <div class="field-info">
+                <span class="field-label">Outbound Policy</span>
+                <span class="field-hint">Controls who the bot can send messages TO</span>
+              </div>
+              <div class="field-control">
+                <select class="input input-sm"
+                  value={getVal('channels.telegram.outboundPolicy') || 'session-only'}
+                  onchange={(e) => saveField('channels.telegram.outboundPolicy', (e.target as HTMLSelectElement).value)}>
+                  <option value="session-only">Session only (contacts who messaged first)</option>
+                  <option value="unrestricted">Unrestricted</option>
+                </select>
+                {#if saving['channels.telegram.outboundPolicy']}<span class="spinner-sm"></span>{/if}
+                {#if feedback['channels.telegram.outboundPolicy']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.telegram.outboundPolicy'].ok}>{feedback['channels.telegram.outboundPolicy'].msg}</span>
+                {/if}
+              </div>
+            </div>
+            {#if getVal('channels.telegram.outboundPolicy') === 'session-only'}
+              <div class="field-row">
+                <div class="field-info">
+                  <span class="field-label">Outbound Allowlist</span>
+                  <span class="field-hint">Extra chat IDs the bot can message (beyond active sessions)</span>
+                </div>
+                <div class="field-control">
+                  <div class="input-action">
+                    <input
+                      class="input input-sm"
+                      type="text"
+                      value={formatList(getVal('channels.telegram.outboundAllowlist'))}
+                      placeholder="e.g. -1001234567890"
+                      onblur={(e) => saveList('channels.telegram.outboundAllowlist', (e.target as HTMLInputElement).value)}
+                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                    {#if saving['channels.telegram.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
+                  </div>
+                  {#if feedback['channels.telegram.outboundAllowlist']?.msg}
+                    <span class="field-msg" class:ok={feedback['channels.telegram.outboundAllowlist'].ok}>{feedback['channels.telegram.outboundAllowlist'].msg}</span>
+                  {/if}
+                </div>
+              </div>
+            {/if}
           </div>
         {/if}
 
@@ -708,6 +765,49 @@
                 Group JIDs are auto-filled when you approve groups. You typically don't need to set this manually.
               </p>
             </div>
+            <!-- Outbound Security -->
+            <div class="field-row">
+              <div class="field-info">
+                <span class="field-label">Outbound Policy</span>
+                <span class="field-hint">Controls who the bot can send messages TO</span>
+              </div>
+              <div class="field-control">
+                <select class="input input-sm"
+                  value={getVal('channels.whatsapp.outboundPolicy') || 'session-only'}
+                  onchange={(e) => saveField('channels.whatsapp.outboundPolicy', (e.target as HTMLSelectElement).value)}>
+                  <option value="session-only">Session only (contacts who messaged first)</option>
+                  <option value="unrestricted">Unrestricted</option>
+                </select>
+                {#if saving['channels.whatsapp.outboundPolicy']}<span class="spinner-sm"></span>{/if}
+                {#if feedback['channels.whatsapp.outboundPolicy']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.whatsapp.outboundPolicy'].ok}>{feedback['channels.whatsapp.outboundPolicy'].msg}</span>
+                {/if}
+              </div>
+            </div>
+            {#if getVal('channels.whatsapp.outboundPolicy') === 'session-only'}
+              <div class="field-row">
+                <div class="field-info">
+                  <span class="field-label">Outbound Allowlist</span>
+                  <span class="field-hint">Extra JIDs the bot can message (beyond active sessions)</span>
+                </div>
+                <div class="field-control">
+                  <div class="input-action">
+                    <input
+                      class="input input-sm"
+                      type="text"
+                      value={formatList(getVal('channels.whatsapp.outboundAllowlist'))}
+                      placeholder="e.g. 6591234567@s.whatsapp.net"
+                      onblur={(e) => saveList('channels.whatsapp.outboundAllowlist', (e.target as HTMLInputElement).value)}
+                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                    {#if saving['channels.whatsapp.outboundAllowlist']}<span class="spinner-sm"></span>{/if}
+                  </div>
+                  {#if feedback['channels.whatsapp.outboundAllowlist']?.msg}
+                    <span class="field-msg" class:ok={feedback['channels.whatsapp.outboundAllowlist'].ok}>{feedback['channels.whatsapp.outboundAllowlist'].msg}</span>
+                  {/if}
+                </div>
+              </div>
+            {/if}
           </div>
         {/if}
 
