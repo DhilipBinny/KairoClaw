@@ -57,7 +57,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'agent.name', 'agent.maxToolRounds', 'agent.compactionThreshold', 'agent.keepRecentMessages',
       'session.resetHour', 'session.idleMinutes',
       'channels.telegram.enabled', 'channels.telegram.allowFrom', 'channels.telegram.groupsEnabled', 'channels.telegram.groupRequireMention',
-      'channels.whatsapp.enabled', 'channels.whatsapp.allowFrom', 'channels.whatsapp.groupsEnabled', 'channels.whatsapp.groupRequireMention', 'channels.whatsapp.sendReadReceipts',
+      'channels.whatsapp.enabled', 'channels.whatsapp.allowFrom', 'channels.whatsapp.groupAllowFrom', 'channels.whatsapp.groupsEnabled', 'channels.whatsapp.groupRequireMention', 'channels.whatsapp.sendReadReceipts',
       'tools.exec.enabled', 'tools.exec.timeout',
       'tools.webSearch.enabled',
       'tools.webFetch.enabled', 'tools.webFetch.maxChars',
@@ -124,5 +124,140 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     }
 
     return { success: true, path: dotPath, value };
+  });
+
+  // GET /api/v1/admin/tools — tool metadata for dynamic rendering
+  app.get('/api/v1/admin/tools', { preHandler: [requireRole('admin')] }, async () => {
+    return {
+      tools: [
+        {
+          key: 'exec',
+          label: 'Shell Exec',
+          hint: 'Allow the agent to execute shell commands',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
+            { key: 'timeout', type: 'number', label: 'Timeout (sec)', hint: 'Maximum seconds per command execution', showWhen: 'enabled', min: 1 },
+          ],
+        },
+        {
+          key: 'webSearch',
+          label: 'Web Search',
+          hint: 'Allow the agent to search the web',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
+          ],
+        },
+        {
+          key: 'webFetch',
+          label: 'Web Fetch',
+          hint: 'Allow the agent to fetch web pages',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
+            { key: 'maxChars', type: 'number', label: 'Max Characters', hint: 'Maximum characters to fetch from a web page', showWhen: 'enabled', min: 0 },
+          ],
+        },
+      ],
+    };
+  });
+
+  // PUT /api/v1/admin/config — bulk save (raw JSON editor)
+  app.put('/api/v1/admin/config', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const { config: newConfig } = request.body as { config?: Record<string, unknown> };
+
+    if (!newConfig || typeof newConfig !== 'object') {
+      return reply.code(400).send({ error: 'Missing or invalid "config" object' });
+    }
+
+    // Never allow secrets to be set via bulk save — strip secret fields
+    const secretPaths = [
+      ['providers', 'anthropic', 'apiKey'], ['providers', 'anthropic', 'authToken'],
+      ['providers', 'openai', 'apiKey'], ['channels', 'telegram', 'botToken'],
+      ['gateway', 'token'], ['tools', 'webSearch', 'apiKey'],
+    ];
+
+    // Read existing raw config to preserve secrets
+    const stateDir = config._stateDir || '';
+    const configPath = path.join(stateDir, 'config.json');
+    let rawConfig: Record<string, unknown>;
+    try {
+      rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    } catch {
+      return reply.code(500).send({ error: 'Failed to read config file' });
+    }
+
+    // Merge: use new config but preserve secret fields from raw
+    const merged = JSON.parse(JSON.stringify(newConfig));
+    for (const pathParts of secretPaths) {
+      // Read secret from raw config
+      let rawVal: unknown = rawConfig;
+      for (const p of pathParts) {
+        if (rawVal && typeof rawVal === 'object') rawVal = (rawVal as Record<string, unknown>)[p];
+        else { rawVal = undefined; break; }
+      }
+      if (rawVal === undefined) continue;
+
+      // Check if new config has a masked or empty value for this secret
+      let newVal: unknown = merged;
+      for (const p of pathParts) {
+        if (newVal && typeof newVal === 'object') newVal = (newVal as Record<string, unknown>)[p];
+        else { newVal = undefined; break; }
+      }
+
+      // Restore the original secret if the submitted value looks masked or empty
+      if (newVal === '***' || newVal === '' || newVal === undefined) {
+        let target: Record<string, unknown> = merged;
+        for (let i = 0; i < pathParts.length - 1; i++) {
+          if (!target[pathParts[i]] || typeof target[pathParts[i]] !== 'object') target[pathParts[i]] = {};
+          target = target[pathParts[i]] as Record<string, unknown>;
+        }
+        target[pathParts[pathParts.length - 1]] = rawVal;
+      }
+    }
+
+    // Remove internal fields
+    delete merged._stateDir;
+
+    // Validate against schema
+    const parseResult = configSchema.safeParse(merged);
+    if (!parseResult.success) {
+      const issues = (parseResult.error as any).issues ?? (parseResult.error as any).errors ?? [];
+      const firstIssue = issues[0];
+      const errorPath = firstIssue?.path?.join('.') || 'unknown';
+      const errorMsg = firstIssue?.message || 'Validation failed';
+      return reply.code(400).send({ error: `Validation failed at "${errorPath}": ${errorMsg}` });
+    }
+
+    // Write to disk
+    try {
+      fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    } catch {
+      return reply.code(500).send({ error: 'Failed to write config file' });
+    }
+
+    // Apply to runtime config (shallow merge top-level keys)
+    for (const key of Object.keys(merged)) {
+      (config as unknown as Record<string, unknown>)[key] = (merged as Record<string, unknown>)[key];
+    }
+
+    // Audit
+    if (auditService) {
+      try {
+        auditService.log({
+          tenantId: (request as any).ctx.tenantId || 'default',
+          userId: (request as any).ctx.userId,
+          action: 'config.bulk_update',
+          resource: 'config',
+          details: { keys: Object.keys(merged) },
+        });
+      } catch { /* non-fatal */ }
+    }
+
+    // Notify config change
+    if (onConfigChange) {
+      try { await onConfigChange('*', merged); } catch { /* non-fatal */ }
+    }
+
+    return { success: true };
   });
 };

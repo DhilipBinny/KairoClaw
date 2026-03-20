@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { checkAuth, getIsAuthenticated, getIsLoading } from '$lib/stores/auth.svelte';
+  import { getHealth } from '$lib/api';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
 
@@ -10,9 +11,19 @@
   let isLoading = $derived(getIsLoading());
 
   $effect(() => {
-    checkAuth().then((ok) => {
-      const path = page.url?.pathname || '/';
-      if (!ok && path !== '/login') {
+    checkAuth().then(async (ok) => {
+      const currentPath = String(page.url?.pathname || '/');
+      // Allow /setup and /login without auth
+      if (currentPath === '/setup' || currentPath === '/login') return;
+      if (!ok) {
+        // Check if this is a first-run — redirect to setup wizard instead of login
+        try {
+          const health = await getHealth();
+          if (health.firstRun) {
+            goto('/setup');
+            return;
+          }
+        } catch { /* fall through to login */ }
         goto('/login');
       }
     });
@@ -24,7 +35,7 @@
     <div class="loading-logo">A</div>
     <div class="loading-text">Loading...</div>
   </div>
-{:else if isAuthenticated || page.url?.pathname === '/login'}
+{:else if isAuthenticated || String(page.url?.pathname) === '/login' || String(page.url?.pathname) === '/setup'}
   {@render children()}
 {:else}
   <div class="loading-screen">

@@ -1,27 +1,37 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig } from '$lib/api';
+  import type { ToolMeta } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
 
   let config: Record<string, unknown> | null = $state(null);
   let system: Record<string, unknown> | null = $state(null);
   let loading = $state(true);
-  let showRawJson = $state(false);
+  let toolsMeta: ToolMeta[] = $state([]);
 
   // Per-field feedback: key = dot path, value = { msg, ok }
   let feedback: Record<string, { msg: string; ok: boolean }> = $state({});
   let saving: Record<string, boolean> = $state({});
 
+  // Raw JSON editor state
+  let showRawJson = $state(false);
+  let rawJsonText = $state('');
+  let rawJsonError = $state('');
+  let rawJsonSaving = $state(false);
+  let rawJsonDirty = $state(false);
+
   async function loadData() {
     loading = true;
     try {
-      const [configData, systemData] = await Promise.all([
+      const [configData, systemData, toolsData] = await Promise.all([
         getConfig().catch(() => ({ config: null })),
         getSystemInfo().catch(() => null),
+        getToolsConfig().catch(() => ({ tools: [] })),
       ]);
       config = configData.config;
       system = systemData;
+      toolsMeta = toolsData.tools || [];
     } catch (e) {
       console.error('Failed to load settings:', e);
     } finally {
@@ -69,7 +79,6 @@
       feedback = { ...feedback, [dotPath]: { msg, ok: false } };
     } finally {
       saving = { ...saving, [dotPath]: false };
-      // Clear success feedback after 3 seconds
       if (feedback[dotPath]?.ok) {
         setTimeout(() => {
           if (feedback[dotPath]?.ok) {
@@ -97,6 +106,64 @@
 
   async function saveToggle(dotPath: string, current: boolean) {
     await saveField(dotPath, !current);
+  }
+
+  // Full config viewer/editor
+  let configViewMode: 'view' | 'edit' = $state('view');
+
+  function getFullConfigJson(): string {
+    if (!config) return '{}';
+    const clean: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(config)) {
+      if (key.startsWith('_')) continue;
+      clean[key] = val;
+    }
+    return JSON.stringify(clean, null, 2);
+  }
+
+  function refreshRawJson() {
+    rawJsonText = getFullConfigJson();
+  }
+
+  function handleRawJsonInput(event: Event) {
+    rawJsonText = (event.target as HTMLTextAreaElement).value;
+    rawJsonDirty = true;
+    rawJsonError = '';
+    try {
+      JSON.parse(rawJsonText);
+    } catch (e) {
+      rawJsonError = `Invalid JSON: ${(e as Error).message}`;
+    }
+  }
+
+  async function saveRawJson() {
+    rawJsonError = '';
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(rawJsonText);
+    } catch (e) {
+      rawJsonError = `Invalid JSON: ${(e as Error).message}`;
+      return;
+    }
+    rawJsonSaving = true;
+    try {
+      await saveFullConfig(parsed);
+      rawJsonDirty = false;
+      configViewMode = 'view';
+      await loadData();
+      rawJsonError = '';
+    } catch (e: unknown) {
+      rawJsonError = e instanceof Error ? e.message : 'Save failed';
+    } finally {
+      rawJsonSaving = false;
+    }
+  }
+
+  function resetRawJson() {
+    refreshRawJson();
+    rawJsonDirty = false;
+    rawJsonError = '';
+    configViewMode = 'view';
   }
 
   function handleLogout() {
@@ -129,7 +196,7 @@
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
           <circle cx="12" cy="7" r="4"></circle>
         </svg>
-        Agent Settings
+        Agent
       </h2>
       <div class="card settings-card">
         <div class="field-row">
@@ -243,7 +310,7 @@
           <circle cx="12" cy="12" r="10"></circle>
           <polyline points="12 6 12 12 16 14"></polyline>
         </svg>
-        Session Settings
+        Sessions
       </h2>
       <div class="card settings-card">
         <div class="field-row">
@@ -300,7 +367,7 @@
       </div>
     </div>
 
-    <!-- Tool Toggles -->
+    <!-- Tool Toggles (dynamic from API) -->
     <div class="section">
       <h2 class="section-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--tool)">
@@ -309,174 +376,161 @@
         Tools
       </h2>
       <div class="card settings-card">
-        <div class="field-row">
-          <div class="field-info">
-            <label class="field-label">Shell Exec</label>
-            <span class="field-hint">Allow the agent to execute shell commands</span>
-          </div>
-          <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('tools.exec.enabled')}
-              disabled={!!saving['tools.exec.enabled']}
-              onclick={() => saveToggle('tools.exec.enabled', !!getVal('tools.exec.enabled'))}
-            >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('tools.exec.enabled') ? 'Enabled' : 'Disabled'}</span>
-            </button>
-            {#if feedback['tools.exec.enabled']?.msg}
-              <span class="field-feedback" class:ok={feedback['tools.exec.enabled'].ok} class:err={!feedback['tools.exec.enabled'].ok}>
-                {feedback['tools.exec.enabled'].msg}
-              </span>
-            {/if}
-          </div>
-        </div>
-        {#if getVal('tools.exec.enabled')}
-          <div class="field-row sub-field">
-            <div class="field-info">
-              <label class="field-label" for="tools-exec-timeout">Exec Timeout (sec)</label>
-              <span class="field-hint">Maximum seconds per command execution</span>
-            </div>
-            <div class="field-control">
-              <div class="input-action">
-                <input
-                  id="tools-exec-timeout"
-                  class="input input-narrow"
-                  type="number"
-                  min="1"
-                  value={getVal('tools.exec.timeout') ?? 30}
-                  onblur={(e) => saveNumberField('tools.exec.timeout', e)}
-                  onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                />
-                {#if saving['tools.exec.timeout']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+        {#each toolsMeta as tool (tool.key)}
+          {#each tool.fields as field (field.key)}
+            {#if field.type === 'boolean'}
+              <div class="field-row">
+                <div class="field-info">
+                  <label class="field-label">{tool.label}</label>
+                  <span class="field-hint">{tool.hint}</span>
+                </div>
+                <div class="field-control">
+                  <button
+                    class="toggle-btn"
+                    class:active={!!getVal(`tools.${tool.key}.${field.key}`)}
+                    disabled={!!saving[`tools.${tool.key}.${field.key}`]}
+                    onclick={() => saveToggle(`tools.${tool.key}.${field.key}`, !!getVal(`tools.${tool.key}.${field.key}`))}
+                    aria-label="Toggle {tool.label}"
+                  >
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-label">{getVal(`tools.${tool.key}.${field.key}`) ? 'Enabled' : 'Disabled'}</span>
+                  </button>
+                  {#if feedback[`tools.${tool.key}.${field.key}`]?.msg}
+                    <span class="field-feedback" class:ok={feedback[`tools.${tool.key}.${field.key}`].ok} class:err={!feedback[`tools.${tool.key}.${field.key}`].ok}>
+                      {feedback[`tools.${tool.key}.${field.key}`].msg}
+                    </span>
+                  {/if}
+                </div>
               </div>
-              {#if feedback['tools.exec.timeout']?.msg}
-                <span class="field-feedback" class:ok={feedback['tools.exec.timeout'].ok} class:err={!feedback['tools.exec.timeout'].ok}>
-                  {feedback['tools.exec.timeout'].msg}
-                </span>
-              {/if}
-            </div>
-          </div>
-        {/if}
-        <div class="field-row">
-          <div class="field-info">
-            <label class="field-label">Web Search</label>
-            <span class="field-hint">Allow the agent to search the web</span>
-          </div>
-          <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('tools.webSearch.enabled')}
-              disabled={!!saving['tools.webSearch.enabled']}
-              onclick={() => saveToggle('tools.webSearch.enabled', !!getVal('tools.webSearch.enabled'))}
-            >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('tools.webSearch.enabled') ? 'Enabled' : 'Disabled'}</span>
-            </button>
-            {#if feedback['tools.webSearch.enabled']?.msg}
-              <span class="field-feedback" class:ok={feedback['tools.webSearch.enabled'].ok} class:err={!feedback['tools.webSearch.enabled'].ok}>
-                {feedback['tools.webSearch.enabled'].msg}
-              </span>
-            {/if}
-          </div>
-        </div>
-        <div class="field-row">
-          <div class="field-info">
-            <label class="field-label">Web Fetch</label>
-            <span class="field-hint">Allow the agent to fetch web pages</span>
-          </div>
-          <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('tools.webFetch.enabled')}
-              disabled={!!saving['tools.webFetch.enabled']}
-              onclick={() => saveToggle('tools.webFetch.enabled', !!getVal('tools.webFetch.enabled'))}
-            >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('tools.webFetch.enabled') ? 'Enabled' : 'Disabled'}</span>
-            </button>
-            {#if feedback['tools.webFetch.enabled']?.msg}
-              <span class="field-feedback" class:ok={feedback['tools.webFetch.enabled'].ok} class:err={!feedback['tools.webFetch.enabled'].ok}>
-                {feedback['tools.webFetch.enabled'].msg}
-              </span>
-            {/if}
-          </div>
-        </div>
-        {#if getVal('tools.webFetch.enabled')}
-          <div class="field-row sub-field">
-            <div class="field-info">
-              <label class="field-label" for="tools-webFetch-maxChars">Max Characters</label>
-              <span class="field-hint">Maximum characters to fetch from a web page</span>
-            </div>
-            <div class="field-control">
-              <div class="input-action">
-                <input
-                  id="tools-webFetch-maxChars"
-                  class="input input-narrow"
-                  type="number"
-                  min="0"
-                  value={getVal('tools.webFetch.maxChars') ?? 50000}
-                  onblur={(e) => saveNumberField('tools.webFetch.maxChars', e)}
-                  onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                />
-                {#if saving['tools.webFetch.maxChars']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+            {:else if field.type === 'number' && (!field.showWhen || getVal(`tools.${tool.key}.${field.showWhen}`))}
+              <div class="field-row sub-field">
+                <div class="field-info">
+                  <label class="field-label" for="tools-{tool.key}-{field.key}">{field.label || field.key}</label>
+                  {#if field.hint}<span class="field-hint">{field.hint}</span>{/if}
+                </div>
+                <div class="field-control">
+                  <div class="input-action">
+                    <input
+                      id="tools-{tool.key}-{field.key}"
+                      class="input input-narrow"
+                      type="number"
+                      min={field.min ?? 0}
+                      value={getVal(`tools.${tool.key}.${field.key}`) ?? ''}
+                      onblur={(e) => saveNumberField(`tools.${tool.key}.${field.key}`, e)}
+                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                    {#if saving[`tools.${tool.key}.${field.key}`]}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+                  </div>
+                  {#if feedback[`tools.${tool.key}.${field.key}`]?.msg}
+                    <span class="field-feedback" class:ok={feedback[`tools.${tool.key}.${field.key}`].ok} class:err={!feedback[`tools.${tool.key}.${field.key}`].ok}>
+                      {feedback[`tools.${tool.key}.${field.key}`].msg}
+                    </span>
+                  {/if}
+                </div>
               </div>
-              {#if feedback['tools.webFetch.maxChars']?.msg}
-                <span class="field-feedback" class:ok={feedback['tools.webFetch.maxChars'].ok} class:err={!feedback['tools.webFetch.maxChars'].ok}>
-                  {feedback['tools.webFetch.maxChars'].msg}
-                </span>
-              {/if}
-            </div>
-          </div>
-        {/if}
+            {/if}
+          {/each}
+        {/each}
       </div>
     </div>
 
-    <!-- Raw JSON (collapsible) -->
+    <!-- Full Configuration -->
     <div class="section">
-      <button class="collapse-toggle" onclick={() => showRawJson = !showRawJson}>
+      <button class="collapse-toggle" onclick={() => { showRawJson = !showRawJson; if (showRawJson) { refreshRawJson(); configViewMode = 'view'; } }}>
         <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          class="collapse-chevron"
-          class:open={showRawJson}
+          width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          class="collapse-chevron" class:open={showRawJson}
         >
           <polyline points="9 18 15 12 9 6"></polyline>
         </svg>
         <h2 class="section-title" style="margin-bottom: 0;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--yellow)">
             <polyline points="16 18 22 12 16 6"></polyline>
             <polyline points="8 6 2 12 8 18"></polyline>
           </svg>
-          Raw Configuration
+          Full Configuration
         </h2>
       </button>
       {#if showRawJson}
-        <div class="card config-view">
-          <pre class="config-json">{JSON.stringify(config, null, 2)}</pre>
+        <div class="card raw-editor-card">
+          <div class="raw-editor-header">
+            <span class="raw-editor-hint">
+              {#if configViewMode === 'view'}
+                Read-only view of config.json. Secrets are masked.
+              {:else}
+                Editing config.json — secrets are preserved on save.
+              {/if}
+            </span>
+            {#if configViewMode === 'view'}
+              <button class="btn btn-xs" onclick={() => { configViewMode = 'edit'; refreshRawJson(); }} aria-label="Edit configuration">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+                Edit
+              </button>
+            {/if}
+          </div>
+          {#if configViewMode === 'view'}
+            <pre class="raw-editor-pre">{getFullConfigJson()}</pre>
+          {:else}
+            <div class="raw-editor-warning">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              Edit carefully — invalid changes may break the gateway.
+            </div>
+            <textarea
+              class="raw-editor-textarea"
+              spellcheck="false"
+              value={rawJsonText}
+              oninput={handleRawJsonInput}
+              rows="24"
+            ></textarea>
+            {#if rawJsonError}
+              <div class="raw-editor-error">{rawJsonError}</div>
+            {/if}
+            <div class="raw-editor-actions">
+              <button class="btn btn-sm" onclick={resetRawJson}>Cancel</button>
+              <button
+                class="btn btn-sm btn-primary"
+                disabled={!rawJsonDirty || !!rawJsonError || rawJsonSaving}
+                onclick={saveRawJson}
+              >
+                {#if rawJsonSaving}<span class="spinner"></span>{/if}
+                {rawJsonSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
 
-    <!-- System info -->
+    <!-- System Info -->
     {#if system}
       <div class="section">
         <h2 class="section-title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--blue)">
-            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-            <line x1="8" y1="21" x2="16" y2="21"></line>
-            <line x1="12" y1="17" x2="12" y2="21"></line>
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
           </svg>
           System Information
         </h2>
-        <div class="card config-view">
-          <pre class="config-json">{JSON.stringify(system, null, 2)}</pre>
+        <div class="card settings-card">
+          {#each Object.entries(system) as [key, val]}
+            <div class="field-row">
+              <div class="field-info">
+                <span class="field-label">{key}</span>
+              </div>
+              <div class="field-control">
+                <span class="system-value">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+              </div>
+            </div>
+          {/each}
         </div>
       </div>
     {/if}
@@ -536,7 +590,6 @@
     align-items: center;
     gap: 8px;
   }
-
   /* Settings card with field rows */
   .settings-card {
     padding: 6px 0;
@@ -601,10 +654,6 @@
     align-items: center;
     flex-shrink: 0;
   }
-  .field-spinner.inline {
-    display: inline-flex;
-    margin-left: 8px;
-  }
   .field-feedback {
     font-size: 11px;
     font-weight: 500;
@@ -619,6 +668,12 @@
   .field-feedback.err {
     color: var(--red);
     background: var(--red-subtle);
+  }
+  .system-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    word-break: break-all;
   }
 
   /* Toggle button */
@@ -674,7 +729,7 @@
     min-width: 56px;
   }
 
-  /* Collapsible raw JSON */
+  /* Collapsible toggle */
   .collapse-toggle {
     display: flex;
     align-items: center;
@@ -699,18 +754,75 @@
   .collapse-chevron.open {
     transform: rotate(90deg);
   }
-  .config-view {
-    padding: 18px;
-    overflow-x: auto;
+
+  /* Full config viewer/editor */
+  .raw-editor-card {
+    padding: 0;
+    overflow: hidden;
   }
-  .config-json {
+  .raw-editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .raw-editor-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .raw-editor-pre {
+    margin: 0;
+    padding: 18px;
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.7;
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-all;
-    margin: 0;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+  .raw-editor-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    font-size: 12px;
+    color: var(--yellow);
+    background: var(--yellow-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .raw-editor-textarea {
+    width: 100%;
+    padding: 18px;
+    background: var(--bg-base);
+    color: var(--text-secondary);
+    border: none;
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    resize: vertical;
+    outline: none;
+    tab-size: 2;
+    box-sizing: border-box;
+  }
+  .raw-editor-textarea:focus {
+    color: var(--text-primary);
+    background: rgba(0, 0, 0, 0.2);
+  }
+  .raw-editor-error {
+    padding: 8px 18px;
+    font-size: 12px;
+    color: var(--red);
+    background: var(--red-subtle);
+  }
+  .raw-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px;
   }
 
   /* Account */

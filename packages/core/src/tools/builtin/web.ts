@@ -59,7 +59,7 @@ export const webTools: ToolRegistration[] = [
         required: ['url'],
       },
     },
-    executor: async (args) => {
+    executor: async (args, context) => {
       const url = args.url as string;
       if (!url || typeof url !== 'string') {
         return { error: 'url is required' };
@@ -72,7 +72,10 @@ export const webTools: ToolRegistration[] = [
         return { error: `SSRF protection: ${message}` };
       }
 
-      const maxChars = (args.maxChars as number) || 50000;
+      const ctx = context as Record<string, unknown>;
+      const configMaxChars = (ctx.config as Record<string, Record<string, Record<string, unknown>>>)?.tools?.webFetch?.maxChars as number | undefined;
+      const defaultMaxChars = typeof configMaxChars === 'number' && configMaxChars > 0 ? configMaxChars : 50000;
+      const maxChars = (args.maxChars as number) || defaultMaxChars;
 
       try {
         const res = await fetch(url, {

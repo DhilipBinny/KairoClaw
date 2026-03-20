@@ -82,6 +82,81 @@ class TelegramChannel implements Channel {
     this.runner = runner;
     this.bot = new Bot(botToken);
 
+    // ── Middleware: record senders for discovery ──
+    // Runs before commands and message handlers so /myid etc. also get tracked
+    this.bot.use(async (ctx, next) => {
+      if (ctx.from && ctx.chat?.type === 'private') {
+        const senderId = String(ctx.from.id);
+        const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
+        const cfg = this.config.channels.telegram;
+        if (!cfg.allowFrom || cfg.allowFrom.length === 0) {
+          // No allowlist — record as 'seen' for onboarding (5-row budget)
+          try {
+            const exists = this.db.get<{ id: number }>(
+              "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status = 'seen'",
+              [senderId],
+            );
+            if (exists) {
+              this.db.run(
+                "UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1 WHERE channel = 'telegram' AND sender_id = ? AND status = 'seen'",
+                [senderName, senderId],
+              );
+            } else {
+              const count = this.db.get<{ c: number }>(
+                "SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'telegram' AND status = 'seen'",
+              );
+              if ((count?.c ?? 0) >= 5) {
+                this.db.run(
+                  "DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'seen' ORDER BY last_seen ASC LIMIT 1)",
+                );
+              }
+              this.db.run(
+                "INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'seen')",
+                ['telegram', senderId, senderName],
+              );
+            }
+          } catch { /* non-critical */ }
+        }
+      }
+      await next();
+    });
+
+    // ── Slash commands ───────────────────────────
+    this.bot.command('start', async (ctx) => {
+      const name = this.config.agent?.name || 'Kairo';
+      await ctx.reply(`Hi! I'm ${name}, your AI assistant. Send me a message to get started.\n\nType /help to see available commands.`);
+    });
+
+    this.bot.command('help', async (ctx) => {
+      await ctx.reply(
+        '*Commands*\n\n' +
+        '/start — Welcome message\n' +
+        '/help — Show this list\n' +
+        '/myid — Show your Telegram user ID\n\n' +
+        'Or just send any message to chat.',
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    this.bot.command('myid', async (ctx) => {
+      if (!ctx.from) return;
+      const name = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
+      await ctx.reply(
+        `Your Telegram user ID: \`${ctx.from.id}\`\n` +
+        (name ? `Name: ${name}\n` : '') +
+        `\nPaste this ID into *Allowed Users* on the admin Channels page to grant access.`,
+        { parse_mode: 'Markdown' },
+      );
+    });
+
+    // Clear any old commands then set only ours
+    this.bot.api.deleteMyCommands().catch(() => {});
+    this.bot.api.setMyCommands([
+      { command: 'start', description: 'Welcome message' },
+      { command: 'help', description: 'List available commands' },
+      { command: 'myid', description: 'Show your Telegram user ID' },
+    ]).catch(() => { /* non-critical */ });
+
     // ── Text messages ────────────────────────────
     this.bot.on('message:text', (ctx) => this.handleMessage(ctx));
 
@@ -185,13 +260,33 @@ class TelegramChannel implements Channel {
     const cfg = this.config.channels.telegram;
 
     // Allowlist check — compare as strings to handle mixed types
+    const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
     if (cfg.allowFrom?.length > 0) {
       const allowed = cfg.allowFrom.map(String);
       if (!allowed.includes(senderId)) {
         log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
+        try {
+          // Evict oldest pending if at 50-row cap
+          this.db.run(`
+            DELETE FROM pending_senders WHERE id IN (
+              SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'pending'
+              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'telegram' AND status = 'pending') - 49)
+            )
+          `);
+          this.db.run(`
+            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
+            ON CONFLICT(channel, sender_id) DO UPDATE SET
+              sender_name = excluded.sender_name,
+              last_seen = datetime('now'),
+              message_count = message_count + 1,
+              status = 'pending'
+          `, ['telegram', senderId, senderName]);
+        } catch { /* non-critical */ }
         return;
       }
     }
+    // 'seen' recording handled by middleware (runs for commands + messages)
 
     // Group handling
     if (chatType === 'group') {

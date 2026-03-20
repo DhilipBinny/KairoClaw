@@ -20,9 +20,9 @@ export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun
     [tenantId, 'Default', 'default', 'community']
   );
 
-  // Create admin user with generated API key
+  // Create admin user — use AGW_ADMIN_KEY env var if set, otherwise generate one
   const userId = crypto.randomUUID();
-  const apiKey = 'agw_sk_' + crypto.randomBytes(32).toString('hex');
+  const apiKey = process.env.AGW_ADMIN_KEY || ('agw_sk_' + crypto.randomBytes(32).toString('hex'));
   const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
 
   db.run(

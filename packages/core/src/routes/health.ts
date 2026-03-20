@@ -12,6 +12,16 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.db;
     const config = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.config;
 
+    // First-run detection: only 1 user (the seeded admin) and no provider API key set
+    let firstRun = false;
+    try {
+      const userCount = db.get<{ count: number }>('SELECT COUNT(*) as count FROM users');
+      const providers = (config as Record<string, Record<string, Record<string, string>>>)?.providers;
+      const hasApiKey = !!(providers?.anthropic?.apiKey && providers.anthropic.apiKey !== '' && !providers.anthropic.apiKey.startsWith('${'));
+      const hasAuthToken = !!(providers?.anthropic?.authToken && providers.anthropic.authToken !== '' && !providers.anthropic.authToken.startsWith('${'));
+      firstRun = (userCount?.count ?? 0) <= 1 && !hasApiKey && !hasAuthToken;
+    } catch { /* non-critical */ }
+
     return {
       status: 'ok',
       version: '0.2.0',
@@ -22,6 +32,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       },
       model: (config as Record<string, Record<string, string>>)?.model?.primary || 'not configured',
+      firstRun,
     };
   });
 

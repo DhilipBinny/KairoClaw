@@ -180,6 +180,44 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 
 ---
 
+## Sender Discovery & Pending Approvals
+
+When users message the bot, their identity is tracked in a bounded `pending_senders` table for admin approval. This enables zero-friction onboarding (no need to manually find user IDs) and ongoing access management.
+
+### Design Constraints
+
+| Constraint | Value | Rationale |
+|------------|-------|-----------|
+| `seen` rows (discovery) | **5 per channel** | Only needed for initial onboarding (find yourself, add to allowlist). Oldest evicted when full. |
+| `pending` rows (rejected) | **50 per channel** | Ongoing approval queue. Oldest evicted when full. Prevents unbounded growth from bot abuse. |
+| Data stored | **Metadata only** | sender ID, name, channel, timestamps, message count. No message content stored. |
+| Total max rows | **110** | 5 seen + 50 pending per channel, 2 channels (Telegram + WhatsApp). Fixed ceiling regardless of traffic. |
+
+### How It Works
+
+| Allowlist state | Sender outcome | Recorded as | UI section |
+|-----------------|----------------|-------------|------------|
+| Empty (allow all) | Bot responds | `seen` | Discovered Users |
+| Has entries, sender matches | Bot responds | Not recorded | — |
+| Has entries, sender doesn't match | Bot ignores | `pending` | Pending Approvals |
+
+### Onboarding Flow
+
+1. Deploy with empty allowlist → bot allows everyone
+2. Message your bot → you appear in "Discovered Users" on Channels page
+3. Click "Add to allowlist" → your ID added to config, bot now restricted to you
+4. Anyone else who messages → silently rejected, appears in "Pending Approvals"
+5. Approve or dismiss from the admin UI
+
+### Abuse Scenario (1M bots hitting your endpoint)
+
+- Each unique rejected sender = 1 row, but table capped at 50 pending per channel
+- 51st sender evicts the oldest row → table never grows past 50
+- Bot silently ignores all rejected senders — no response, no resource consumption beyond the allowlist check
+- Messages are NOT stored or processed
+
+---
+
 ## Cron Job Delivery
 
 Cron jobs can deliver results to any channel. Configure delivery targets per job:

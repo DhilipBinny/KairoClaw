@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getConfig, getChannelsStatus, getWhatsAppQR, unpairWhatsApp, updateConfig, saveChannelCredentials } from '$lib/api';
+  import { getConfig, getChannelsStatus, getWhatsAppQR, unpairWhatsApp, updateConfig, saveChannelCredentials, testTelegramBot, getPendingSenders, approveSender, rejectSender } from '$lib/api';
+  import type { PendingSender } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface TelegramStatus {
     enabled: boolean;
     connected: boolean;
     botUsername: string | null;
+    hasToken?: boolean;
+    tokenHint?: string | null;
   }
 
   interface WhatsAppStatus {
@@ -32,6 +35,16 @@
   let botTokenInput = $state('');
   let savingToken = $state(false);
   let tokenMsg = $state('');
+
+  // Telegram test connection
+  let testingTelegram = $state(false);
+  let telegramTestResult = $state<{ success: boolean; username?: string; error?: string } | null>(null);
+
+  // Pending senders (P3)
+  let pendingSenders = $state<PendingSender[]>([]);
+  let senderCounts = $state<{ pending: number; seen: number }>({ pending: 0, seen: 0 });
+  let approvingId = $state<number | null>(null);
+  let rejectingId = $state<number | null>(null);
 
   // Per-field saving state
   let saving: Record<string, boolean> = $state({});
@@ -132,11 +145,24 @@
     if (!botTokenInput.trim()) return;
     savingToken = true;
     tokenMsg = '';
+    telegramTestResult = null;
     try {
       await saveChannelCredentials('telegram', { botToken: botTokenInput.trim() });
-      tokenMsg = 'Bot token saved. Enable Telegram to connect.';
       botTokenInput = '';
       showTokenForm = false;
+
+      // If Telegram is already enabled, restart it by toggling off then on
+      if (getVal('channels.telegram.enabled')) {
+        tokenMsg = 'Token saved. Reconnecting...';
+        await updateConfig('channels.telegram.enabled', false);
+        await new Promise(r => setTimeout(r, 500));
+        await updateConfig('channels.telegram.enabled', true);
+        tokenMsg = 'Token saved. Telegram reconnected.';
+        setTimeout(loadStatus, 1500);
+      } else {
+        tokenMsg = 'Token saved. Enable Telegram to connect.';
+      }
+      setTimeout(() => { tokenMsg = ''; }, 5000);
     } catch (e: unknown) {
       tokenMsg = e instanceof Error ? e.message : 'Failed to save';
     } finally {
@@ -144,9 +170,79 @@
     }
   }
 
+  // AllowFrom helpers
+  function formatList(arr: unknown): string {
+    if (!Array.isArray(arr)) return '';
+    return arr.map(String).join(', ');
+  }
+
+  function parseList(text: string): string[] {
+    return text.split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  async function saveList(dotPath: string, text: string) {
+    const list = parseList(text);
+    saving[dotPath] = true;
+    feedback[dotPath] = undefined as unknown as { msg: string; ok: boolean };
+    try {
+      await updateConfig(dotPath, list);
+      setLocalVal(dotPath, list);
+      feedback[dotPath] = { msg: 'Saved', ok: true };
+    } catch (e: unknown) {
+      feedback[dotPath] = { msg: e instanceof Error ? e.message : 'Failed', ok: false };
+    } finally {
+      saving[dotPath] = false;
+    }
+  }
+
+  // Telegram test connection — uses input value if editing, otherwise tests saved token
+  async function handleTestTelegram(tokenOverride?: string) {
+    testingTelegram = true;
+    telegramTestResult = null;
+    tokenMsg = '';
+    try {
+      telegramTestResult = await testTelegramBot(tokenOverride || undefined);
+    } catch (e: unknown) {
+      telegramTestResult = { success: false, error: e instanceof Error ? e.message : 'Test failed' };
+    } finally {
+      testingTelegram = false;
+    }
+  }
+
+  // Pending senders
+  async function loadPendingSenders() {
+    try {
+      const data = await getPendingSenders() as { senders: PendingSender[]; counts?: { pending: number; seen: number } };
+      pendingSenders = data.senders || [];
+      senderCounts = data.counts || { pending: 0, seen: 0 };
+    } catch { /* non-critical */ }
+  }
+
+  async function handleApproveSender(id: number) {
+    approvingId = id;
+    try {
+      await approveSender(id);
+      pendingSenders = pendingSenders.filter(s => s.id !== id);
+      // Reload config so allowFrom field and warnings update
+      const configData = await getConfig().catch(() => ({ config: null }));
+      if (configData.config) config = configData.config;
+    } catch { /* non-critical */ }
+    approvingId = null;
+  }
+
+  async function handleRejectSender(id: number) {
+    rejectingId = id;
+    try {
+      await rejectSender(id);
+      pendingSenders = pendingSenders.filter(s => s.id !== id);
+    } catch { /* non-critical */ }
+    rejectingId = null;
+  }
+
   function startPolling() {
     pollInterval = setInterval(async () => {
       await loadStatus();
+      await loadPendingSenders();
       if (whatsapp.enabled && (whatsapp.status === 'qr' || whatsapp.status === 'disconnected')) {
         await loadQR();
       } else {
@@ -159,6 +255,7 @@
     const [configData] = await Promise.all([
       getConfig().catch(() => ({ config: null })),
       loadStatus(),
+      loadPendingSenders(),
     ]);
     config = configData.config;
     if (whatsapp.enabled && (whatsapp.status === 'qr' || whatsapp.status === 'disconnected')) {
@@ -185,6 +282,67 @@
   {#if loading}
     <div class="loading"><span class="spinner"></span> Loading channels...</div>
   {:else}
+
+    <!-- ─── Pending Approvals (rejected senders) ──────────── -->
+    {#if pendingSenders.filter(s => s.status === 'pending').length > 0}
+      <div class="card pending-card">
+        <div class="pending-header">
+          <span class="pending-dot"></span>
+          <strong>{senderCounts.pending} Pending Approval{senderCounts.pending > 1 ? 's' : ''}</strong>
+          <span class="pending-hint">Blocked by allowlist{senderCounts.pending > 50 ? ` (showing 50 of ${senderCounts.pending})` : ''}</span>
+        </div>
+        <div class="pending-list">
+          {#each pendingSenders.filter(s => s.status === 'pending') as sender (sender.id)}
+            <div class="pending-row">
+              <div class="pending-info">
+                <span class="pending-name">{sender.sender_name || sender.sender_id}</span>
+                <span class="pending-meta">
+                  {sender.channel} &middot; ID: <code>{sender.sender_id}</code> &middot; {sender.message_count} msg{sender.message_count > 1 ? 's' : ''} &middot; {new Date(sender.last_seen).toLocaleDateString()}
+                </span>
+              </div>
+              <div class="pending-actions">
+                <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
+                  {approvingId === sender.id ? 'Adding...' : 'Approve'}
+                </button>
+                <button class="btn btn-sm" disabled={rejectingId === sender.id} onclick={() => handleRejectSender(sender.id)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- ─── Discovered Users (seen senders, no allowlist set) ──────────── -->
+    {#if pendingSenders.filter(s => s.status === 'seen').length > 0}
+      <div class="card discovered-card">
+        <div class="pending-header">
+          <strong>Discovered Users</strong>
+          <span class="pending-hint">People who have messaged your bot.{senderCounts.seen > 50 ? ` Showing 50 of ${senderCounts.seen}.` : ''} Add to allowlist to restrict access.</span>
+        </div>
+        <div class="pending-list">
+          {#each pendingSenders.filter(s => s.status === 'seen') as sender (sender.id)}
+            <div class="pending-row">
+              <div class="pending-info">
+                <span class="pending-name">{sender.sender_name || sender.sender_id}</span>
+                <span class="pending-meta">
+                  {sender.channel} &middot; ID: <code>{sender.sender_id}</code> &middot; {sender.message_count} msg{sender.message_count > 1 ? 's' : ''} &middot; {new Date(sender.last_seen).toLocaleDateString()}
+                </span>
+              </div>
+              <div class="pending-actions">
+                <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
+                  {approvingId === sender.id ? 'Adding...' : 'Add to allowlist'}
+                </button>
+                <button class="btn btn-sm" disabled={rejectingId === sender.id} onclick={() => handleRejectSender(sender.id)}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     <!-- ─── Telegram ────────────────────────── -->
     <div class="channel-section">
@@ -227,21 +385,43 @@
           </div>
           <div class="field-control">
             {#if !showTokenForm}
-              <button class="btn btn-sm" aria-label={telegram.connected ? 'Change Telegram bot token' : 'Set Telegram bot token'} onclick={() => { showTokenForm = true; }}>
-                {telegram.connected ? 'Change Token' : 'Set Token'}
+              {#if telegram.hasToken}
+                <span class="token-masked mono">{telegram.tokenHint || '****'}****</span>
+              {/if}
+              <button class="btn btn-sm" onclick={() => { showTokenForm = true; telegramTestResult = null; }}>
+                {telegram.hasToken ? 'Edit Token' : 'Set Token'}
               </button>
+              {#if telegram.hasToken && !telegram.connected}
+                <button class="btn btn-sm" onclick={() => handleTestTelegram()} disabled={testingTelegram}>
+                  {testingTelegram ? 'Testing...' : 'Test'}
+                </button>
+              {/if}
             {:else}
               <div class="inline-form">
                 <input type="password" class="input input-sm" bind:value={botTokenInput} placeholder="123456:ABC-..." />
                 <button class="btn btn-sm btn-primary" onclick={handleSaveBotToken} disabled={savingToken}>
                   {savingToken ? 'Saving...' : 'Save'}
                 </button>
+                <button class="btn btn-sm" onclick={() => handleTestTelegram(botTokenInput.trim())} disabled={testingTelegram || !botTokenInput.trim()}>
+                  {testingTelegram ? '...' : 'Test'}
+                </button>
                 <button class="btn btn-sm" onclick={() => { showTokenForm = false; }}>Cancel</button>
               </div>
             {/if}
-            {#if tokenMsg}<span class="field-msg" class:ok={tokenMsg.includes('saved')}>{tokenMsg}</span>{/if}
           </div>
         </div>
+        {#if tokenMsg || telegramTestResult}
+          <div class="token-feedback-row">
+            {#if tokenMsg}<span class="field-msg" class:ok={tokenMsg.includes('saved')}>{tokenMsg}</span>{/if}
+            {#if telegramTestResult}
+              {#if telegramTestResult.success}
+                <span class="test-ok">Connected as @{telegramTestResult.username}</span>
+              {:else}
+                <span class="test-err">{telegramTestResult.error}</span>
+              {/if}
+            {/if}
+          </div>
+        {/if}
 
         <!-- Status info -->
         {#if telegram.enabled && telegram.connected}
@@ -254,11 +434,27 @@
           </div>
         {:else if telegram.enabled && !telegram.connected}
           <div class="channel-hint warn">
-            Telegram is enabled but not connected. Make sure the bot token is set and valid.
+            {#if telegram.hasToken}
+              Telegram is enabled but not connected. Try clicking "Test" to verify the token, or save the token again to reconnect.
+            {:else}
+              Telegram is enabled but no bot token is set. Add a token from @BotFather above.
+            {/if}
           </div>
         {:else}
           <div class="channel-hint">
             Set a bot token from <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>, then enable to connect.
+          </div>
+        {/if}
+
+        <!-- Security warning: open bot -->
+        {#if getVal('channels.telegram.enabled') && (!getVal('channels.telegram.allowFrom') || (Array.isArray(getVal('channels.telegram.allowFrom')) && (getVal('channels.telegram.allowFrom') as unknown[]).length === 0))}
+          <div class="open-warning">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span><strong>Open access</strong> — anyone can message this bot. Add yourself to Allowed Users to restrict access.</span>
           </div>
         {/if}
 
@@ -293,8 +489,60 @@
                 </button>
               </div>
             </div>
+            <!-- AllowFrom -->
+            <div class="field-row allow-from-row">
+              <div class="field-info">
+                <span class="field-label">Allowed Users</span>
+                <span class="field-hint">Restrict who can talk to your bot. Leave empty to allow everyone.</span>
+              </div>
+              <div class="field-control">
+                <div class="input-action">
+                  <input
+                    class="input input-sm"
+                    type="text"
+                    value={formatList(getVal('channels.telegram.allowFrom'))}
+                    placeholder="e.g. 110432895"
+                    onblur={(e) => saveList('channels.telegram.allowFrom', (e.target as HTMLInputElement).value)}
+                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  />
+                  {#if saving['channels.telegram.allowFrom']}<span class="spinner-sm"></span>{/if}
+                </div>
+                {#if feedback['channels.telegram.allowFrom']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.telegram.allowFrom'].ok}>{feedback['channels.telegram.allowFrom'].msg}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="allow-from-help">
+              <p class="allow-from-alt">
+                Easiest way: leave this empty, message your bot, then click <strong>Add to allowlist</strong> on the <strong>Discovered Users</strong> card above. Or paste IDs manually &mdash; message <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer">@userinfobot</a> to find yours.
+              </p>
+            </div>
           </div>
         {/if}
+
+        <!-- Setup Guide (P1-1) -->
+        <div class="collapsible-help">
+          <details>
+            <summary>Setup Guide</summary>
+            <div class="setup-guide">
+              <h4 class="guide-section-title">1. Create a bot</h4>
+              <ol class="setup-steps">
+                <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a></li>
+                <li>Send <code>/newbot</code>, pick a name and username</li>
+                <li>Copy the bot token (looks like <code>123456:ABC-DEF...</code>)</li>
+                <li>Paste it above using "Set Token", then click "Test" to verify</li>
+              </ol>
+
+              <h4 class="guide-section-title">2. Enable and restrict access</h4>
+              <ol class="setup-steps">
+                <li>Turn on the <strong>Enabled</strong> toggle above</li>
+                <li>Send a message to your bot on Telegram</li>
+                <li>Come back here &mdash; your name and ID appear under <strong>Discovered Users</strong></li>
+                <li>Click <strong>Add to allowlist</strong> &mdash; now only you can use the bot</li>
+              </ol>
+            </div>
+          </details>
+        </div>
       </div>
     </div>
 
@@ -348,6 +596,18 @@
           {/if}
         {/if}
 
+        <!-- Security warning: open bot -->
+        {#if getVal('channels.whatsapp.enabled') && (!getVal('channels.whatsapp.allowFrom') || (Array.isArray(getVal('channels.whatsapp.allowFrom')) && (getVal('channels.whatsapp.allowFrom') as unknown[]).length === 0))}
+          <div class="open-warning">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              <line x1="12" y1="9" x2="12" y2="13"></line>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span><strong>Open access</strong> — anyone who messages your number gets an AI response. Add your phone to Allowed Phones to restrict access.</span>
+          </div>
+        {/if}
+
         <!-- Sub-settings (only when enabled) -->
         {#if getVal('channels.whatsapp.enabled')}
           <div class="subsettings">
@@ -393,6 +653,61 @@
                 </button>
               </div>
             </div>
+            <!-- AllowFrom -->
+            <div class="field-row">
+              <div class="field-info">
+                <span class="field-label">Allowed Phones</span>
+                <span class="field-hint">Restrict who can DM your bot. Leave empty to allow everyone.</span>
+              </div>
+              <div class="field-control">
+                <div class="input-action">
+                  <input
+                    class="input input-sm"
+                    type="text"
+                    value={formatList(getVal('channels.whatsapp.allowFrom'))}
+                    placeholder="e.g. 971501234567"
+                    onblur={(e) => saveList('channels.whatsapp.allowFrom', (e.target as HTMLInputElement).value)}
+                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  />
+                  {#if saving['channels.whatsapp.allowFrom']}<span class="spinner-sm"></span>{/if}
+                </div>
+                {#if feedback['channels.whatsapp.allowFrom']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.whatsapp.allowFrom'].ok}>{feedback['channels.whatsapp.allowFrom'].msg}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="allow-from-help">
+              <p class="allow-from-alt">
+                Phone numbers without + or spaces (e.g. <code>971501234567</code>). Easiest way: leave empty, message your bot from WhatsApp, then click <strong>Add to allowlist</strong> on the <strong>Discovered Users</strong> card above.
+              </p>
+            </div>
+            <div class="field-row">
+              <div class="field-info">
+                <span class="field-label">Allowed Groups</span>
+                <span class="field-hint">Restrict which groups the bot responds in. Leave empty to allow all.</span>
+              </div>
+              <div class="field-control">
+                <div class="input-action">
+                  <input
+                    class="input input-sm"
+                    type="text"
+                    value={formatList(getVal('channels.whatsapp.groupAllowFrom'))}
+                    placeholder="Group JIDs"
+                    onblur={(e) => saveList('channels.whatsapp.groupAllowFrom', (e.target as HTMLInputElement).value)}
+                    onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                  />
+                  {#if saving['channels.whatsapp.groupAllowFrom']}<span class="spinner-sm"></span>{/if}
+                </div>
+                {#if feedback['channels.whatsapp.groupAllowFrom']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.whatsapp.groupAllowFrom'].ok}>{feedback['channels.whatsapp.groupAllowFrom'].msg}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="allow-from-help">
+              <p class="allow-from-alt">
+                Group JIDs are auto-filled when you approve groups. You typically don't need to set this manually.
+              </p>
+            </div>
           </div>
         {/if}
 
@@ -402,6 +717,48 @@
             Enable WhatsApp to start QR code pairing.
           </div>
         {/if}
+
+        <!-- Docker warning (P1-2) -->
+        {#if whatsapp.enabled && whatsapp.status !== 'connected'}
+          <div class="docker-warning">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            If running in Docker, mount <code>agw-data/</code> as a volume to persist WhatsApp sessions across restarts.
+          </div>
+        {/if}
+
+        <!-- Setup Guide -->
+        <div class="collapsible-help">
+          <details>
+            <summary>Setup Guide</summary>
+            <div class="setup-guide">
+              <h4 class="guide-section-title">1. Pair your phone</h4>
+              <ol class="setup-steps">
+                <li>Toggle <strong>Enabled</strong> to On above</li>
+                <li>A QR code appears below this card</li>
+                <li>On your phone: <strong>WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device</strong></li>
+                <li>Scan the QR code &mdash; status changes to "Connected"</li>
+              </ol>
+
+              <h4 class="guide-section-title">2. Restrict access</h4>
+              <ol class="setup-steps">
+                <li>Send a message to your WhatsApp number from another phone</li>
+                <li>Come back here &mdash; your number appears under <strong>Discovered Users</strong></li>
+                <li>Click <strong>Add to allowlist</strong> &mdash; now only that number can trigger the bot</li>
+              </ol>
+
+              <h4 class="guide-section-title">Important</h4>
+              <ul class="setup-steps">
+                <li>WhatsApp uses <strong>your real phone number</strong> &mdash; the bot responds as you, not as a separate bot</li>
+                <li>Consider using a <strong>dedicated SIM</strong> to keep your personal WhatsApp separate</li>
+                <li>Linked devices expire if your phone is offline for ~14 days &mdash; you'll need to re-scan the QR</li>
+              </ul>
+            </div>
+          </details>
+        </div>
       </div>
 
       <!-- QR Code for pairing -->
@@ -499,6 +856,56 @@
 
   .action-card { padding: 16px 22px; margin-top: 12px; }
   .action-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
+
+  .input-action { display: flex; align-items: center; gap: 6px; width: 100%; }
+  .input-action .input-sm { flex: 1; min-width: 180px; padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
+  .spinner-sm { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Token display */
+  .token-masked { font-size: 12px; color: var(--text-muted); letter-spacing: 0.5px; }
+  .token-feedback-row { padding: 4px 0 6px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .test-ok { font-size: 12px; color: var(--green); font-weight: 500; }
+  .test-err { font-size: 12px; color: var(--red); }
+
+  /* Collapsible sections — unified style for Setup Guide + AllowFrom help */
+  .collapsible-help, .allow-from-help { padding: 2px 0 4px; }
+  .collapsible-help details, .allow-from-help details { font-size: 12px; color: var(--text-muted); }
+  .collapsible-help summary, .allow-from-help summary { cursor: pointer; color: var(--accent); font-size: 12px; padding: 4px 0; }
+  .collapsible-help summary:hover, .allow-from-help summary:hover { text-decoration: underline; }
+  .collapsible-help code, .allow-from-help code { font-size: 11px; background: var(--bg-raised); padding: 1px 5px; border-radius: 3px; color: var(--text-primary); }
+  .collapsible-help a, .allow-from-help a { color: var(--accent); }
+  .allow-from-alt { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; line-height: 1.5; }
+
+  /* Setup guide content */
+  .setup-guide { padding: 10px 0 4px; }
+  .guide-section-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 6px; }
+  .guide-section-title:first-child { margin-top: 0; }
+  .setup-steps { font-size: 13px; color: var(--text-secondary); padding-left: 20px; margin: 0 0 12px; line-height: 1.8; }
+  .setup-steps code { font-size: 12px; background: var(--bg-raised); padding: 1px 5px; border-radius: 3px; color: var(--text-primary); }
+  .setup-steps a { color: var(--accent); }
+
+  /* Open access warning */
+  .open-warning { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--red); padding: 10px 14px; margin: 8px 0 4px; background: var(--red-subtle); border: 1px solid rgba(244, 63, 94, 0.15); border-radius: var(--radius); line-height: 1.5; }
+  .open-warning svg { flex-shrink: 0; margin-top: 1px; }
+
+  /* Docker warning */
+  .docker-warning { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--yellow, #fbbf24); padding: 10px 0 4px; line-height: 1.5; }
+  .docker-warning code { font-size: 11px; background: var(--bg-raised); padding: 1px 4px; border-radius: 3px; }
+
+  /* Pending senders */
+  .pending-card { padding: 16px 22px; margin-bottom: 24px; border: 1px solid rgba(251, 191, 36, 0.2); background: rgba(251, 191, 36, 0.03); }
+  .pending-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+  .pending-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow, #fbbf24); animation: pulse 2s infinite; flex-shrink: 0; }
+  .pending-hint { color: var(--text-muted); font-weight: 400; margin-left: auto; font-size: 12px; }
+  .pending-list { display: flex; flex-direction: column; gap: 8px; }
+  .pending-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-raised); border-radius: var(--radius); border: 1px solid var(--border-subtle); }
+  .pending-info { display: flex; flex-direction: column; gap: 2px; }
+  .pending-name { font-size: 13px; font-weight: 500; }
+  .pending-meta { font-size: 11px; color: var(--text-muted); }
+  .pending-meta code { font-size: 11px; background: var(--bg-void); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); }
+  .pending-actions { display: flex; gap: 6px; }
+  .discovered-card { padding: 16px 22px; margin-bottom: 24px; border: 1px solid var(--border-subtle); }
 
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 </style>
