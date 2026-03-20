@@ -104,6 +104,8 @@ const telegramChannelSchema = z.object({
   groupsEnabled: z.boolean().default(true),
   groupRequireMention: z.boolean().default(true),
   tokenFile: z.string().optional(),
+  outboundPolicy: z.enum(['session-only', 'unrestricted']).default('session-only'),
+  outboundAllowlist: z.array(z.string()).default([]),
 });
 
 const whatsappChannelSchema = z.object({
@@ -113,6 +115,8 @@ const whatsappChannelSchema = z.object({
   groupRequireMention: z.boolean().default(true),
   groupAllowFrom: z.array(z.string()).default([]),
   sendReadReceipts: z.boolean().default(true),
+  outboundPolicy: z.enum(['session-only', 'unrestricted']).default('session-only'),
+  outboundAllowlist: z.array(z.string()).default([]),
 });
 
 const channelsSchema = z.object({
@@ -210,6 +214,8 @@ export const configDefaults: GatewayConfig = {
       allowFrom: [],
       groupsEnabled: true,
       groupRequireMention: true,
+      outboundPolicy: 'session-only',
+      outboundAllowlist: [],
     },
     whatsapp: {
       enabled: false,
@@ -218,6 +224,8 @@ export const configDefaults: GatewayConfig = {
       groupRequireMention: true,
       groupAllowFrom: [],
       sendReadReceipts: true,
+      outboundPolicy: 'session-only',
+      outboundAllowlist: [],
     },
   },
   session: {

@@ -60,6 +60,8 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'session.resetHour', 'session.idleMinutes',
       'channels.telegram.enabled', 'channels.telegram.allowFrom', 'channels.telegram.groupsEnabled', 'channels.telegram.groupRequireMention',
       'channels.whatsapp.enabled', 'channels.whatsapp.allowFrom', 'channels.whatsapp.groupAllowFrom', 'channels.whatsapp.groupsEnabled', 'channels.whatsapp.groupRequireMention', 'channels.whatsapp.sendReadReceipts',
+      'channels.whatsapp.outboundPolicy', 'channels.whatsapp.outboundAllowlist',
+      'channels.telegram.outboundPolicy', 'channels.telegram.outboundAllowlist',
       'tools.exec.enabled', 'tools.exec.timeout',
       'tools.webSearch.enabled',
       'tools.webFetch.enabled', 'tools.webFetch.maxChars',
