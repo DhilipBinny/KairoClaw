@@ -500,7 +500,7 @@
     gap: 8px;
     max-width: 800px;
     margin: 0 auto;
-    background: rgba(19, 19, 28, 0.8);
+    background: var(--bg-surface);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
