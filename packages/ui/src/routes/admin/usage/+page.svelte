@@ -338,4 +338,17 @@
     color: var(--text-muted);
     white-space: nowrap;
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .usage-header {
+      flex-direction: column;
+      gap: 12px;
+    }
+    .stat-icon-wrap { width: 36px; height: 36px; }
+    .chart-card { padding: 12px; }
+    .daily-chart { overflow-x: auto; }
+    .section-title { font-size: 14px; }
+  }
 </style>

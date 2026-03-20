@@ -808,4 +808,25 @@
     padding: 2px 6px;
     border-radius: var(--radius-sm);
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .catalog-grid {
+      grid-template-columns: 1fr;
+    }
+    .server-header {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .server-actions { flex-wrap: wrap; }
+    .search-bar { flex-direction: column; align-items: stretch; }
+    .section-title { font-size: 14px; }
+    .server-card { padding: 14px 16px; }
+    .catalog-card { padding: 14px 16px; }
+    .env-fields {
+      flex-direction: column;
+      gap: 6px;
+    }
+  }
 </style>

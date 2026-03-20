@@ -318,4 +318,19 @@
     font-size: 14px;
     line-height: 1.7;
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .file-grid {
+      grid-template-columns: 1fr;
+    }
+    .editor-header {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .editor-actions { width: 100%; justify-content: flex-end; }
+    .editor-textarea { min-height: 250px; }
+    .editor-filename { font-size: 16px; }
+  }
 </style>

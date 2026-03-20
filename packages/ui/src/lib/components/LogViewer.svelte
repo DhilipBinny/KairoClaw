@@ -266,4 +266,21 @@
   .file-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px; background: var(--bg-void); border-radius: var(--radius-sm); }
   .file-date { font-family: var(--font-mono); color: var(--text-secondary); }
   .file-size { color: var(--text-muted); font-size: 11px; }
+
+  @media (max-width: 768px) {
+    .log-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+    .log-filters { flex-wrap: wrap; }
+    .log-controls { flex-wrap: wrap; gap: 8px; }
+    .category-select { width: 100%; }
+    .search-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .search-input { min-width: 0; }
+    .log-entry { flex-wrap: wrap; gap: 4px; }
+  }
 </style>

@@ -367,4 +367,27 @@
     align-items: center;
     gap: 10px;
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .sessions-layout {
+      flex-direction: column;
+    }
+    .sessions-list-panel {
+      width: 100%;
+      max-height: 40vh;
+      flex-shrink: 0;
+    }
+    .messages-panel {
+      min-height: 300px;
+    }
+    .messages-header {
+      padding: 10px 14px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .messages-session-id { font-size: 11px; }
+    .session-row { padding: 10px 12px; }
+  }
 </style>

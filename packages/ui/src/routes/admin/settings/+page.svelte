@@ -1304,4 +1304,25 @@
     color: var(--text-secondary);
     margin-bottom: 12px;
   }
+
+  @media (max-width: 768px) {
+    .settings-page { max-width: none; }
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .field-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    .field-row.sub-field { padding-left: 16px; }
+    .field-control {
+      width: 100%;
+      align-items: flex-start;
+      min-width: 0;
+    }
+    .theme-selector { flex-wrap: wrap; }
+    .raw-editor-textarea { min-height: 200px; }
+    .section-title { font-size: 14px; }
+  }
 </style>

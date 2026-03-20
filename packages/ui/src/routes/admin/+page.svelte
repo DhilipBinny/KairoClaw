@@ -327,4 +327,18 @@
     color: var(--text-secondary);
     word-break: break-all;
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .stat-icon-wrap { width: 36px; height: 36px; }
+    .section-title { font-size: 14px; }
+    .check-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 10px 12px;
+    }
+    .check-name { min-width: 0; }
+  }
 </style>
