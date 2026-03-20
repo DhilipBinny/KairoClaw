@@ -447,8 +447,8 @@ export class MCPClient {
 
       // Send initialized notification (stdio only — write directly to stdin)
       if (this.transport instanceof StdioTransport && this.transport.connected) {
-        void this.transport.send('notifications/initialized', {}, 5000).catch(() => {
-          // Notifications don't return responses — timeout is expected
+        void this.transport.send('notifications/initialized', {}, 5000).catch(err => {
+          this.log.warn({ err: (err as Error).message, serverId: this.name }, 'Failed to send initialized notification');
         });
       }
 

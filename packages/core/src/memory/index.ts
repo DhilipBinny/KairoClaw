@@ -46,6 +46,7 @@ export class MemorySystem {
   private workspace: string;
   private watchers: fs.FSWatcher[] = [];
   private initialized = false;
+  private _debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(db: DatabaseAdapter, workspace: string) {
     this.db = db;
@@ -182,6 +183,10 @@ export class MemorySystem {
       }
     }
     this.watchers = [];
+    for (const timer of this._debounceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this._debounceTimers.clear();
     this.initialized = false;
   }
 
@@ -311,7 +316,11 @@ export class MemorySystem {
       try {
         const w = fs.watch(watchPath, { recursive: false }, (_eventType, filename) => {
           // Debounce: wait for writes to settle
-          setTimeout(() => {
+          const debounceKey = filename ? path.join(watchPath, filename) : watchPath;
+          const existing = this._debounceTimers.get(debounceKey);
+          if (existing) clearTimeout(existing);
+          this._debounceTimers.set(debounceKey, setTimeout(() => {
+            this._debounceTimers.delete(debounceKey);
             if (filename && filename.endsWith('.md')) {
               const isDir = fs.statSync(watchPath, { throwIfNoEntry: false })?.isDirectory();
               const fullPath = isDir ? path.join(watchPath, filename) : watchPath;
@@ -324,7 +333,7 @@ export class MemorySystem {
                 this.indexFile(watchPath);
               }
             }
-          }, 500);
+          }, 500));
         });
 
         this.watchers.push(w);
