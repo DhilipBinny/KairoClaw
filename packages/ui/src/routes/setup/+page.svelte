@@ -77,7 +77,7 @@
     {#if step === 0}
       <div class="step" >
         <div class="setup-logo">
-          <div class="setup-logo-inner">A</div>
+          <img src="/logo.png" alt="Kairo" class="setup-logo-inner" />
           <div class="setup-logo-glow"></div>
         </div>
         <h1 class="setup-title">Welcome to Kairo</h1>
@@ -246,15 +246,8 @@
   }
   .setup-logo-inner {
     width: 72px; height: 72px;
-    background: linear-gradient(135deg, var(--accent), #a78bfa, #818cf8);
-    background-size: 200% 200%;
-    animation: gradientShift 4s ease infinite;
     border-radius: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 30px; font-weight: 700;
-    color: #fff;
+    object-fit: cover;
     position: relative; z-index: 1;
     box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
   }
