@@ -1,3 +1,12 @@
+# Railway.com deployment config
+#
+# Required environment variables (set in Railway dashboard → Variables):
+#   RAILWAY_RUN_UID=0       — fixes volume permission errors
+#   PORT=18181              — must match the app's listening port
+#   AGW_ADMIN_KEY=<secret>  — your admin login key (used in setup wizard)
+#
+# Volume: mount at /data (persistent storage for DB + secrets)
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
