@@ -231,7 +231,7 @@
     transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
   }
   .stat-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .stat-icon-wrap {
     width: 40px;
@@ -314,7 +314,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .check-row:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .check-status {
     flex-shrink: 0;

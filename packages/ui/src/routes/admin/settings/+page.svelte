@@ -1033,7 +1033,7 @@
     border-bottom: none;
   }
   .field-row:hover {
-    background: rgba(255, 255, 255, 0.01);
+    background: var(--bg-wash);
   }
   .field-row.sub-field {
     padding-left: 40px;

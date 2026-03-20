@@ -225,7 +225,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .stat-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .stat-icon-wrap {
     width: 40px;

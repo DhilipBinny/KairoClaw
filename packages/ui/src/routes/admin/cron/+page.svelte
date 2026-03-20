@@ -645,7 +645,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .job-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .job-header {
     margin-bottom: 10px;
