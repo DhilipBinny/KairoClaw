@@ -28,6 +28,7 @@ import { createWhatsAppChannel } from './channels/whatsapp.js';
 import type { WhatsAppChannelInstance } from './channels/whatsapp.js';
 import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
+import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
 import { createModuleLogger } from './observability/logger.js';
 
 // Routes
@@ -371,6 +372,11 @@ async function main(): Promise<void> {
   });
   scheduler.start();
   sharedServices.cronScheduler = scheduler;
+
+  // Migrate: seed outbound allowlists from existing active cron targets
+  try {
+    migrateOutboundAllowlist(scheduler, config, db);
+  } catch { /* non-critical — existing crons may need manual allowlisting */ }
 
   // Register cron routes (needs scheduler)
   await server.register(registerCronRoutes, { scheduler });
