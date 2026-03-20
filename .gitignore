@@ -15,6 +15,7 @@ secrets.json
 
 # ── Local reference (untracked, kept on disk) ──
 _local/
+docs/_local_reference/
 
 # ── Runtime data (app-managed) ──
 agw-data/
