@@ -133,7 +133,7 @@ IMPORTANT delivery rules:
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'run'], description: 'Action to perform' },
+          action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'run'], description: 'Action to perform. "run" immediately executes the job AND delivers the result to the saved delivery targets — do NOT use send_message separately after run.' },
           id: { type: 'string', description: 'Job ID (for update/remove/run)' },
           name: { type: 'string', description: 'Human-readable job name' },
           schedule: {
