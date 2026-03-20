@@ -27,6 +27,8 @@ import type { TelegramChannelInstance } from './channels/telegram.js';
 import { createWhatsAppChannel } from './channels/whatsapp.js';
 import type { WhatsAppChannelInstance } from './channels/whatsapp.js';
 import type { AgentRunner } from './channels/types.js';
+import { checkOutboundAllowed } from './security/outbound.js';
+import { createModuleLogger } from './observability/logger.js';
 
 // Routes
 import { registerHealthRoutes } from './routes/health.js';
@@ -252,6 +254,8 @@ async function main(): Promise<void> {
           telegramSend: sharedServices.telegramSend,
           whatsappSend: sharedServices.whatsappSend,
           broadcastToWeb,
+          checkOutboundAllowed: (channel: 'whatsapp' | 'telegram', recipient: string) =>
+            checkOutboundAllowed(channel, recipient, config, db),
           braveApiKey: secretsStore.get('tools.webSearch', 'apiKey') || config.tools?.webSearch?.apiKey || process.env.BRAVE_API_KEY || '',
         };
         return toolRegistry.execute(name, args, enrichedCtx as any);
@@ -345,6 +349,15 @@ async function main(): Promise<void> {
       return { text: result.text ?? undefined };
     },
     deliverer: async (text, channel, to) => {
+      // Outbound policy check for cron delivery
+      if ((channel === 'whatsapp' || channel === 'telegram') && to) {
+        const check = checkOutboundAllowed(channel, to, config, db);
+        if (!check.allowed) {
+          const cronLog = createModuleLogger('cron');
+          cronLog.warn({ channel, to, reason: check.reason }, 'Cron delivery blocked by outbound policy');
+          return;
+        }
+      }
       if (channel === 'telegram' && channelRegistry.telegram) {
         await channelRegistry.telegram.sendToChat(text, to);
       } else if (channel === 'whatsapp' && channelRegistry.whatsapp) {
@@ -374,10 +387,18 @@ async function main(): Promise<void> {
   // Shared services read from registry (lazy lookup) so they always see the current instance
   sharedServices.telegramSend = async (text: string, chatId?: string) => {
     if (!channelRegistry.telegram) throw new Error('Telegram channel not enabled');
+    if (chatId) {
+      const check = checkOutboundAllowed('telegram', chatId, config, db);
+      if (!check.allowed) throw new Error(`Outbound blocked: ${check.reason}`);
+    }
     return channelRegistry.telegram.sendToChat(text, chatId);
   };
   sharedServices.whatsappSend = async (text: string, jid?: string) => {
     if (!channelRegistry.whatsapp) throw new Error('WhatsApp channel not enabled');
+    if (jid) {
+      const check = checkOutboundAllowed('whatsapp', jid, config, db);
+      if (!check.allowed) throw new Error(`Outbound blocked: ${check.reason}`);
+    }
     return channelRegistry.whatsapp.sendToChat(text, jid);
   };
 

@@ -69,6 +69,10 @@ export interface TelegramChannelConfig {
   groupRequireMention: boolean;
   /** Path to a file containing the bot token. */
   tokenFile?: string;
+  /** Outbound message policy. 'session-only' restricts to contacts with existing sessions. */
+  outboundPolicy: 'session-only' | 'unrestricted';
+  /** Extra chat IDs allowed for outbound beyond active sessions. */
+  outboundAllowlist: string[];
 }
 
 /** WhatsApp channel configuration. */
@@ -85,6 +89,10 @@ export interface WhatsAppChannelConfig {
   groupAllowFrom: string[];
   /** Send read receipts. */
   sendReadReceipts: boolean;
+  /** Outbound message policy. 'session-only' restricts to contacts with existing sessions. */
+  outboundPolicy: 'session-only' | 'unrestricted';
+  /** Extra JIDs allowed for outbound beyond active sessions (e.g. "6591234567@s.whatsapp.net"). */
+  outboundAllowlist: string[];
 }
 
 /** All channel configurations. */

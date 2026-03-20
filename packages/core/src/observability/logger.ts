@@ -158,7 +158,8 @@ export type LogCategory =
   | 'auth'
   | 'config'
   | 'http'
-  | 'system';
+  | 'system'
+  | 'security';
 
 // ── Shared multistream (set by createServerLogger, used by createModuleLogger) ──
 let _sharedStream: ReturnType<typeof multistream> | null = null;
