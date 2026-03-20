@@ -1,0 +1,419 @@
+/**
+ * Telegram channel — Grammy bot integration.
+ *
+ * Implements the Channel interface for Telegram. Handles text, photo,
+ * document, and voice messages. Supports allowlist filtering and
+ * per-session request queuing.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { Bot, InputFile } from 'grammy';
+import type { Context } from 'grammy';
+import type { GatewayConfig, InboundMessage } from '@agw/types';
+import type { DatabaseAdapter } from '../db/index.js';
+import type { SecretsStore } from '../secrets/store.js';
+import type { Channel, AgentRunner } from './types.js';
+import { AgentQueue } from '../queue/index.js';
+import { splitMessage } from './utils.js';
+import { createModuleLogger } from '../observability/logger.js';
+
+const log = createModuleLogger('channel.telegram');
+
+// ─── Helpers ────────────────────────────────────────────────
+
+/**
+ * Send a message with retry and exponential backoff for Telegram rate limits.
+ */
+async function sendWithRetry(
+  ctx: Context,
+  text: string,
+  options: Record<string, unknown> = {},
+  maxRetries = 3,
+): Promise<unknown> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await ctx.reply(text, options);
+    } catch (e: unknown) {
+      const err = e as { error_code?: number; message?: string; parameters?: { retry_after?: number } };
+      if (err.error_code === 429 || err.message?.includes('Too Many Requests')) {
+        const retryAfter = err.parameters?.retry_after || 2 ** attempt;
+        log.warn({ retryAfter, attempt }, 'Telegram rate limit, retrying');
+        await new Promise((r) => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
+      // If parse_mode caused a failure on first attempt, retry without it
+      if (attempt === 0 && options.parse_mode && err.message?.includes("can't parse")) {
+        const { parse_mode: _, ...rest } = options;
+        return sendWithRetry(ctx, text, rest, maxRetries - 1);
+      }
+      throw e;
+    }
+  }
+}
+
+// ─── TelegramChannel class ─────────────────────────────────
+
+class TelegramChannel implements Channel {
+  readonly name = 'telegram';
+  private bot: Bot | null = null;
+  private runner: AgentRunner | null = null;
+  private readonly queue = new AgentQueue();
+  private readonly config: GatewayConfig;
+  private readonly db: DatabaseAdapter;
+  private readonly tenantId: string;
+  private readonly secretsStore?: SecretsStore;
+
+  constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string, secretsStore?: SecretsStore) {
+    this.config = config;
+    this.db = db;
+    this.tenantId = tenantId;
+    this.secretsStore = secretsStore;
+  }
+
+  async start(runner: AgentRunner): Promise<void> {
+    const cfg = this.config.channels.telegram;
+    const botToken = this.secretsStore?.get('channels.telegram', 'botToken') || cfg.botToken;
+    if (!cfg.enabled || !botToken) {
+      log.info('Telegram channel disabled or no bot token');
+      return;
+    }
+
+    this.runner = runner;
+    this.bot = new Bot(botToken);
+
+    // ── Text messages ────────────────────────────
+    this.bot.on('message:text', (ctx) => this.handleMessage(ctx));
+
+    // ── Photo messages ───────────────────────────
+    this.bot.on('message:photo', async (ctx) => {
+      const photo = ctx.message.photo;
+      if (!photo || photo.length === 0) return;
+      const largest = photo[photo.length - 1]!;
+      const imageData = await this.downloadFileAsBase64(largest.file_id);
+      const caption = ctx.message.caption || '';
+      if (imageData) {
+        const text = caption || "What's in this image?";
+        await this.handleMessage(ctx, text, [{ data: imageData, mimeType: 'image/jpeg' }]);
+      } else {
+        // Fallback: save to disk
+        const localPath = await this.downloadFile(largest.file_id, 'photo.jpg');
+        const workspace = this.config.agent.workspace;
+        const text = localPath
+          ? `[Image saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+          : caption || '[Photo received but download failed]';
+        await this.handleMessage(ctx, text);
+      }
+    });
+
+    // ── Document messages ────────────────────────
+    this.bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document;
+      if (!doc) return;
+
+      // Check if the document is an image
+      const imageExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+      const fileName = doc.file_name || '';
+      const ext = path.extname(fileName).toLowerCase();
+      const isImage = imageExts.includes(ext) || doc.mime_type?.startsWith('image/');
+
+      if (isImage) {
+        const imageData = await this.downloadFileAsBase64(doc.file_id);
+        const caption = ctx.message.caption || '';
+        if (imageData) {
+          const mimeType = doc.mime_type || `image/${ext.slice(1) || 'jpeg'}`;
+          const text = caption || "What's in this image?";
+          await this.handleMessage(ctx, text, [{ data: imageData, mimeType, filename: fileName }]);
+          return;
+        }
+      }
+
+      // Non-image document or image download failed: save to disk
+      const localPath = await this.downloadFile(doc.file_id, doc.file_name || 'document');
+      const caption = ctx.message.caption || '';
+      const workspace = this.config.agent.workspace;
+      const text = localPath
+        ? `[Document "${doc.file_name}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+        : caption || '[Document received but download failed]';
+      await this.handleMessage(ctx, text);
+    });
+
+    // ── Voice messages ───────────────────────────
+    this.bot.on('message:voice', async (ctx) => {
+      const voice = ctx.message.voice;
+      if (!voice) return;
+      const localPath = await this.downloadFile(voice.file_id, 'voice.ogg');
+      const workspace = this.config.agent.workspace;
+      const text = localPath
+        ? `[Voice message saved to ${path.relative(workspace, localPath)}]`
+        : '[Voice message received but download failed]';
+      await this.handleMessage(ctx, text);
+    });
+
+    // ── Error handler ────────────────────────────
+    this.bot.catch((err) => {
+      log.error({ err: err.message }, 'Grammy error');
+    });
+
+    this.bot.start();
+    log.info('Telegram bot started');
+  }
+
+  async stop(): Promise<void> {
+    if (this.bot) {
+      try {
+        this.bot.stop();
+      } catch {
+        /* ignore */
+      }
+      this.bot = null;
+    }
+  }
+
+  // ── Message handling ─────────────────────────────────────
+
+  private async handleMessage(ctx: Context, overrideText?: string, images?: Array<{ data: string; mimeType: string; filename?: string }>): Promise<void> {
+    if (!ctx.from || !ctx.chat || !ctx.message) return;
+    if (!this.runner) return;
+
+    // Track last active chat for send_message tool
+    this.lastActiveChatId = String(ctx.chat.id);
+
+    const senderId = String(ctx.from.id);
+    const chatId = String(ctx.chat.id);
+    const chatType = ctx.chat.type === 'private' ? 'private' as const : 'group' as const;
+    const cfg = this.config.channels.telegram;
+
+    // Allowlist check — compare as strings to handle mixed types
+    if (cfg.allowFrom?.length > 0) {
+      const allowed = cfg.allowFrom.map(String);
+      if (!allowed.includes(senderId)) {
+        log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
+        return;
+      }
+    }
+
+    // Group handling
+    if (chatType === 'group') {
+      if (!cfg.groupsEnabled) return;
+
+      if (cfg.groupRequireMention && this.bot) {
+        const botInfo = this.bot.botInfo;
+        const text = ctx.message.text || ctx.message.caption || '';
+        const mentioned = botInfo.username ? text.includes(`@${botInfo.username}`) : false;
+        const replied = ctx.message.reply_to_message?.from?.id === botInfo.id;
+        if (!mentioned && !replied) return;
+      }
+    }
+
+    const msgText = overrideText || ctx.message.text || '';
+
+    const inbound: InboundMessage = {
+      text: msgText,
+      channel: 'telegram',
+      chatId: `telegram:${chatId}`,
+      chatType,
+      userId: senderId,
+      senderName:
+        [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown',
+      ...(images && images.length > 0 ? { images } : {}),
+    };
+
+    log.info(
+      { sender: inbound.senderName, chat: chatType, text: inbound.text.slice(0, 80) },
+      'Telegram message',
+    );
+
+    // Send typing indicator, keep refreshing for long tool chains
+    let typingInterval: ReturnType<typeof setInterval> | undefined;
+    try {
+      await ctx.replyWithChatAction('typing');
+      typingInterval = setInterval(() => {
+        ctx.replyWithChatAction('typing').catch(() => {});
+      }, 4_000);
+    } catch {
+      // Typing indicator is non-critical
+    }
+
+    const sessionKey = `telegram:${chatId}`;
+
+    try {
+      const result = await this.queue.enqueue(sessionKey, () =>
+        this.runner!(inbound, {
+          onDelta: () => {},
+        }),
+      );
+
+      if (result.text) {
+        // Check if the reply references an image to send as photo
+        const imageMatch = result.text.match(
+          /!\[.*?\]\((.+?)\)|(?:^|\s)((?:\/|\.\/|\.\.\/).+?\.(?:jpg|jpeg|png|gif|webp))(?:\s|$)/i,
+        );
+        if (imageMatch) {
+          const imgPath = imageMatch[1] || imageMatch[2];
+          if (imgPath) {
+            const resolvedImg = path.resolve(
+              path.isAbsolute(imgPath)
+                ? imgPath
+                : path.join(this.config.agent.workspace, imgPath),
+            );
+            const workspace = path.resolve(this.config.agent.workspace);
+            if (!resolvedImg.startsWith(workspace + path.sep) && resolvedImg !== workspace) {
+              log.warn({ imgPath, resolvedImg }, 'Telegram: image path traversal blocked');
+            } else if (fs.existsSync(resolvedImg)) {
+              try {
+                await ctx.replyWithPhoto(new InputFile(fs.createReadStream(resolvedImg)), {
+                  caption: result.text.replace(imageMatch[0], '').trim().slice(0, 1024) || undefined,
+                  reply_parameters:
+                    chatType === 'group' && ctx.message
+                      ? { message_id: ctx.message.message_id }
+                      : undefined,
+                });
+                return;
+              } catch (e: unknown) {
+                const errMsg = e instanceof Error ? e.message : String(e);
+                log.debug({ err: errMsg }, 'Failed to send as photo, falling back to text');
+              }
+            }
+          }
+        }
+
+        // Split long messages (Telegram limit: 4096 chars)
+        const chunks = splitMessage(result.text, 4000);
+        for (const chunk of chunks) {
+          await sendWithRetry(ctx, chunk, {
+            parse_mode: 'Markdown',
+            reply_parameters:
+              chatType === 'group' && ctx.message
+                ? { message_id: ctx.message.message_id }
+                : undefined,
+          });
+        }
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'Telegram handler error');
+      try {
+        await ctx.reply('Something went wrong. Please try again.');
+      } catch {
+        /* ignore */
+      }
+    } finally {
+      if (typingInterval) clearInterval(typingInterval);
+    }
+  }
+
+  // ── File download ──────────────────────────────────────
+
+  private async downloadFile(fileId: string, filename: string): Promise<string | null> {
+    if (!this.bot) return null;
+    try {
+      const mediaDir = path.join(this.config.agent.workspace, 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+
+      const file = await this.bot.api.getFile(fileId);
+      const filePath = file.file_path;
+      if (!filePath) return null;
+
+      const token = this.config.channels.telegram.botToken;
+      const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) return null;
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const ext = path.extname(filePath) || path.extname(filename || '') || '';
+      const finalPath = ext
+        ? path.join(mediaDir, `${Date.now()}${ext}`)
+        : path.join(mediaDir, `${Date.now()}-${filename || 'file'}.bin`);
+
+      await fs.promises.writeFile(finalPath, new Uint8Array(buffer));
+      log.info({ path: finalPath, size: buffer.length }, 'Telegram file downloaded');
+      return finalPath;
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'Failed to download Telegram file');
+      return null;
+    }
+  }
+
+  /**
+   * Download a Telegram file and return its contents as a base64 string.
+   * Returns null if the download fails.
+   */
+  private async downloadFileAsBase64(fileId: string): Promise<string | null> {
+    if (!this.bot) return null;
+    try {
+      const file = await this.bot.api.getFile(fileId);
+      const filePath = file.file_path;
+      if (!filePath) return null;
+
+      const token = this.config.channels.telegram.botToken;
+      const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!res.ok) return null;
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      return buffer.toString('base64');
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'Failed to download Telegram file as base64');
+      return null;
+    }
+  }
+
+  /** Send a message to a specific Telegram chat. Used by send_message tool. */
+  async sendToChat(text: string, chatId?: string): Promise<void> {
+    if (!this.bot) throw new Error('Telegram bot not started');
+    const targetChatId = chatId || this.lastActiveChatId;
+    if (!targetChatId) throw new Error('No chat ID specified and no recent active chat');
+
+    // Split long messages (Telegram limit: 4096 chars)
+    const MAX_LEN = 4000;
+    if (text.length <= MAX_LEN) {
+      await this.bot.api.sendMessage(targetChatId, text, { parse_mode: 'Markdown' }).catch(() => {
+        // Retry without Markdown if parsing fails
+        return this.bot!.api.sendMessage(targetChatId, text);
+      });
+    } else {
+      const chunks = [];
+      for (let i = 0; i < text.length; i += MAX_LEN) {
+        chunks.push(text.slice(i, i + MAX_LEN));
+      }
+      for (const chunk of chunks) {
+        await this.bot.api.sendMessage(targetChatId, chunk).catch(() => {});
+      }
+    }
+  }
+
+  /** Return bot info (username, id) if available. */
+  getBotInfo(): { username?: string; id?: number } | null {
+    if (!this.bot) return null;
+    try {
+      const info = this.bot.botInfo;
+      return { username: info.username, id: info.id };
+    } catch {
+      return null;
+    }
+  }
+
+  private lastActiveChatId: string | null = null;
+}
+
+// ─── Factory ────────────────────────────────────────────────
+
+/**
+ * Create a Telegram channel instance.
+ */
+export interface TelegramChannelInstance extends Channel {
+  sendToChat(text: string, chatId?: string): Promise<void>;
+  getBotInfo(): { username?: string; id?: number } | null;
+}
+
+export function createTelegramChannel(
+  config: GatewayConfig,
+  db: DatabaseAdapter,
+  tenantId: string,
+  secretsStore?: SecretsStore,
+): TelegramChannelInstance {
+  return new TelegramChannel(config, db, tenantId, secretsStore);
+}

@@ -1,0 +1,625 @@
+/**
+ * WhatsApp channel — Baileys (WhiskeySockets) integration.
+ *
+ * Implements the Channel interface for WhatsApp using QR-code pairing.
+ * Handles text, image, document, voice/PTT messages. Supports allowlist
+ * filtering, group mention detection, and per-session request queuing.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  downloadMediaMessage,
+  getContentType,
+  isJidGroup,
+  isJidStatusBroadcast,
+  jidNormalizedUser,
+  type WASocket,
+  type WAMessage,
+  proto,
+} from 'baileys';
+import type { GatewayConfig, InboundMessage } from '@agw/types';
+import type { DatabaseAdapter } from '../db/index.js';
+import type { Channel, AgentRunner } from './types.js';
+import { AgentQueue } from '../queue/index.js';
+import { splitMessage } from './utils.js';
+import { createModuleLogger } from '../observability/logger.js';
+
+const log = createModuleLogger('channel.whatsapp');
+
+// ─── Helpers ────────────────────────────────────────────────
+
+/**
+ * Extract the phone number part from a JID (e.g. "971501234567@s.whatsapp.net" → "971501234567").
+ */
+function phoneFromJid(jid: string): string {
+  return jid.replace(/@.*$/, '');
+}
+
+// ─── WhatsAppChannel class ─────────────────────────────────
+
+class WhatsAppChannel implements Channel {
+  readonly name = 'whatsapp';
+  private sock: WASocket | null = null;
+  private runner: AgentRunner | null = null;
+  private readonly queue = new AgentQueue();
+  private readonly config: GatewayConfig;
+  private readonly db: DatabaseAdapter;
+  private readonly tenantId: string;
+  private currentQR: string | null = null;
+  private connectionStatus: 'disconnected' | 'qr' | 'connected' = 'disconnected';
+  private connectedPhone: string | null = null;
+  private connectedName: string | null = null;
+  private ownJid: string | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
+  private authDir: string;
+  /** LID → phone number mapping (WhatsApp's Linked Identity system). */
+  private lidToPhone = new Map<string, string>();
+
+  constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string) {
+    this.config = config;
+    this.db = db;
+    this.tenantId = tenantId;
+    const stateDir = config._stateDir || path.join(process.env.HOME || '/tmp', '.agw');
+    this.authDir = path.join(stateDir, 'whatsapp');
+  }
+
+  async start(runner: AgentRunner): Promise<void> {
+    this.runner = runner;
+    await this.connect();
+  }
+
+  private async connect(): Promise<void> {
+    // Ensure auth directory exists
+    fs.mkdirSync(this.authDir, { recursive: true });
+
+    const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+
+    this.sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      // Pin version to work around Baileys 405 error (github.com/WhiskeySockets/Baileys/issues/2370)
+      version: [2, 3000, 1033893291],
+      browser: ['Kairo', 'Chrome', '145.0.0'],
+      // Reduce log noise
+      logger: {
+        level: 'silent',
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+        trace: () => {},
+        fatal: () => {},
+        child: () => ({ level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any),
+      } as any,
+    });
+
+    // Save credentials on update
+    this.sock.ev.on('creds.update', saveCreds);
+
+    // Handle connection events
+    this.sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      log.info({ connection, hasQR: !!qr, keys: Object.keys(update) }, 'WhatsApp connection.update');
+
+      if (qr) {
+        this.currentQR = qr;
+        this.connectionStatus = 'qr';
+        log.info('WhatsApp: QR code generated — scan to pair');
+      }
+
+      if (connection === 'close') {
+        this.connectionStatus = 'disconnected';
+        this.currentQR = null;
+        this.connectedPhone = null;
+        this.connectedName = null;
+        this.ownJid = null;
+
+        const error = lastDisconnect?.error as { output?: { statusCode?: number } } | undefined;
+        const statusCode = error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          log.info('WhatsApp: logged out — clearing credentials');
+          this.reconnectAttempts = 0;
+          this.clearAuth();
+        } else if (shouldReconnect) {
+          // Clear any existing timer to prevent storm
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          // Exponential backoff: 3s, 6s, 12s, 24s, ... capped at 5 minutes
+          const delay = Math.min(3000 * Math.pow(2, this.reconnectAttempts), 5 * 60_000);
+          this.reconnectAttempts++;
+          log.warn({ statusCode, attempt: this.reconnectAttempts, delayMs: delay }, 'WhatsApp: connection closed, reconnecting...');
+          this.reconnectTimer = setTimeout(() => this.connect().catch((e) => {
+            log.error({ err: e instanceof Error ? e.message : String(e) }, 'WhatsApp: reconnect failed');
+          }), delay);
+        }
+      }
+
+      if (connection === 'open') {
+        this.connectionStatus = 'connected';
+        this.currentQR = null;
+        this.reconnectAttempts = 0;
+        // Extract own JID
+        if (this.sock?.user) {
+          this.ownJid = jidNormalizedUser(this.sock.user.id);
+          this.connectedPhone = phoneFromJid(this.ownJid);
+          this.connectedName = this.sock.user.name || null;
+        }
+        log.info({ phone: this.connectedPhone, name: this.connectedName }, 'WhatsApp: connected');
+      }
+    });
+
+    // Build LID → phone mapping from contact sync events
+    this.sock.ev.on('messaging-history.set', ({ contacts }) => {
+      if (!contacts) return;
+      for (const contact of contacts) {
+        if (contact.id && contact.lid) {
+          this.lidToPhone.set(phoneFromJid(contact.lid), phoneFromJid(contact.id));
+        }
+      }
+      if (this.lidToPhone.size > 0) {
+        log.info({ mappings: this.lidToPhone.size }, 'WhatsApp: LID→phone mappings loaded from history');
+      }
+    });
+
+    this.sock.ev.on('contacts.update', (updates) => {
+      for (const update of updates) {
+        if (update.id && update.lid) {
+          this.lidToPhone.set(phoneFromJid(update.lid), phoneFromJid(update.id));
+        }
+      }
+    });
+
+    // Handle incoming messages
+    this.sock.ev.on('messages.upsert', async (upsert) => {
+      log.debug({ type: upsert.type, count: upsert.messages.length }, 'WhatsApp: messages.upsert event');
+      // Process both 'notify' (real-time) and 'append' (some group messages arrive as append)
+      // For 'append', only process messages from the last 60 seconds to avoid replaying history
+      if (upsert.type !== 'notify' && upsert.type !== 'append') return;
+      const now = Math.floor(Date.now() / 1000);
+      const isAppend = upsert.type === 'append';
+
+      for (const msg of upsert.messages) {
+        // For 'append' type, skip messages older than 60 seconds (history sync, not real-time)
+        if (isAppend && msg.messageTimestamp) {
+          const ts = typeof msg.messageTimestamp === 'number'
+            ? msg.messageTimestamp
+            : Number(msg.messageTimestamp);
+          if (ts > 0 && now - ts > 60) continue;
+        }
+        try {
+          await this.handleMessage(msg);
+        } catch (e: unknown) {
+          const errMsg = e instanceof Error ? e.message : String(e);
+          log.error({ err: errMsg }, 'WhatsApp message handler error');
+        }
+      }
+    });
+
+    log.info('WhatsApp channel starting...');
+  }
+
+  async stop(): Promise<void> {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.sock) {
+      try {
+        this.sock.end(undefined);
+      } catch {
+        /* ignore */
+      }
+      this.sock = null;
+    }
+    this.connectionStatus = 'disconnected';
+    this.currentQR = null;
+  }
+
+  // ── Message handling ─────────────────────────────────────
+
+  private async handleMessage(msg: WAMessage): Promise<void> {
+    if (!this.runner || !this.sock) return;
+    if (!msg.message || !msg.key.remoteJid) return;
+
+    const jid = msg.key.remoteJid;
+
+    // Ignore status broadcasts
+    if (isJidStatusBroadcast(jid)) return;
+
+    // Ignore messages from self
+    if (msg.key.fromMe) return;
+
+    const isGroup = isJidGroup(jid) || false;
+    const cfg = this.config.channels.whatsapp;
+    const senderJid = isGroup
+      ? (msg.key.participant || '')
+      : jid;
+    const rawPhone = phoneFromJid(jidNormalizedUser(senderJid));
+    // Resolve LID → phone number using cache or Baileys' auth state reverse files
+    const senderPhone = this.resolveLidToPhone(rawPhone);
+
+    log.debug({ jid, isGroup, senderPhone }, 'WhatsApp: message received');
+
+    // Allowlist check for direct messages
+    if (!isGroup && cfg.allowFrom?.length > 0) {
+      if (!cfg.allowFrom.includes(senderPhone)) {
+        log.warn({ senderPhone }, 'WhatsApp: sender not in allowFrom list — rejected');
+        return;
+      }
+    }
+
+    // Group handling
+    if (isGroup) {
+      if (!cfg.groupsEnabled) {
+        log.debug({ jid }, 'WhatsApp: group message ignored — groups disabled');
+        return;
+      }
+
+      // Group allowlist
+      if (cfg.groupAllowFrom?.length > 0) {
+        if (!cfg.groupAllowFrom.includes(jid)) {
+          log.debug({ jid }, 'WhatsApp: group not in groupAllowFrom — ignored');
+          return;
+        }
+      }
+
+      // Mention check in groups
+      if (cfg.groupRequireMention) {
+        const msgContent = msg.message;
+        const textContent =
+          msgContent?.conversation ||
+          msgContent?.extendedTextMessage?.text ||
+          msgContent?.imageMessage?.caption ||
+          msgContent?.documentMessage?.caption ||
+          '';
+
+        // Collect mentionedJids from ALL possible contextInfo locations
+        // WhatsApp puts mention metadata in different places depending on message type
+        const mentionedJids = [
+          ...(msgContent?.extendedTextMessage?.contextInfo?.mentionedJid || []),
+          ...(msgContent?.imageMessage?.contextInfo?.mentionedJid || []),
+          ...(msgContent?.documentMessage?.contextInfo?.mentionedJid || []),
+          ...(msgContent?.videoMessage?.contextInfo?.mentionedJid || []),
+        ];
+        const ownPhone = this.connectedPhone || (this.ownJid ? phoneFromJid(this.ownJid) : '');
+        // Build list of identifiers others might use to @mention us (phone + LID)
+        const ownIdentifiers = [ownPhone];
+        // Look up our own LID from auth state
+        try {
+          const lidPath = path.join(this.authDir, `lid-mapping-${ownPhone}.json`);
+          if (fs.existsSync(lidPath)) {
+            const lid = JSON.parse(fs.readFileSync(lidPath, 'utf8'));
+            if (typeof lid === 'string') ownIdentifiers.push(lid);
+          }
+        } catch { /* non-critical */ }
+
+        const isMentioned = this.ownJid
+          ? mentionedJids.includes(this.ownJid) ||
+            mentionedJids.some(j => this.resolveLidToPhone(phoneFromJid(j)) === ownPhone) ||
+            ownIdentifiers.some(id => textContent.includes(`@${id}`))
+          : false;
+        const ctxParticipant =
+          msgContent?.extendedTextMessage?.contextInfo?.participant ||
+          msgContent?.imageMessage?.contextInfo?.participant ||
+          msgContent?.documentMessage?.contextInfo?.participant || '';
+        const isQuoteReply = ctxParticipant === this.ownJid ||
+          (ctxParticipant && ownPhone && this.resolveLidToPhone(phoneFromJid(ctxParticipant)) === ownPhone);
+
+        log.debug({ jid, isMentioned, isQuoteReply }, 'WhatsApp: group mention check');
+
+        if (!isMentioned && !isQuoteReply) {
+          log.debug({ jid }, 'WhatsApp: group message ignored — not mentioned');
+          return;
+        }
+      }
+    }
+
+
+    // Send read receipt if configured
+    if (cfg.sendReadReceipts && msg.key.id) {
+      try {
+        await this.sock.readMessages([msg.key]);
+      } catch {
+        // Non-critical
+      }
+    }
+
+    // Determine message content type
+    const contentType = getContentType(msg.message);
+    // Log raw message keys for debugging image+mention issues
+    const msgKeys = msg.message ? Object.keys(msg.message) : [];
+    log.debug({ contentType, msgKeys }, 'WhatsApp: message content type');
+    let msgText = '';
+    let images: Array<{ data: string; mimeType: string; filename?: string }> | undefined;
+
+    if (contentType === 'conversation') {
+      msgText = msg.message.conversation || '';
+    } else if (contentType === 'extendedTextMessage') {
+      msgText = msg.message.extendedTextMessage?.text || '';
+      // Check if this extended text message also has an image (WhatsApp sometimes wraps image+mention as extendedText)
+      const ctxInfo = msg.message.extendedTextMessage?.contextInfo;
+      if (ctxInfo?.quotedMessage?.imageMessage) {
+        // The user quoted/replied to an image — treat the quoted image as an attachment
+        try {
+          const imgMsg = ctxInfo.quotedMessage.imageMessage;
+          const buffer = await downloadMediaMessage(
+            { ...msg, message: { imageMessage: imgMsg } } as any,
+            'buffer', {},
+            { logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any, reuploadRequest: this.sock!.updateMediaMessage },
+          );
+          const base64 = Buffer.from(buffer).toString('base64');
+          images = [{ data: base64, mimeType: imgMsg.mimetype || 'image/jpeg' }];
+        } catch { /* fall through to text-only */ }
+      }
+    } else if (contentType === 'imageMessage') {
+      const imgMsg = msg.message.imageMessage!;
+      const caption = imgMsg.caption || '';
+      try {
+        const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+          logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+          reuploadRequest: this.sock.updateMediaMessage,
+        });
+        const base64 = Buffer.from(buffer).toString('base64');
+        const mimeType = imgMsg.mimetype || 'image/jpeg';
+        msgText = caption || "What's in this image?";
+        images = [{ data: base64, mimeType }];
+      } catch (e: unknown) {
+        // Fallback: save to disk
+        const localPath = await this.downloadMediaToDisk(msg, 'image.jpg');
+        const workspace = this.config.agent.workspace;
+        msgText = localPath
+          ? `[Image saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+          : caption || '[Image received but download failed]';
+      }
+    } else if (contentType === 'documentMessage' || contentType === 'documentWithCaptionMessage') {
+      const docMsg = contentType === 'documentWithCaptionMessage'
+        ? msg.message.documentWithCaptionMessage?.message?.documentMessage
+        : msg.message.documentMessage;
+      if (!docMsg) return;
+
+      const fileName = docMsg.fileName || 'document';
+      const caption = docMsg.caption || '';
+      const mimeType = docMsg.mimetype || '';
+      const isImage = mimeType.startsWith('image/');
+
+      if (isImage) {
+        try {
+          const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+            logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+            reuploadRequest: this.sock.updateMediaMessage,
+          });
+          const base64 = Buffer.from(buffer).toString('base64');
+          msgText = caption || "What's in this image?";
+          images = [{ data: base64, mimeType, filename: fileName }];
+        } catch {
+          const localPath = await this.downloadMediaToDisk(msg, fileName);
+          const workspace = this.config.agent.workspace;
+          msgText = localPath
+            ? `[Document "${fileName}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+            : caption || '[Document received but download failed]';
+        }
+      } else {
+        const localPath = await this.downloadMediaToDisk(msg, fileName);
+        const workspace = this.config.agent.workspace;
+        msgText = localPath
+          ? `[Document "${fileName}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+          : caption || '[Document received but download failed]';
+      }
+    } else if (contentType === 'audioMessage') {
+      const audioMsg = msg.message.audioMessage!;
+      const ext = audioMsg.ptt ? 'ogg' : 'ogg';
+      const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`);
+      const workspace = this.config.agent.workspace;
+      msgText = localPath
+        ? `[Voice message saved to ${path.relative(workspace, localPath)}]`
+        : '[Voice message received but download failed]';
+    } else if (contentType === 'videoMessage') {
+      const videoMsg = msg.message.videoMessage!;
+      const localPath = await this.downloadMediaToDisk(msg, 'video.mp4');
+      const workspace = this.config.agent.workspace;
+      const caption = videoMsg.caption || '';
+      msgText = localPath
+        ? `[Video saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
+        : caption || '[Video received but download failed]';
+    } else {
+      // Unsupported message type — skip
+      return;
+    }
+
+    if (!msgText && !images) return;
+
+    // Get sender name from push name or phone
+    const senderName = msg.pushName || senderPhone || 'Unknown';
+
+    const inbound: InboundMessage = {
+      text: msgText,
+      channel: 'whatsapp',
+      chatId: `whatsapp:${jid}`,
+      chatType: isGroup ? 'group' : 'private',
+      userId: senderPhone,
+      senderName,
+      ...(images && images.length > 0 ? { images } : {}),
+    };
+
+    log.info(
+      { sender: inbound.senderName, chat: isGroup ? 'group' : 'private', text: inbound.text.slice(0, 80) },
+      'WhatsApp message',
+    );
+
+    // Send composing indicator
+    try {
+      await this.sock.sendPresenceUpdate('composing', jid);
+    } catch {
+      // Non-critical
+    }
+
+    const sessionKey = `whatsapp:${jid}`;
+
+    try {
+      const result = await this.queue.enqueue(sessionKey, () =>
+        this.runner!(inbound, {
+          onDelta: () => {},
+        }),
+      );
+
+      // Clear composing
+      try {
+        await this.sock?.sendPresenceUpdate('paused', jid);
+      } catch {
+        // Non-critical
+      }
+
+      if (result.text) {
+        const chunks = splitMessage(result.text, 4000);
+        for (const chunk of chunks) {
+          try {
+            await this.sock?.sendMessage(jid, { text: chunk });
+          } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            log.error({ err: errMsg }, 'WhatsApp: failed to send message');
+          }
+        }
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'WhatsApp handler error');
+      try {
+        await this.sock?.sendMessage(jid, { text: 'Something went wrong. Please try again.' });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // ── Media download ──────────────────────────────────────
+
+  private async downloadMediaToDisk(msg: WAMessage, filename: string): Promise<string | null> {
+    if (!this.sock) return null;
+    try {
+      const mediaDir = path.join(this.config.agent.workspace, 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+        logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+        reuploadRequest: this.sock.updateMediaMessage,
+      });
+
+      const ext = path.extname(filename) || '.bin';
+      const finalPath = path.join(mediaDir, `${Date.now()}${ext}`);
+      await fs.promises.writeFile(finalPath, new Uint8Array(buffer));
+      log.info({ path: finalPath, size: buffer.length }, 'WhatsApp file downloaded');
+      return finalPath;
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'Failed to download WhatsApp media');
+      return null;
+    }
+  }
+
+  // ── LID resolution ─────────────────────────────────────
+
+  /**
+   * Resolve a LID (Linked Identity) to a real phone number.
+   * Uses in-memory cache first, falls back to Baileys' auth state
+   * reverse mapping files (lid-mapping-{LID}_reverse.json → "phone").
+   */
+  private resolveLidToPhone(rawPhone: string): string {
+    // Check in-memory cache first
+    const cached = this.lidToPhone.get(rawPhone);
+    if (cached) return cached;
+
+    // Try the Baileys auth state reverse file: lid-mapping-{LID}_reverse.json
+    try {
+      const reversePath = path.join(this.authDir, `lid-mapping-${rawPhone}_reverse.json`);
+      if (fs.existsSync(reversePath)) {
+        const phone = JSON.parse(fs.readFileSync(reversePath, 'utf8'));
+        if (typeof phone === 'string' && phone) {
+          this.lidToPhone.set(rawPhone, phone);
+          log.info({ lid: rawPhone, phone }, 'WhatsApp: resolved LID→phone from auth state');
+          return phone;
+        }
+      }
+    } catch { /* non-critical */ }
+
+    return rawPhone;
+  }
+
+  // ── Public API ──────────────────────────────────────────
+
+  /** Send a message to a specific WhatsApp chat. Requires an explicit JID. */
+  async sendToChat(text: string, jid?: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID (delivery.to). No silent fallback.');
+
+    const chunks = splitMessage(text, 4000);
+    for (const chunk of chunks) {
+      await this.sock.sendMessage(jid, { text: chunk });
+    }
+  }
+
+  /** Returns current QR code string for admin UI pairing. */
+  getQRCode(): string | null {
+    return this.currentQR;
+  }
+
+  /** Returns current connection state. */
+  getConnectionStatus(): 'disconnected' | 'qr' | 'connected' {
+    return this.connectionStatus;
+  }
+
+  /** Returns connected phone number. */
+  getConnectedPhone(): string | null {
+    return this.connectedPhone;
+  }
+
+  /** Returns connected account name. */
+  getConnectedName(): string | null {
+    return this.connectedName;
+  }
+
+  /** Disconnect and clear stored credentials. */
+  async unpair(): Promise<void> {
+    await this.stop();
+    this.clearAuth();
+    log.info('WhatsApp: unpaired and credentials cleared');
+  }
+
+  private clearAuth(): void {
+    try {
+      if (fs.existsSync(this.authDir)) {
+        fs.rmSync(this.authDir, { recursive: true, force: true });
+      }
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      log.error({ err: errMsg }, 'Failed to clear WhatsApp auth');
+    }
+  }
+}
+
+// ─── Factory ────────────────────────────────────────────────
+
+export interface WhatsAppChannelInstance extends Channel {
+  sendToChat(text: string, jid?: string): Promise<void>;
+  getQRCode(): string | null;
+  getConnectionStatus(): 'disconnected' | 'qr' | 'connected';
+  getConnectedPhone(): string | null;
+  getConnectedName(): string | null;
+  unpair(): Promise<void>;
+}
+
+export function createWhatsAppChannel(
+  config: GatewayConfig,
+  db: DatabaseAdapter,
+  tenantId: string,
+): WhatsAppChannelInstance {
+  return new WhatsAppChannel(config, db, tenantId);
+}
