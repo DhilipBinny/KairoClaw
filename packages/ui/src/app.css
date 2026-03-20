@@ -152,6 +152,10 @@
 [data-theme="light"] .message.assistant:hover { background: #f4f4f8; }
 [data-theme="light"] .chat-input-wrapper { background: rgba(255, 255, 255, 0.9); }
 [data-theme="light"] .sidebar-backdrop { background: rgba(0, 0, 0, 0.2); }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); }
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.2); }
+[data-theme="light"] .btn { border-color: rgba(0, 0, 0, 0.12); }
+[data-theme="light"] .glass { border-color: rgba(0, 0, 0, 0.08); }
 
 /* ═══════════════ SYNTAX HIGHLIGHTING (highlight.js) ═══════════════ */
 /* Dark theme — atom-one-dark */

@@ -610,7 +610,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .server-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .server-header {
     display: flex;
@@ -730,7 +730,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .catalog-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .catalog-header {
     display: flex;
@@ -786,7 +786,7 @@
     transition: border-color var(--duration) var(--ease);
   }
   .marketplace-card:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
   }
   .marketplace-header {
     margin-bottom: 6px;

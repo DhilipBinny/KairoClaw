@@ -274,7 +274,7 @@
     transition: all var(--duration) var(--ease);
   }
   .session-row:hover {
-    border-color: rgba(255, 255, 255, 0.1);
+    border-color: var(--border);
     background: var(--bg-raised);
   }
   .session-row.active {

@@ -204,7 +204,7 @@
     width: 100%;
   }
   .file-card:hover {
-    border-color: rgba(255, 255, 255, 0.12);
+    border-color: var(--border);
     background: var(--bg-raised);
   }
   .file-card:hover .file-arrow {
