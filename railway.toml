@@ -5,7 +5,7 @@
 #   PORT=18181              — must match the app's listening port
 #   AGW_ADMIN_KEY=<secret>  — your admin login key (used in setup wizard)
 #
-# Volume: mount at /data (persistent storage for DB + secrets)
+# Volume: create a volume and mount at /data (persistent storage for DB + secrets)
 
 [build]
 builder = "DOCKERFILE"
