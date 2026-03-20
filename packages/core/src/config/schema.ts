@@ -120,12 +120,26 @@ const channelsSchema = z.object({
   whatsapp: withObjectDefault(whatsappChannelSchema),
 });
 
+const thinkingShowSchema = z.object({
+  web: z.boolean().default(true),
+  telegram: z.boolean().default(false),
+  whatsapp: z.boolean().default(false),
+});
+
+const thinkingSchema = z.object({
+  enabled: z.boolean().default(false),
+  mode: z.enum(['enabled', 'adaptive']).default('adaptive'),
+  budgetTokens: z.number().int().min(1024).default(10000),
+  showThinking: withObjectDefault(thinkingShowSchema),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
   maxToolRounds: z.number().int().min(1).default(25),
   compactionThreshold: z.number().min(0).max(1).default(0.75),
   keepRecentMessages: z.number().int().min(0).default(10),
+  thinking: withObjectDefault(thinkingSchema),
 });
 
 const modelsCatalogSchema = z.object({
@@ -232,6 +246,12 @@ export const configDefaults: GatewayConfig = {
     maxToolRounds: 25,
     compactionThreshold: 0.75,
     keepRecentMessages: 10,
+    thinking: {
+      enabled: false,
+      mode: 'adaptive',
+      budgetTokens: 10000,
+      showThinking: { web: true, telegram: false, whatsapp: false },
+    },
   },
   models: {
     catalog: {},

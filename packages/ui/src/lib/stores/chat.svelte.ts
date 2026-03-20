@@ -21,6 +21,10 @@ export interface ChatMessage {
   timestamp: number;
   toolCalls?: ToolCall[];
   isStreaming?: boolean;
+  /** Accumulated thinking / chain-of-thought text. */
+  thinkingContent?: string;
+  /** Whether the model is currently in the thinking phase. */
+  isThinking?: boolean;
 }
 
 // Persist session key across page refreshes
@@ -75,15 +79,41 @@ export function initChatListeners(): void {
   );
 
   _unsubscribers.push(
+    ws.on('chat.thinking', (msg) => {
+      const text = msg.text as string;
+      const lastMsg = _messages[_messages.length - 1];
+      if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+        _messages = _messages.map((m, i) =>
+          i === _messages.length - 1
+            ? { ...m, thinkingContent: (m.thinkingContent || '') + text, isThinking: true }
+            : m
+        );
+      } else {
+        _messages = [..._messages, {
+          id: `msg-${++_msgCounter}`,
+          role: 'assistant',
+          content: '',
+          thinkingContent: text,
+          timestamp: Date.now(),
+          isStreaming: true,
+          isThinking: true,
+          toolCalls: [],
+        }];
+      }
+      _thinkingLabel = 'Thinking...';
+    })
+  );
+
+  _unsubscribers.push(
     ws.on('chat.delta', (msg) => {
       _thinkingLabel = null;
       const text = msg.text as string;
       const lastMsg = _messages[_messages.length - 1];
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-        // Update in-place for reactivity
+        // Update in-place for reactivity — also mark thinking as done
         _messages = _messages.map((m, i) =>
           i === _messages.length - 1
-            ? { ...m, content: m.content + text }
+            ? { ...m, content: m.content + text, isThinking: false }
             : m
         );
       } else {

@@ -333,11 +333,29 @@ class TelegramChannel implements Channel {
     const sessionKey = `telegram:${chatId}`;
 
     try {
+      let thinkingText = '';
+      const showThinking = this.config.agent?.thinking?.showThinking?.telegram ?? false;
+
       const result = await this.queue.enqueue(sessionKey, () =>
         this.runner!(inbound, {
           onDelta: () => {},
+          onThinkingDelta: showThinking ? (delta: string) => { thinkingText += delta; } : undefined,
         }),
       );
+
+      // Send thinking as a separate message before the response
+      if (showThinking && thinkingText) {
+        const truncated = thinkingText.slice(0, 3000);
+        try {
+          await sendWithRetry(ctx, `_Thinking..._\n\n${truncated}`, {
+            parse_mode: 'Markdown',
+            reply_parameters:
+              chatType === 'group' && ctx.message
+                ? { message_id: ctx.message.message_id }
+                : undefined,
+          });
+        } catch { /* non-critical */ }
+      }
 
       if (result.text) {
         // Check if the reply references an image to send as photo

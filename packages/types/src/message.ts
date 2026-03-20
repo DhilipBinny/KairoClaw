@@ -10,6 +10,17 @@
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
 /**
+ * A thinking block from extended thinking / chain-of-thought.
+ * Contains the model's reasoning and a cryptographic signature
+ * required by Anthropic for multi-turn continuity.
+ */
+export interface ThinkingBlock {
+  type: 'thinking';
+  thinking: string;
+  signature: string;
+}
+
+/**
  * A tool call embedded in an assistant message.
  *
  * Follows the OpenAI-style format used internally, with a nested `function`
@@ -48,6 +59,8 @@ export interface Message {
   tool_calls?: ToolCall[];
   /** ID of the tool call this message is responding to (present when `role === 'tool'`). */
   tool_call_id?: string;
+  /** Thinking blocks from extended thinking (present when `role === 'assistant'`). */
+  thinking_blocks?: ThinkingBlock[];
 }
 
 /**
@@ -104,6 +117,8 @@ export interface TranscriptEntry {
 export interface AgentCallbacks {
   /** Called with each text delta as the LLM streams its response. */
   onDelta?: (delta: string) => void;
+  /** Called with each thinking delta during extended thinking. */
+  onThinkingDelta?: (delta: string) => void;
   /** Called when a tool execution begins. */
   onToolStart?: (toolName: string, args: Record<string, unknown>) => void;
   /** Called when a tool execution completes. */
@@ -116,6 +131,8 @@ export interface AgentCallbacks {
 export interface AgentResult {
   /** Final assistant text. `null` if the agent chose NO_REPLY. */
   text: string | null;
+  /** Accumulated thinking text from the final LLM round, if extended thinking was enabled. */
+  thinkingText?: string | null;
   /** Token usage for this turn. */
   usage?: {
     inputTokens: number;

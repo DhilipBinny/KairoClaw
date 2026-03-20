@@ -259,6 +259,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             broadcastToWeb({ type: 'chat.typing', sessionKey, requestId }, sessionKey);
 
             try {
+              const showThinking = config.agent?.thinking?.showThinking?.web ?? true;
               const result = await queue.enqueue(sessionKey, () =>
                 runner(inbound, {
                   onDelta: (delta: string) => {
@@ -270,6 +271,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                       requestId,
                     });
                   },
+                  onThinkingDelta: (config.agent?.thinking?.enabled && showThinking) ? (delta: string) => {
+                    safeSend({
+                      type: 'chat.thinking',
+                      runId,
+                      sessionKey,
+                      text: delta,
+                      requestId,
+                    });
+                  } : undefined,
                   onToolStart: (name: string, args: Record<string, unknown>) => {
                     safeSend({
                       type: 'chat.tool',

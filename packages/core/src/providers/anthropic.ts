@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ProviderInterface, ProviderResponse, ChatArgs } from './types.js';
 import type { ProviderOptions } from './types.js';
-import type { GatewayConfig, ToolCall } from '@agw/types';
+import type { GatewayConfig, ToolCall, ThinkingBlock } from '@agw/types';
 import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 
@@ -124,6 +124,12 @@ export class AnthropicProvider implements ProviderInterface {
         }
         if (m.role === 'assistant' && m.tool_calls) {
           const content: Anthropic.ContentBlockParam[] = [];
+          // Thinking blocks must come first for multi-turn tool-use continuity
+          if (m.thinking_blocks) {
+            for (const tb of m.thinking_blocks) {
+              content.push({ type: 'thinking' as any, thinking: tb.thinking, signature: tb.signature } as any);
+            }
+          }
           if (m.content) content.push({ type: 'text' as const, text: typeof m.content === 'string' ? m.content : '' });
           for (const tc of m.tool_calls) {
             let input: Record<string, unknown>;
@@ -185,6 +191,21 @@ export class AnthropicProvider implements ProviderInterface {
       params.tools = anthropicTools;
     }
 
+    // ── Extended thinking ────────────────────────────────
+    if (args.thinkingConfig?.enabled) {
+      if (args.thinkingConfig.mode === 'adaptive') {
+        (params as any).thinking = { type: 'enabled', budget_tokens: args.thinkingConfig.budgetTokens || 10000 };
+      } else {
+        (params as any).thinking = { type: 'enabled', budget_tokens: args.thinkingConfig.budgetTokens || 10000 };
+      }
+      // max_tokens must cover both thinking + output
+      params.max_tokens = Math.max(params.max_tokens, (args.thinkingConfig.budgetTokens || 10000) + caps.maxOutputTokens);
+      // Thinking + tools requires tool_choice "auto"
+      if (params.tools) {
+        params.tool_choice = { type: 'auto' };
+      }
+    }
+
     // ── Detailed request logging ──────────────────────────
     const systemLen = (systemPrompt || '').length;
     const msgsInfo = apiMessages.map((m) => {
@@ -220,22 +241,46 @@ export class AnthropicProvider implements ProviderInterface {
       let inputTokens = 0;
       let outputTokens = 0;
 
+      // Extended thinking state
+      let thinkingText = '';
+      const thinkingBlocks: ThinkingBlock[] = [];
+      let currentThinkingBlock: { thinking: string; signature: string } | null = null;
+
       for await (const event of stream) {
-        if (event.type === 'content_block_delta') {
-          if (event.delta.type === 'text_delta') {
-            text += event.delta.text;
-            if (onDelta) onDelta(event.delta.text);
-          } else if (event.delta.type === 'input_json_delta') {
-            const tc = toolCalls[toolCalls.length - 1];
-            if (tc) tc._rawArgs = (tc._rawArgs || '') + event.delta.partial_json;
-          }
-        } else if (event.type === 'content_block_start') {
+        if (event.type === 'content_block_start') {
           if (event.content_block.type === 'tool_use') {
             toolCalls.push({
               id: event.content_block.id,
               function: { name: event.content_block.name, arguments: '' },
               _rawArgs: '',
             });
+          } else if ((event.content_block as any).type === 'thinking') {
+            currentThinkingBlock = { thinking: '', signature: '' };
+          }
+        } else if (event.type === 'content_block_delta') {
+          const delta = event.delta as any;
+          if (delta.type === 'text_delta') {
+            text += delta.text;
+            if (onDelta) onDelta(delta.text);
+          } else if (delta.type === 'input_json_delta') {
+            const tc = toolCalls[toolCalls.length - 1];
+            if (tc) tc._rawArgs = (tc._rawArgs || '') + delta.partial_json;
+          } else if (delta.type === 'thinking_delta') {
+            const chunk = delta.thinking as string;
+            thinkingText += chunk;
+            if (currentThinkingBlock) currentThinkingBlock.thinking += chunk;
+            if (args.onThinkingDelta) args.onThinkingDelta(chunk);
+          } else if (delta.type === 'signature_delta') {
+            if (currentThinkingBlock) currentThinkingBlock.signature += delta.signature as string;
+          }
+        } else if (event.type === 'content_block_stop') {
+          if (currentThinkingBlock) {
+            thinkingBlocks.push({
+              type: 'thinking',
+              thinking: currentThinkingBlock.thinking,
+              signature: currentThinkingBlock.signature,
+            });
+            currentThinkingBlock = null;
           }
         } else if (event.type === 'message_delta') {
           if (event.usage) {
@@ -260,6 +305,8 @@ export class AnthropicProvider implements ProviderInterface {
         text: text || null,
         toolCalls: toolCalls.length > 0 ? toolCalls : null,
         usage: { inputTokens, outputTokens },
+        thinkingText: thinkingText || null,
+        thinkingBlocks: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       };
     } catch (e: unknown) {
       clearTimeout(timeoutId);

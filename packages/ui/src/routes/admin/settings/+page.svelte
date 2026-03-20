@@ -362,6 +362,138 @@
       </div>
     </div>
 
+    <!-- Thinking Settings -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)">
+          <path d="M12 2a8 8 0 0 0-8 8c0 3.4 2.1 6.3 5 7.4V20h6v-2.6c2.9-1.1 5-4 5-7.4a8 8 0 0 0-8-8z"></path>
+          <line x1="10" y1="22" x2="14" y2="22"></line>
+        </svg>
+        Extended Thinking
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label">Enable Extended Thinking</label>
+            <span class="field-hint">Show the LLM's chain-of-thought reasoning process</span>
+          </div>
+          <div class="field-control">
+            <button
+              class="toggle-btn"
+              class:active={!!getVal('agent.thinking.enabled')}
+              disabled={!!saving['agent.thinking.enabled']}
+              onclick={() => saveToggle('agent.thinking.enabled', !!getVal('agent.thinking.enabled'))}
+              aria-label="Toggle extended thinking"
+            >
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-label">{getVal('agent.thinking.enabled') ? 'Enabled' : 'Disabled'}</span>
+            </button>
+            {#if feedback['agent.thinking.enabled']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.thinking.enabled'].ok} class:err={!feedback['agent.thinking.enabled'].ok}>
+                {feedback['agent.thinking.enabled'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+        {#if getVal('agent.thinking.enabled')}
+          <div class="field-row sub-field">
+            <div class="field-info">
+              <label class="field-label" for="thinking-budgetTokens">Budget Tokens</label>
+              <span class="field-hint">Token budget for thinking (min 1024)</span>
+            </div>
+            <div class="field-control">
+              <div class="input-action">
+                <input
+                  id="thinking-budgetTokens"
+                  class="input input-narrow"
+                  type="number"
+                  min="1024"
+                  value={getVal('agent.thinking.budgetTokens') ?? 10000}
+                  onblur={(e) => saveNumberField('agent.thinking.budgetTokens', e)}
+                  onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                />
+                {#if saving['agent.thinking.budgetTokens']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+              </div>
+              {#if feedback['agent.thinking.budgetTokens']?.msg}
+                <span class="field-feedback" class:ok={feedback['agent.thinking.budgetTokens'].ok} class:err={!feedback['agent.thinking.budgetTokens'].ok}>
+                  {feedback['agent.thinking.budgetTokens'].msg}
+                </span>
+              {/if}
+            </div>
+          </div>
+          <div class="field-row sub-field">
+            <div class="field-info">
+              <label class="field-label">Show in Web Chat</label>
+              <span class="field-hint">Display thinking in the web UI</span>
+            </div>
+            <div class="field-control">
+              <button
+                class="toggle-btn"
+                class:active={!!getVal('agent.thinking.showThinking.web')}
+                disabled={!!saving['agent.thinking.showThinking.web']}
+                onclick={() => saveToggle('agent.thinking.showThinking.web', !!getVal('agent.thinking.showThinking.web'))}
+                aria-label="Toggle web thinking visibility"
+              >
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">{getVal('agent.thinking.showThinking.web') ? 'On' : 'Off'}</span>
+              </button>
+              {#if feedback['agent.thinking.showThinking.web']?.msg}
+                <span class="field-feedback" class:ok={feedback['agent.thinking.showThinking.web'].ok} class:err={!feedback['agent.thinking.showThinking.web'].ok}>
+                  {feedback['agent.thinking.showThinking.web'].msg}
+                </span>
+              {/if}
+            </div>
+          </div>
+          <div class="field-row sub-field">
+            <div class="field-info">
+              <label class="field-label">Show in Telegram</label>
+              <span class="field-hint">Send thinking as a separate message in Telegram</span>
+            </div>
+            <div class="field-control">
+              <button
+                class="toggle-btn"
+                class:active={!!getVal('agent.thinking.showThinking.telegram')}
+                disabled={!!saving['agent.thinking.showThinking.telegram']}
+                onclick={() => saveToggle('agent.thinking.showThinking.telegram', !!getVal('agent.thinking.showThinking.telegram'))}
+                aria-label="Toggle Telegram thinking visibility"
+              >
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">{getVal('agent.thinking.showThinking.telegram') ? 'On' : 'Off'}</span>
+              </button>
+              {#if feedback['agent.thinking.showThinking.telegram']?.msg}
+                <span class="field-feedback" class:ok={feedback['agent.thinking.showThinking.telegram'].ok} class:err={!feedback['agent.thinking.showThinking.telegram'].ok}>
+                  {feedback['agent.thinking.showThinking.telegram'].msg}
+                </span>
+              {/if}
+            </div>
+          </div>
+          <div class="field-row sub-field">
+            <div class="field-info">
+              <label class="field-label">Show in WhatsApp</label>
+              <span class="field-hint">Send thinking as a separate message in WhatsApp</span>
+            </div>
+            <div class="field-control">
+              <button
+                class="toggle-btn"
+                class:active={!!getVal('agent.thinking.showThinking.whatsapp')}
+                disabled={!!saving['agent.thinking.showThinking.whatsapp']}
+                onclick={() => saveToggle('agent.thinking.showThinking.whatsapp', !!getVal('agent.thinking.showThinking.whatsapp'))}
+                aria-label="Toggle WhatsApp thinking visibility"
+              >
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-label">{getVal('agent.thinking.showThinking.whatsapp') ? 'On' : 'Off'}</span>
+              </button>
+              {#if feedback['agent.thinking.showThinking.whatsapp']?.msg}
+                <span class="field-feedback" class:ok={feedback['agent.thinking.showThinking.whatsapp'].ok} class:err={!feedback['agent.thinking.showThinking.whatsapp'].ok}>
+                  {feedback['agent.thinking.showThinking.whatsapp'].msg}
+                </span>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+
     <!-- Session Settings -->
     <div class="section">
       <h2 class="section-title">

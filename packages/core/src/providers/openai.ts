@@ -118,10 +118,18 @@ export class OpenAIProvider implements ProviderInterface {
       const toolCalls: ToolCall[] = [];
       let inputTokens = 0;
       let outputTokens = 0;
+      let thinkingText = '';
 
       for await (const chunk of stream) {
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
+
+        // Handle reasoning_content from Ollama thinking models (qwen3, deepseek-r1)
+        const reasoningContent = (delta as any).reasoning_content as string | undefined;
+        if (reasoningContent) {
+          thinkingText += reasoningContent;
+          if (args.onThinkingDelta) args.onThinkingDelta(reasoningContent);
+        }
 
         if (delta.content) {
           text += delta.content;
@@ -154,6 +162,7 @@ export class OpenAIProvider implements ProviderInterface {
         text: text || null,
         toolCalls: toolCalls.length > 0 ? toolCalls : null,
         usage: { inputTokens, outputTokens },
+        thinkingText: thinkingText || null,
       };
     } catch (e: unknown) {
       clearTimeout(timeoutId);

@@ -55,6 +55,8 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     const allowedPaths = [
       'model.primary', 'model.fallback',
       'agent.name', 'agent.maxToolRounds', 'agent.compactionThreshold', 'agent.keepRecentMessages',
+      'agent.thinking.enabled', 'agent.thinking.mode', 'agent.thinking.budgetTokens',
+      'agent.thinking.showThinking.web', 'agent.thinking.showThinking.telegram', 'agent.thinking.showThinking.whatsapp',
       'session.resetHour', 'session.idleMinutes',
       'channels.telegram.enabled', 'channels.telegram.allowFrom', 'channels.telegram.groupsEnabled', 'channels.telegram.groupRequireMention',
       'channels.whatsapp.enabled', 'channels.whatsapp.allowFrom', 'channels.whatsapp.groupAllowFrom', 'channels.whatsapp.groupsEnabled', 'channels.whatsapp.groupRequireMention', 'channels.whatsapp.sendReadReceipts',
