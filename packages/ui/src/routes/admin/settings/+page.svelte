@@ -1037,7 +1037,7 @@
   }
   .field-row.sub-field {
     padding-left: 40px;
-    background: rgba(0, 0, 0, 0.15);
+    background: var(--bg-raised);
   }
   .field-info {
     flex: 1;

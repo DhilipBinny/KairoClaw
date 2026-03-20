@@ -160,7 +160,7 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 7px 12px;
+    padding: 9px 12px;
     border: none;
     background: none;
     cursor: pointer;

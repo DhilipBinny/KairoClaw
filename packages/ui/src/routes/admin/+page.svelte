@@ -224,7 +224,7 @@
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   }
   .stat-card {
-    padding: 20px;
+    padding: 18px 22px;
     display: flex;
     gap: 16px;
     align-items: flex-start;
