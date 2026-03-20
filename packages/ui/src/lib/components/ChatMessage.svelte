@@ -296,7 +296,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--bg-wash);
     transition: color var(--duration) var(--ease);
   }
   .thinking-summary:hover {
