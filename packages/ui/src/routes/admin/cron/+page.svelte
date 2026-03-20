@@ -21,6 +21,10 @@
   let creating = $state(false);
   let showCreateForm = $state(false);
 
+  // Delete confirmation state (two-click pattern)
+  let confirmDeleteId = $state<string | null>(null);
+  let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Edit state
   let editingJobId = $state<string | null>(null);
   let editName = $state('');
@@ -186,8 +190,19 @@
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Delete this cron job?')) return;
+  function requestDelete(id: string) {
+    if (confirmDeleteId === id) {
+      performDelete(id);
+      return;
+    }
+    confirmDeleteId = id;
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
+    confirmDeleteTimer = setTimeout(() => { confirmDeleteId = null; }, 3000);
+  }
+
+  async function performDelete(id: string) {
+    confirmDeleteId = null;
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer);
     actionInProgress = `delete-${id}`;
     error = '';
     try {
@@ -263,7 +278,7 @@
         <h1 class="page-title">Cron Jobs</h1>
         <p class="page-desc">Schedule recurring or one-shot AI agent tasks.</p>
       </div>
-      <button class="btn btn-primary" onclick={() => showCreateForm = !showCreateForm}>
+      <button class="btn btn-primary" aria-label={showCreateForm ? 'Cancel creating new job' : 'Create new cron job'} onclick={() => showCreateForm = !showCreateForm}>
         {showCreateForm ? 'Cancel' : '+ New Job'}
       </button>
     </div>
@@ -337,10 +352,10 @@
                   {:else}
                     <span class="text-muted" style="font-size: 12px;">Broadcasts to web UI</span>
                   {/if}
-                  <button class="btn btn-xs btn-danger" type="button" onclick={() => { formTargets = formTargets.filter((_, j) => j !== i); }}>×</button>
+                  <button class="btn btn-xs btn-danger" type="button" aria-label="Remove delivery target" onclick={() => { formTargets = formTargets.filter((_, j) => j !== i); }}>×</button>
                 </div>
               {/each}
-              <button class="btn btn-xs" type="button" onclick={() => { formTargets = [...formTargets, { channel: 'telegram', to: '' }]; }}>+ Add target</button>
+              <button class="btn btn-xs" type="button" aria-label="Add delivery target" onclick={() => { formTargets = [...formTargets, { channel: 'telegram', to: '' }]; }}>+ Add target</button>
             </div>
           </div>
 
@@ -352,10 +367,10 @@
           </div>
 
           <div class="form-row form-actions">
-            <button class="btn btn-primary" onclick={handleCreate} disabled={creating}>
+            <button class="btn btn-primary" aria-label="Create cron job" onclick={handleCreate} disabled={creating}>
               {creating ? 'Creating...' : 'Create Job'}
             </button>
-            <button class="btn" onclick={() => showCreateForm = false}>Cancel</button>
+            <button class="btn" aria-label="Cancel creating job" onclick={() => showCreateForm = false}>Cancel</button>
           </div>
         </div>
       </div>
@@ -430,10 +445,10 @@
                           {:else}
                             <span class="text-muted" style="font-size: 12px;">Broadcasts to web UI</span>
                           {/if}
-                          <button class="btn btn-xs btn-danger" type="button" onclick={() => { editTargets = editTargets.filter((_, j) => j !== i); }}>×</button>
+                          <button class="btn btn-xs btn-danger" type="button" aria-label="Remove delivery target" onclick={() => { editTargets = editTargets.filter((_, j) => j !== i); }}>×</button>
                         </div>
                       {/each}
-                      <button class="btn btn-xs" type="button" onclick={() => { editTargets = [...editTargets, { channel: 'telegram', to: '' }]; }}>+ Add target</button>
+                      <button class="btn btn-xs" type="button" aria-label="Add delivery target" onclick={() => { editTargets = [...editTargets, { channel: 'telegram', to: '' }]; }}>+ Add target</button>
                     </div>
                   </div>
                   <div class="form-row">
@@ -443,10 +458,10 @@
                     </label>
                   </div>
                   <div class="job-actions">
-                    <button class="btn btn-sm btn-primary" onclick={handleSaveEdit} disabled={saving}>
+                    <button class="btn btn-sm btn-primary" aria-label="Save job changes" onclick={handleSaveEdit} disabled={saving}>
                       {saving ? 'Saving...' : 'Save Changes'}
                     </button>
-                    <button class="btn btn-sm" onclick={cancelEdit}>Cancel</button>
+                    <button class="btn btn-sm" aria-label="Cancel editing job" onclick={cancelEdit}>Cancel</button>
                   </div>
                 </div>
               {:else}
@@ -491,11 +506,12 @@
                 {/if}
 
                 <div class="job-actions">
-                  <button class="btn btn-sm" onclick={() => startEdit(job)}>
+                  <button class="btn btn-sm" aria-label="Edit cron job" onclick={() => startEdit(job)}>
                     Edit
                   </button>
                   <button
                     class="btn btn-sm btn-primary"
+                    aria-label="Run cron job now"
                     onclick={() => handleRun(job.id)}
                     disabled={actionInProgress === `run-${job.id}`}
                   >
@@ -503,10 +519,11 @@
                   </button>
                   <button
                     class="btn btn-sm btn-danger"
-                    onclick={() => handleDelete(job.id)}
+                    aria-label={confirmDeleteId === job.id ? 'Confirm delete cron job' : 'Delete cron job'}
+                    onclick={() => requestDelete(job.id)}
                     disabled={actionInProgress === `delete-${job.id}`}
                   >
-                    {actionInProgress === `delete-${job.id}` ? '...' : 'Delete'}
+                    {actionInProgress === `delete-${job.id}` ? '...' : confirmDeleteId === job.id ? 'Confirm?' : 'Delete'}
                   </button>
                 </div>
               {/if}
