@@ -102,8 +102,13 @@ export function connect(): Promise<void> {
 }
 
 function scheduleReconnect(): void {
-  if (reconnectTimer) return;
   if (!getToken()) return; // Don't reconnect if not logged in
+
+  // Clear any existing timer to prevent accumulation
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;

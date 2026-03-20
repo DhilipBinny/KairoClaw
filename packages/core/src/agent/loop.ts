@@ -241,7 +241,7 @@ export async function runAgent(
     reqLog.info({
       round, inputTokens: inTok, outputTokens: outTok,
       toolCalls: toolCount, latencyMs: llmLatencyMs,
-      stopReason: (response as any).stopReason || (toolCount > 0 ? 'tool_use' : 'end_turn'),
+      stopReason: ('stopReason' in response ? (response as Record<string, unknown>).stopReason : undefined) || (toolCount > 0 ? 'tool_use' : 'end_turn'),
     }, 'LLM call completed');
 
     // Record per-round usage with cost estimate
@@ -422,7 +422,8 @@ export async function runAgent(
       minTurns: 5,
     }).catch((e) => {
       const msg = e instanceof Error ? e.message : String(e);
-      reqLog.error({ err: msg, category: 'memory' }, 'Auto-memory summarization failed');
+      const stack = e instanceof Error ? e.stack : undefined;
+      reqLog.error({ err: msg, stack, sessionId: session.id, channel: inbound.channel, category: 'memory' }, 'Auto-memory summarization failed');
     });
   }
 
