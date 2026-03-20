@@ -1,0 +1,17 @@
+services:
+  agw:
+    build: .
+    container_name: agw
+    ports:
+      - "${AGW_PORT:-18181}:18181"
+    volumes:
+      - ./agw-data:/data
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # App reads agw-data/.env automatically (mapped as /data/.env)

@@ -1,0 +1,353 @@
+/**
+ * API client — fetch wrapper for all REST calls.
+ * Automatically attaches the API key from localStorage.
+ */
+
+const API_BASE = '/api/v1';
+
+function getApiKey(): string | null {
+  return localStorage.getItem('agw_api_key');
+}
+
+export function setApiKey(key: string): void {
+  localStorage.setItem('agw_api_key', key);
+}
+
+export function clearApiKey(): void {
+  localStorage.removeItem('agw_api_key');
+}
+
+export function hasApiKey(): boolean {
+  return !!localStorage.getItem('agw_api_key');
+}
+
+interface FetchOptions {
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function request<T = unknown>(path: string, opts: FetchOptions = {}): Promise<T> {
+  const apiKey = getApiKey();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...opts.headers,
+  };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: opts.method || 'GET',
+    headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const data = await res.json();
+      msg = data.error || data.message || msg;
+    } catch {
+      // ignore parse error
+    }
+    throw new ApiError(msg, res.status);
+  }
+
+  try {
+    return await res.json() as T;
+  } catch {
+    throw new ApiError('Invalid JSON response from server', res.status);
+  }
+}
+
+// ── Auth ──────────────────────────────────
+export async function login(apiKey: string): Promise<{ user: { id: string; name: string; role: string; email: string }; tenantId: string }> {
+  const result = await request<{ user: { id: string; name: string; role: string; email: string }; tenantId: string }>('/auth/login', {
+    method: 'POST',
+    body: { apiKey },
+  });
+  setApiKey(apiKey);
+  return result;
+}
+
+export async function getMe(): Promise<{ user: { id: string; name: string; role: string } }> {
+  return request('/auth/me');
+}
+
+// ── Health ────────────────────────────────
+export async function getHealth(): Promise<{ status: string; version: string; uptime: number; model: string }> {
+  return request('/health');
+}
+
+// ── Sessions ──────────────────────────────
+export async function getSessions(limit = 50): Promise<{ sessions: Array<{ id: string; channel: string; turns: number; input_tokens: number; output_tokens: number; created_at: string; updated_at: string }> }> {
+  return request(`/sessions?limit=${limit}`);
+}
+
+export async function getSession(id: string): Promise<{ session: Record<string, unknown>; messages: Array<{ role: string; content: string; created_at: string }> }> {
+  return request(`/sessions/${id}`);
+}
+
+export async function deleteSession(id: string): Promise<{ success: boolean }> {
+  return request(`/sessions/${id}`, { method: 'DELETE' });
+}
+
+export async function renameSession(id: string, title: string): Promise<{ success: boolean }> {
+  return request(`/sessions/${id}`, { method: 'PATCH', body: { title } });
+}
+
+export async function deleteMessage(sessionId: string, messageId: string): Promise<{ success: boolean }> {
+  return request(`/sessions/${sessionId}/messages/${messageId}`, { method: 'DELETE' });
+}
+
+// ── Admin: Config ─────────────────────────
+export async function getConfig(): Promise<{ config: Record<string, unknown> }> {
+  return request('/admin/config');
+}
+
+export async function updateConfig(configPath: string, value: unknown): Promise<{ success: boolean }> {
+  return request('/admin/config', { method: 'PATCH', body: { path: configPath, value } });
+}
+
+// ── Admin: System ─────────────────────────
+export async function getSystemInfo(): Promise<Record<string, unknown>> {
+  return request('/admin/system');
+}
+
+export async function runDoctor(): Promise<{ overall: string; checks: Array<{ name: string; status: string; message: string }>; timestamp: string }> {
+  return request('/admin/doctor');
+}
+
+// ── Admin: Model ──────────────────────────
+export interface ModelCapabilitiesInfo {
+  contextWindow: number;
+  maxOutputTokens: number;
+  supportsVision: boolean;
+  supportsToolCalling: boolean;
+  supportsStreaming: boolean;
+  costPer1M: { input: number; output: number } | null;
+  timeoutMs: number;
+}
+
+export interface ModelInfo {
+  id: string;
+  provider: string;
+  modelId: string;
+  capabilities: ModelCapabilitiesInfo;
+}
+
+export async function getModelInfo(): Promise<{ primary: ModelInfo; fallback: ModelInfo | null }> {
+  return request('/admin/model');
+}
+
+// ── Admin: Providers ──────────────────────
+export async function testProvider(data: { provider: string; apiKey?: string; authToken?: string; baseUrl?: string; useExisting?: boolean }): Promise<{ success: boolean; models?: Array<{ id: string; name: string }>; error?: string; authType?: string }> {
+  return request('/admin/providers/test', { method: 'POST', body: data });
+}
+
+export async function saveProviderCredentials(
+  providerId: string,
+  credentials: { apiKey?: string; authToken?: string; baseUrl?: string },
+): Promise<{ success: boolean }> {
+  return request(`/admin/providers/${providerId}/credentials`, { method: 'PATCH', body: credentials });
+}
+
+export async function saveModelCapabilities(
+  modelId: string,
+  capabilities: Record<string, unknown>,
+): Promise<{ success: boolean }> {
+  return request('/admin/models/capabilities', { method: 'PATCH', body: { modelId, capabilities } });
+}
+
+export async function saveChannelCredentials(
+  channelId: string,
+  credentials: { botToken?: string },
+): Promise<{ success: boolean }> {
+  return request(`/admin/channels/${channelId}/credentials`, { method: 'PATCH', body: credentials });
+}
+
+// ── Admin: Usage ──────────────────────────
+export async function getUsage(days = 30): Promise<Record<string, unknown>> {
+  return request(`/admin/usage?days=${days}`);
+}
+
+// ── Admin: Logs ───────────────────────────
+export interface LogEntry { level: string; msg: string; time: number; [key: string]: unknown; }
+export interface LogFile { date: string; file: string; sizeBytes: number; }
+
+export async function getLogs(lines = 200): Promise<{ entries: LogEntry[]; buffered: number }> {
+  return request(`/admin/logs?lines=${lines}`);
+}
+
+export async function getLogFiles(): Promise<{ files: LogFile[] }> {
+  return request('/admin/logs/files');
+}
+
+export async function searchLogs(opts: { q?: string; level?: string; from?: string; to?: string; limit?: number }): Promise<{ entries: LogEntry[]; count: number }> {
+  const params = new URLSearchParams();
+  if (opts.q) params.set('q', opts.q);
+  if (opts.level) params.set('level', opts.level);
+  if (opts.from) params.set('from', opts.from);
+  if (opts.to) params.set('to', opts.to);
+  if (opts.limit) params.set('limit', String(opts.limit));
+  return request(`/admin/logs/search?${params.toString()}`);
+}
+
+export function getLogDownloadUrl(date: string): string {
+  const token = localStorage.getItem('agw_api_key') || '';
+  return `${API_BASE}/admin/logs/download/${date}?token=${encodeURIComponent(token)}`;
+}
+
+export async function setLogLevel(level: string): Promise<{ success: boolean; level: string }> {
+  return request('/admin/log-level', { method: 'PUT', body: { level } });
+}
+
+// ── Admin: MCP ────────────────────────────
+export async function getMCPServers(): Promise<{ servers: Array<{ id: string; status: string; tools: string[] }> }> {
+  return request('/mcp/servers');
+}
+
+export async function installMCPServer(data: { id: string; transport?: string; command?: string; args?: string[]; url?: string; env?: Record<string, string> }): Promise<{ success: boolean; status: unknown }> {
+  return request('/mcp/servers', { method: 'POST', body: data });
+}
+
+export async function removeMCPServer(id: string): Promise<{ success: boolean }> {
+  const apiKey = getApiKey();
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const res = await fetch(`${API_BASE}/mcp/servers/${id}`, { method: 'DELETE', headers });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const data = await res.json(); msg = data.error || msg; } catch {}
+    throw new ApiError(msg, res.status);
+  }
+  return res.json();
+}
+
+export async function reconnectMCPServer(id: string): Promise<{ success: boolean }> {
+  return request(`/mcp/servers/${id}/reconnect`, { method: 'POST', body: {} });
+}
+
+export async function disableMCPServer(id: string): Promise<{ success: boolean }> {
+  return request(`/mcp/servers/${id}/disable`, { method: 'POST', body: {} });
+}
+
+export async function enableMCPServer(id: string): Promise<{ success: boolean }> {
+  return request(`/mcp/servers/${id}/enable`, { method: 'POST', body: {} });
+}
+
+export async function updateMCPServer(id: string, data: { env?: Record<string, string> }): Promise<{ success: boolean }> {
+  return request(`/mcp/servers/${id}`, { method: 'PATCH', body: data });
+}
+
+export async function getMCPCatalog(): Promise<{ catalog: Array<{ id: string; name: string; description: string; transport: string; installed: boolean; enabled: boolean }> }> {
+  return request('/mcp/catalog');
+}
+
+export async function searchMCPMarketplace(search: string, limit = 20): Promise<{ servers: Array<{ id: string; name: string; description: string; qualifiedName: string }> }> {
+  return request(`/mcp/marketplace?search=${encodeURIComponent(search)}&limit=${limit}`);
+}
+
+// ── Admin: Cron ───────────────────────────
+export interface CronJobSchedule {
+  type: 'at' | 'every' | 'cron';
+  value: string | number;
+  tz?: string;
+}
+
+export interface CronJobDelivery {
+  mode: 'none' | 'announce' | 'always';
+  /** Per-channel delivery targets (new format). */
+  targets?: Array<{ channel: string; to?: string }>;
+  /** Legacy: single channel or array. */
+  channel?: string | string[];
+  /** Legacy: single target ID. */
+  to?: string;
+}
+
+export interface CronJob {
+  id: string;
+  name: string;
+  schedule: CronJobSchedule;
+  prompt: string;
+  delivery: CronJobDelivery | string;
+  enabled: boolean;
+  createdAt: string;
+  lastRun: string | null;
+  lastResult: string | null;
+  lastError: string | null;
+  lastDelivered: boolean | null;
+  lastDeliveryChannel: string | null;
+  runCount: number;
+}
+
+export interface CreateCronJob {
+  name?: string;
+  schedule: { type: string; value: string | number; tz?: string };
+  prompt: string;
+  delivery?: CronJobDelivery | string;
+  enabled?: boolean;
+}
+
+export async function getCronJobs(): Promise<{ jobs: CronJob[] }> {
+  return request('/admin/cron');
+}
+
+export async function createCronJob(job: CreateCronJob): Promise<{ success: boolean }> {
+  return request('/admin/cron', { method: 'POST', body: job });
+}
+
+export async function updateCronJob(id: string, updates: Partial<CreateCronJob>): Promise<{ success: boolean; job: CronJob }> {
+  return request(`/admin/cron/${id}`, { method: 'PATCH', body: updates });
+}
+
+export async function deleteCronJob(id: string): Promise<{ success: boolean }> {
+  return request(`/admin/cron/${id}`, { method: 'DELETE' });
+}
+
+export async function runCronJob(id: string): Promise<{ success: boolean; lastResult?: string }> {
+  return request(`/admin/cron/${id}/run`, { method: 'POST', body: {} });
+}
+
+// ── Admin: Channels (unified) ────────────
+export async function getChannelsStatus(): Promise<{
+  telegram: { enabled: boolean; connected: boolean; botUsername: string | null };
+  whatsapp: { enabled: boolean; status: string; phone: string | null; name: string | null };
+}> {
+  return request('/admin/channels/status');
+}
+
+// ── Admin: WhatsApp ──────────────────────
+export async function getWhatsAppStatus(): Promise<{ status: string; phone: string | null; name: string | null }> {
+  return request('/admin/whatsapp/status');
+}
+
+export async function getWhatsAppQR(): Promise<{ qr: string | null; qrDataUrl: string | null; status: string }> {
+  return request('/admin/whatsapp/qr');
+}
+
+export async function unpairWhatsApp(): Promise<{ success: boolean }> {
+  return request('/admin/whatsapp/unpair', { method: 'POST', body: {} });
+}
+
+// ── Admin: Workspace ──────────────────────
+export async function getWorkspaceFiles(): Promise<{ files: Array<{ name: string; exists: boolean; size: number; modified: string | null }> }> {
+  return request('/workspace/files');
+}
+
+export async function getWorkspaceFile(name: string): Promise<{ name: string; content: string; exists: boolean }> {
+  return request(`/workspace/files/${name}`);
+}
+
+export async function saveWorkspaceFile(name: string, content: string): Promise<{ success: boolean }> {
+  return request(`/workspace/files/${name}`, { method: 'PUT', body: { content } });
+}

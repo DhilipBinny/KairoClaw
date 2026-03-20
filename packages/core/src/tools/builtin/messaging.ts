@@ -1,0 +1,283 @@
+import type { ToolRegistration } from '../types.js';
+
+export const messagingTools: ToolRegistration[] = [
+  {
+    definition: {
+      name: 'send_message',
+      description: 'Proactively send a message to a channel (web, telegram, or whatsapp). Use this to alert or notify the user.',
+      parameters: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string', description: 'Channel to send to: "web", "telegram", or "whatsapp"' },
+          text: { type: 'string', description: 'Message text to send' },
+          chatId: { type: 'string', description: 'For telegram: chat ID. For whatsapp: JID (e.g. "1234567890@s.whatsapp.net"). Required for whatsapp.' },
+        },
+        required: ['text', 'channel'],
+      },
+    },
+    executor: async (args, context) => {
+      const text = args.text as string;
+      if (!text) return { error: 'text is required' };
+      const channel = (args.channel as string) || 'web';
+      const ctx = context as Record<string, unknown>;
+
+      if (channel === 'web') {
+        // Use the broadcast function injected via context
+        const broadcast = ctx.broadcastToWeb as ((msg: Record<string, unknown>) => void) | undefined;
+        if (broadcast) {
+          broadcast({
+            type: 'chat.proactive',
+            text,
+            ts: new Date().toISOString(),
+          });
+          return { success: true, channel: 'web', delivered: true };
+        }
+        return { error: 'WebChat broadcast not available' };
+      }
+
+      if (channel === 'telegram') {
+        const telegramSend = ctx.telegramSend as ((text: string, chatId?: string) => Promise<void>) | undefined;
+        if (telegramSend) {
+          try {
+            await telegramSend(text, args.chatId as string | undefined);
+            return { success: true, channel: 'telegram', delivered: true };
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            return { error: `Telegram send failed: ${message}` };
+          }
+        }
+        return { error: 'Telegram not available' };
+      }
+
+      if (channel === 'whatsapp') {
+        const whatsappSend = ctx.whatsappSend as ((text: string, jid?: string) => Promise<void>) | undefined;
+        if (whatsappSend) {
+          try {
+            await whatsappSend(text, args.chatId as string | undefined);
+            return { success: true, channel: 'whatsapp', delivered: true };
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            return { error: `WhatsApp send failed: ${message}` };
+          }
+        }
+        return { error: 'WhatsApp not available' };
+      }
+
+      return { error: `Unknown channel: ${channel}` };
+    },
+    source: 'builtin',
+    category: 'write',
+  },
+  {
+    definition: {
+      name: 'session_status',
+      description: 'Show current session status including usage stats, model, and uptime.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+    executor: async (_args, context) => {
+      const session = context.session || {} as Record<string, unknown>;
+      const ctx = context as Record<string, unknown>;
+      return {
+        sessionKey: session.key || 'unknown',
+        sessionId: session.sessionId || 'unknown',
+        model: (ctx.primaryModel as string) || 'unknown',
+        inputTokens: session.inputTokens || 0,
+        outputTokens: session.outputTokens || 0,
+        turns: session.turns || 0,
+        uptime: process.uptime().toFixed(0) + 's',
+        time: new Date().toISOString(),
+      };
+    },
+    source: 'builtin',
+    category: 'read',
+  },
+  {
+    definition: {
+      name: 'manage_cron',
+      description: `Manage scheduled cron jobs. Create, list, update, or delete recurring tasks.
+Jobs run on a cron schedule. When delivery.mode is "announce", the AI generates text and the system delivers it to the configured channels automatically.
+
+Schedule examples:
+- Daily at 9 AM SGT: schedule.type="cron", schedule.value="0 9 * * *", schedule.tz="Asia/Singapore"
+- Every 3 hours daytime: schedule.value="0 7,10,13,16,19,22 * * *"
+- One-shot: schedule.type="at", schedule.value="<ISO timestamp>"
+- Every 5 min: schedule.type="every", schedule.value=300000
+
+Delivery: use delivery.targets array for per-channel routing. Each target needs a channel and a "to" address.
+- Telegram: { channel: "telegram", to: "<chat_id like -1001234567890>" }
+- WhatsApp: { channel: "whatsapp", to: "<phone>@s.whatsapp.net" }
+- Web: { channel: "web" } (no "to" needed)
+- Multi-channel: include multiple targets in the array.
+
+IMPORTANT: When the user asks to deliver to the current chat, auto-fill "to" from the current session context. For WhatsApp, the JID format is "<phone>@s.whatsapp.net". For Telegram, use the numeric chat ID. Every "announce" delivery MUST have targets with explicit "to" addresses — there is no fallback.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'run'], description: 'Action to perform' },
+          id: { type: 'string', description: 'Job ID (for update/remove/run)' },
+          name: { type: 'string', description: 'Human-readable job name' },
+          schedule: {
+            type: 'object',
+            description: 'Schedule config',
+            properties: {
+              type: { type: 'string', enum: ['cron', 'at', 'every'] },
+              value: { type: 'string', description: 'Cron expression, ISO timestamp, or interval in ms' },
+              tz: { type: 'string', description: 'IANA timezone (e.g., "Asia/Singapore"). Default: UTC' },
+            },
+          },
+          prompt: { type: 'string', description: 'The prompt the AI will process when the job fires. Write it as a generation instruction — the system handles delivery.' },
+          delivery: {
+            type: 'object',
+            description: 'Delivery config: { mode: "announce"|"none", targets: [{ channel, to }] }',
+            properties: {
+              mode: { type: 'string', enum: ['announce', 'none'] },
+              targets: {
+                type: 'array',
+                description: 'Per-channel delivery targets',
+                items: {
+                  type: 'object',
+                  properties: {
+                    channel: { type: 'string', enum: ['telegram', 'whatsapp', 'web'] },
+                    to: { type: 'string', description: 'Telegram chat ID or WhatsApp JID (phone@s.whatsapp.net)' },
+                  },
+                },
+              },
+            },
+          },
+          enabled: { type: 'boolean', description: 'Enable or disable the job' },
+        },
+        required: ['action'],
+      },
+    },
+    executor: async (args, context) => {
+      const action = args.action as string;
+      if (!action) return { error: 'action is required' };
+
+      // Cron scheduler is injected via context
+      const ctx = context as Record<string, unknown>;
+      const cronScheduler = ctx.cronScheduler as {
+        list: () => Array<Record<string, unknown>>;
+        add: (job: Record<string, unknown>) => Record<string, unknown>;
+        update: (id: string, updates: Record<string, unknown>) => Record<string, unknown> | null;
+        remove: (id: string) => boolean;
+        run: (id: string) => Promise<Record<string, unknown>>;
+      } | undefined;
+
+      if (!cronScheduler) {
+        return { error: 'Cron scheduler not available' };
+      }
+
+      switch (action) {
+        case 'list': {
+          const jobs = cronScheduler.list();
+          return {
+            count: jobs.length,
+            jobs: jobs.map(j => ({
+              id: j.id,
+              name: j.name,
+              schedule: j.schedule,
+              prompt: ((j.prompt as string) || '').slice(0, 100) + ((j.prompt as string)?.length > 100 ? '...' : ''),
+              delivery: j.delivery,
+              enabled: j.enabled,
+              lastRun: j.lastRun,
+              lastResult: j.lastResult ? (j.lastResult as string).slice(0, 100) : null,
+              runCount: j.runCount,
+            })),
+          };
+        }
+        case 'add': {
+          if (!args.schedule) return { error: 'schedule is required for add' };
+          if (!args.prompt || !(args.prompt as string).trim()) return { error: 'prompt is required for add' };
+
+          // Auto-fill and validate delivery targets from conversation context
+          let delivery = args.delivery as Record<string, unknown> | string | undefined;
+          const session = (ctx.session as Record<string, unknown>) || {};
+          const sessionChannel = session.channel as string || '';
+          const sessionChatId = session.chat_id as string || '';
+
+          if (delivery && typeof delivery === 'object' && delivery.mode === 'announce') {
+            let targets = (delivery.targets || []) as Array<{ channel: string; to?: string }>;
+
+            // Migrate legacy channel/to to targets format
+            if (targets.length === 0 && delivery.channel) {
+              const chs = Array.isArray(delivery.channel) ? delivery.channel as string[] : [delivery.channel as string];
+              targets = chs.map(ch => ({ channel: ch, to: delivery!.to as string | undefined }));
+            }
+
+            // Auto-fill: if no targets at all, use current conversation channel
+            if (targets.length === 0 && sessionChannel && sessionChannel !== 'cron') {
+              targets = [{ channel: sessionChannel }];
+            }
+
+            // Auto-fill 'to' for each target that's missing it, using session context
+            for (const target of targets) {
+              if (!target.to && sessionChatId) {
+                if (target.channel === 'whatsapp' && sessionChannel === 'whatsapp') {
+                  target.to = sessionChatId.replace(/^whatsapp:/, '');
+                } else if (target.channel === 'telegram' && sessionChannel === 'telegram') {
+                  target.to = sessionChatId.replace(/^telegram:/, '');
+                }
+              }
+            }
+
+            // Validate: announce mode requires at least one target
+            if (targets.length === 0) {
+              return { error: 'delivery.mode is "announce" but no targets configured. Add targets: [{ channel: "whatsapp", to: "phone@s.whatsapp.net" }]' };
+            }
+            // Validate: telegram/whatsapp targets must have 'to'
+            for (const target of targets) {
+              if ((target.channel === 'whatsapp' || target.channel === 'telegram') && !target.to) {
+                return { error: `delivery target "${target.channel}" requires a "to" address. WhatsApp: "phone@s.whatsapp.net", Telegram: chat ID like "-1001234567890".` };
+              }
+            }
+
+            // Store in normalized targets format
+            delivery.targets = targets;
+            // Clean up legacy fields
+            delete delivery.channel;
+            delete delivery.to;
+          }
+
+          const job = cronScheduler.add({
+            name: args.name,
+            schedule: args.schedule,
+            prompt: args.prompt,
+            delivery: delivery || 'none',
+            enabled: args.enabled !== false,
+          });
+          return { success: true, job: { id: job.id, name: job.name, schedule: job.schedule, delivery: job.delivery } };
+        }
+        case 'update': {
+          if (!args.id) return { error: 'id is required for update' };
+          const updates: Record<string, unknown> = {};
+          if (args.name !== undefined) updates.name = args.name;
+          if (args.schedule !== undefined) updates.schedule = args.schedule;
+          if (args.prompt !== undefined) updates.prompt = args.prompt;
+          if (args.delivery !== undefined) updates.delivery = args.delivery;
+          if (args.enabled !== undefined) updates.enabled = args.enabled;
+          const updated = cronScheduler.update(args.id as string, updates);
+          if (!updated) return { error: `Job not found: ${args.id}` };
+          return { success: true, job: { id: updated.id, name: updated.name, schedule: updated.schedule, enabled: updated.enabled } };
+        }
+        case 'remove': {
+          if (!args.id) return { error: 'id is required for remove' };
+          const removed = cronScheduler.remove(args.id as string);
+          return removed ? { success: true } : { error: `Job not found: ${args.id}` };
+        }
+        case 'run': {
+          if (!args.id) return { error: 'id is required for run' };
+          const result = await cronScheduler.run(args.id as string);
+          return result;
+        }
+        default:
+          return { error: `Unknown action: ${action}. Use: list, add, update, remove, run` };
+      }
+    },
+    source: 'builtin',
+    category: 'execute',
+  },
+];

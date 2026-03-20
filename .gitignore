@@ -1,0 +1,49 @@
+# ══════════════════════════════════════════════
+# Kairo — .gitignore
+# ══════════════════════════════════════════════
+
+# ── Secrets (never commit) ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+.gh-token
+
+# ── Local reference (untracked, kept on disk) ──
+_local/
+
+# ── Runtime data (app-managed) ──
+agw-data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
+# ── Dependencies ──
+node_modules/
+bun.lock
+bun.lockb
+
+# ── Build artifacts ──
+dist/
+build/
+coverage/
+.tsbuildinfo
+
+# ── OS files ──
+.DS_Store
+Thumbs.db
+
+# ── Editor / IDE ──
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── Docker ──
+docker-compose.override.yml

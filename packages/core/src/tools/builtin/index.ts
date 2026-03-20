@@ -1,0 +1,21 @@
+import { fileTools } from './files.js';
+import { execTools } from './exec.js';
+import { webTools } from './web.js';
+import { memoryTools } from './memory.js';
+import { messagingTools } from './messaging.js';
+import type { ToolRegistration } from '../types.js';
+
+export const builtinTools: ToolRegistration[] = [
+  ...fileTools,
+  ...execTools,
+  ...webTools,
+  ...memoryTools,
+  ...messagingTools,
+];
+
+export { fileTools } from './files.js';
+export { execTools } from './exec.js';
+export { webTools } from './web.js';
+export { memoryTools, setMemorySystem } from './memory.js';
+export { messagingTools } from './messaging.js';
+export { safePath } from './files.js';

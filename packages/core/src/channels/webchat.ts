@@ -1,0 +1,422 @@
+/**
+ * WebChat channel — Fastify WebSocket plugin.
+ *
+ * Registers a `/ws` WebSocket route and handles the webchat protocol:
+ * auth, chat messages, session management, status, and cron CRUD.
+ *
+ * Compatible with the original webchat.js message format.
+ */
+
+import crypto from 'node:crypto';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { WebSocket } from '@fastify/websocket';
+import type { InboundMessage, GatewayConfig } from '@agw/types';
+import type { DatabaseAdapter } from '../db/index.js';
+import type { AgentRunner } from './types.js';
+import { AgentQueue } from '../queue/index.js';
+import { SessionRepository } from '../db/repositories/session.js';
+import { MessageRepository } from '../db/repositories/message.js';
+import { hashApiKey } from '../auth/keys.js';
+import { createModuleLogger } from '../observability/logger.js';
+import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+
+const log = createModuleLogger('channel.web');
+
+// ─── Connected client tracking ──────────────────────────────
+
+const clients = new Map<WebSocket, { sessionKey: string }>();
+const MAX_WS_CONNECTIONS = 50;
+
+/**
+ * Broadcast a message to authenticated webchat clients.
+ * If `sessionKey` is provided, only send to clients bound to that session.
+ */
+export function broadcastToWeb(message: Record<string, unknown>, sessionKey?: string): void {
+  const data = JSON.stringify(message);
+  for (const [ws, meta] of clients) {
+    try {
+      if (ws.readyState === 1) {
+        if (!sessionKey || meta.sessionKey === sessionKey) {
+          ws.send(data);
+        }
+      } else {
+        // Clean up dead connections
+        clients.delete(ws);
+      }
+    } catch {
+      clients.delete(ws);
+    }
+  }
+}
+
+// Periodic cleanup of dead WebSocket connections (every 60s)
+let _cleanupInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
+  for (const [ws] of clients) {
+    if (ws.readyState !== 1) {
+      clients.delete(ws);
+    }
+  }
+}, 60_000);
+
+/** Stop the periodic dead-connection cleanup. Call during server shutdown. */
+export function stopWebchatCleanup(): void {
+  if (_cleanupInterval) {
+    clearInterval(_cleanupInterval);
+    _cleanupInterval = null;
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────
+
+function safeTokenCompare(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  // Hash both values to fixed-length buffers — eliminates length-based timing leaks
+  const hashA = new Uint8Array(crypto.createHash('sha256').update(String(a)).digest());
+  const hashB = new Uint8Array(crypto.createHash('sha256').update(String(b)).digest());
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+// ─── Plugin ─────────────────────────────────────────────────
+
+export interface WebchatPluginOptions {
+  db: DatabaseAdapter;
+  config: GatewayConfig;
+  runner: AgentRunner;
+}
+
+/**
+ * Fastify plugin that registers the `/ws` WebSocket route for WebChat.
+ */
+export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (app, opts) => {
+  const { db, config, runner } = opts;
+  const queue = new AgentQueue();
+  const sessionRepo = new SessionRepository(db);
+  const messageRepo = new MessageRepository(db);
+
+  // Ensure @fastify/websocket is registered
+  await app.register(import('@fastify/websocket'));
+
+  app.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
+    if (clients.size >= MAX_WS_CONNECTIONS) {
+      log.warn('WebSocket connection rejected: max connections reached');
+      socket.close(1013, 'Too many connections');
+      return;
+    }
+
+    let authenticated = !config.gateway.token;
+    if (!config.gateway.token) {
+      log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
+    }
+    const clientId = `web-${Date.now()}`;
+    let authAttempts = 0;
+    let lastActivity = Date.now();
+    let boundSessionKey: string | null = null; // set on first chat.send, immutable after
+
+    // ── Keepalive + Idle timeout ─────────────────
+    const IDLE_TIMEOUT = 15 * 60_000; // 15 minutes
+    let isAlive = true;
+    socket.on('pong', () => {
+      isAlive = true;
+    });
+    const keepalive = setInterval(() => {
+      // Check idle timeout
+      if (Date.now() - lastActivity > IDLE_TIMEOUT) {
+        log.debug({ clientId }, 'WebSocket idle timeout — disconnecting');
+        clients.delete(socket);
+        socket.close(1000, 'Idle timeout');
+        return;
+      }
+      if (!isAlive) {
+        clients.delete(socket);
+        socket.terminate();
+        return;
+      }
+      isAlive = false;
+      try {
+        socket.ping();
+      } catch {
+        /* ignore */
+      }
+    }, 30_000);
+
+    // ── Utility: safe send ───────────────────────
+    function safeSend(data: Record<string, unknown>): void {
+      try {
+        if (socket.readyState === 1) {
+          socket.send(JSON.stringify(data));
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        log.debug({ err: msg }, 'WebSocket send error');
+      }
+    }
+
+    // ── Message handler ──────────────────────────
+    socket.on('message', async (raw: Buffer | string) => {
+      lastActivity = Date.now();
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString()) as Record<string, unknown>;
+      } catch {
+        safeSend({ type: 'error', message: 'Invalid JSON' });
+        return;
+      }
+
+      // Auth gate
+      if (!authenticated) {
+        if (msg.type === 'auth') {
+          authAttempts++;
+          if (authAttempts > 5) {
+            safeSend({ type: 'auth.error', message: 'Too many auth attempts' });
+            socket.close(1008, 'Too many auth attempts');
+            return;
+          }
+          const token = msg.token as string | undefined;
+          // Check against gateway token first
+          let authValid = safeTokenCompare(token, config.gateway.token);
+          // If gateway token didn't match, check against user API keys in the DB
+          if (!authValid && token) {
+            const keyHash = hashApiKey(token);
+            const user = db.get<{ id: string }>(
+              'SELECT id FROM users WHERE api_key_hash = ?',
+              [keyHash],
+            );
+            if (user) {
+              authValid = true;
+            }
+          }
+          if (authValid) {
+            authenticated = true;
+            clients.set(socket, { sessionKey: 'main' });
+            safeSend({ type: 'auth.ok' });
+            log.info({ clientId }, 'WebChat client authenticated');
+          } else {
+            safeSend({ type: 'auth.error', message: 'Invalid token' });
+          }
+          return;
+        }
+        safeSend({ type: 'error', message: 'Not authenticated. Send { type: "auth", token: "..." }' });
+        return;
+      }
+
+      const requestId = `ws-${Date.now().toString(36)}`;
+
+      try {
+        switch (msg.type) {
+          // ── Chat message ─────────────────────
+          case 'chat.send': {
+            const sessionKey = (msg.sessionKey as string) || 'main';
+            if (typeof sessionKey !== 'string' || sessionKey.length > 200) {
+              safeSend({ type: 'error', message: 'Invalid session key' });
+              return;
+            }
+
+            // Bind this connection to the first sessionKey it uses
+            if (!boundSessionKey) {
+              boundSessionKey = sessionKey;
+              clients.set(socket, { sessionKey });
+            } else if (boundSessionKey !== sessionKey) {
+              safeSend({ type: 'error', message: 'Session key mismatch — reconnect to switch sessions' });
+              return;
+            }
+            const rawText = typeof msg.text === 'string' ? msg.text.trim() : '';
+            if (!rawText) {
+              safeSend({ type: 'error', message: 'Empty message' });
+              return;
+            }
+            if (rawText.length > 100_000) {
+              safeSend({ type: 'error', message: 'Message too long (max 100KB)' });
+              return;
+            }
+
+            // Input sanitization & prompt injection detection
+            const text = sanitizeInput(rawText);
+            const injection = detectPromptInjection(text);
+            if (injection.suspicious) {
+              log.warn({ patterns: injection.patterns, requestId }, 'Prompt injection patterns detected (webchat)');
+            }
+
+            // Extract images if provided
+            const rawImages = Array.isArray(msg.images) ? msg.images as Array<{ data?: string; mimeType?: string; filename?: string }> : [];
+            const images = rawImages
+              .filter((img) => typeof img.data === 'string' && typeof img.mimeType === 'string')
+              .map((img) => ({ data: img.data!, mimeType: img.mimeType!, filename: img.filename }));
+
+            const inbound: InboundMessage = {
+              text,
+              channel: 'web',
+              chatId: `web:${sessionKey}`,
+              chatType: 'private',
+              userId: clientId,
+              senderName: 'User',
+              ...(images.length > 0 ? { images } : {}),
+            };
+
+            const runId = crypto.randomUUID().slice(0, 8);
+            safeSend({ type: 'chat.ack', runId, requestId });
+
+            // Broadcast typing to clients on the same session
+            broadcastToWeb({ type: 'chat.typing', sessionKey, requestId }, sessionKey);
+
+            try {
+              const result = await queue.enqueue(sessionKey, () =>
+                runner(inbound, {
+                  onDelta: (delta: string) => {
+                    safeSend({
+                      type: 'chat.delta',
+                      runId,
+                      sessionKey,
+                      text: delta,
+                      requestId,
+                    });
+                  },
+                  onToolStart: (name: string, args: Record<string, unknown>) => {
+                    safeSend({
+                      type: 'chat.tool',
+                      runId,
+                      sessionKey,
+                      status: 'start',
+                      name,
+                      args: Object.keys(args || {}),
+                      requestId,
+                    });
+                  },
+                  onToolEnd: (name: string, resultPreview: string) => {
+                    safeSend({
+                      type: 'chat.tool',
+                      runId,
+                      sessionKey,
+                      status: 'end',
+                      name,
+                      preview: (resultPreview || '').slice(0, 200),
+                      requestId,
+                    });
+                  },
+                }),
+              );
+
+              safeSend({
+                type: 'chat.done',
+                runId,
+                sessionKey,
+                text: result.text || '',
+                usage: result.usage,
+                requestId,
+              });
+            } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              log.error({ err: errMsg, runId, requestId }, 'WebChat agent error');
+              safeSend({
+                type: 'chat.error',
+                runId,
+                message: errMsg,
+                requestId,
+              });
+            }
+            break;
+          }
+
+          // ── Chat history ─────────────────────
+          case 'chat.history': {
+            const sessionKey = (msg.sessionKey as string) || 'main';
+            const sessionId = msg.sessionId as string | undefined;
+            // Look up session by ID first, then by chatId pattern
+            const allSessions = sessionRepo.listByTenant('default', 500);
+            let session = sessionId
+              ? allSessions.find((s) => s.id === sessionId)
+              : allSessions.find((s) => s.chat_id === `web:${sessionKey}`);
+            // Also try matching by session ID as sessionKey
+            if (!session) {
+              session = allSessions.find((s) => s.id === sessionKey);
+            }
+            if (!session) {
+              safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
+              break;
+            }
+            const limit = (msg.limit as number) || 50;
+            const rows = messageRepo.listBySession(session.id);
+            const messages = rows.slice(-limit).map((m) => ({
+              role: m.role,
+              content: m.content?.slice(0, 5000),
+            }));
+            safeSend({ type: 'chat.history.result', sessionKey, sessionId: session.id, messages, requestId });
+            break;
+          }
+
+          // ── Session list ─────────────────────
+          case 'sessions.list': {
+            const sessions = sessionRepo.listByTenant('default', 100);
+            // Filter to sessions with actual messages, sorted by most recent
+            const list = sessions
+              .filter((s) => s.turns > 0)
+              .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+              .map((s) => {
+                // Extract session key from chat_id (e.g., "web:main" → "main")
+                const chatKey = s.chat_id?.startsWith('web:') ? s.chat_id.slice(4) : s.chat_id || s.id;
+                return {
+                  id: s.id,
+                  sessionKey: chatKey,
+                  channel: s.channel,
+                  chatId: s.chat_id,
+                  turns: s.turns,
+                  inputTokens: s.input_tokens,
+                  outputTokens: s.output_tokens,
+                  createdAt: s.created_at,
+                  updatedAt: s.updated_at,
+                };
+              });
+            safeSend({ type: 'sessions.list.result', sessions: list, requestId });
+            break;
+          }
+
+          // ── Status ───────────────────────────
+          case 'status': {
+            safeSend({
+              type: 'status.result',
+              uptime: process.uptime(),
+              model: config.model.primary,
+              queue: queue.stats,
+              requestId,
+            });
+            break;
+          }
+
+          // ── Ping / pong ──────────────────────
+          case 'ping': {
+            safeSend({ type: 'pong', ts: Date.now(), requestId });
+            break;
+          }
+
+          default:
+            safeSend({ type: 'error', message: `Unknown type: ${msg.type as string}`, requestId });
+        }
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        log.error({ err: errMsg, type: msg.type, requestId }, 'WebChat message handler error');
+        safeSend({ type: 'error', message: 'Internal server error', requestId });
+      }
+    });
+
+    // ── Cleanup ──────────────────────────────────
+    socket.on('close', () => {
+      clearInterval(keepalive);
+      clients.delete(socket);
+      log.debug({ clientId }, 'WebChat client disconnected');
+    });
+
+    socket.on('error', (err: Error) => {
+      log.debug({ err: err.message, clientId }, 'WebSocket error');
+      clients.delete(socket);
+    });
+
+    // ── Initial greeting ─────────────────────────
+    if (authenticated) {
+      clients.set(socket, { sessionKey: 'main' });
+      safeSend({ type: 'auth.ok' });
+    } else {
+      safeSend({ type: 'auth.required' });
+    }
+  });
+
+  log.info('WebChat WebSocket plugin registered on /ws');
+};

@@ -1,0 +1,12 @@
+node_modules
+.git
+_archive
+agw-data
+docs
+*.log
+*.db
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
