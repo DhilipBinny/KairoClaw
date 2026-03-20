@@ -116,7 +116,7 @@
     <div class="sidebar">
       <div class="sidebar-header">
         <a href="/" class="sidebar-brand">
-          <div class="sidebar-logo">A</div>
+          <img src="/logo.png" alt="Kairo" class="sidebar-logo" />
           <span class="sidebar-title">Kairo</span>
         </a>
       </div>
@@ -164,7 +164,7 @@
       {#if messages.length === 0}
         <div class="chat-empty">
           <div class="chat-empty-logo">
-            <div class="chat-empty-logo-inner">A</div>
+            <img src="/logo.png" alt="Kairo" class="chat-empty-logo-inner" />
             <div class="chat-empty-glow"></div>
           </div>
           <h2 class="chat-empty-title">Kairo</h2>
@@ -267,16 +267,9 @@
   .sidebar-logo {
     width: 34px;
     height: 34px;
-    background: linear-gradient(135deg, var(--accent), #a78bfa);
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 15px;
-    font-weight: 700;
-    color: #fff;
     flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+    object-fit: contain;
   }
   .sidebar-title {
     font-size: 15px;
@@ -386,19 +379,10 @@
   .chat-empty-logo-inner {
     width: 80px;
     height: 80px;
-    background: linear-gradient(135deg, var(--accent), #a78bfa, #818cf8);
-    background-size: 200% 200%;
-    animation: gradientShift 4s ease infinite;
     border-radius: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 34px;
-    font-weight: 700;
-    color: #fff;
+    object-fit: contain;
     position: relative;
     z-index: 1;
-    box-shadow: 0 8px 32px rgba(99, 102, 241, 0.3);
   }
   .chat-empty-glow {
     position: absolute;
