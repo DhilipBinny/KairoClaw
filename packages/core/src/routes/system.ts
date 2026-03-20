@@ -659,4 +659,123 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     return { success: true, modelId: body.modelId, capabilities: catalog[body.modelId] };
   });
+
+  // ── Export/Import state directory ──────────────────────
+
+  // GET /api/v1/admin/export — download state directory as tar.gz
+  app.get('/api/v1/admin/export', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const db = (request as unknown as { ctx: { db: { pragma: (s: string) => unknown } } }).ctx.db;
+    const stateDir = config._stateDir || '';
+
+    if (!stateDir || !fs.existsSync(stateDir)) {
+      return reply.code(500).send({ error: 'State directory not found' });
+    }
+
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const tmpFile = path.join(os.tmpdir(), `kairo-export-${Date.now()}.tar.gz`);
+
+    try {
+      // Flush WAL to main DB file before export so no data is lost
+      try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* non-critical */ }
+
+      await execFileAsync('tar', [
+        '-czf', tmpFile, '-C', stateDir,
+        '--exclude', '*.sqlite-wal', '--exclude', '*.sqlite-shm',
+        '.',
+      ], { timeout: 30_000 });
+
+      const stream = fs.createReadStream(tmpFile);
+      const stat = fs.statSync(tmpFile);
+
+      reply
+        .header('Content-Type', 'application/gzip')
+        .header('Content-Disposition', `attachment; filename="kairo-export-${new Date().toISOString().slice(0, 10)}.tar.gz"`)
+        .header('Content-Length', stat.size);
+
+      stream.on('end', () => { try { fs.unlinkSync(tmpFile); } catch {} });
+      stream.on('error', () => { try { fs.unlinkSync(tmpFile); } catch {} });
+
+      return reply.send(stream);
+    } catch (e: unknown) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      const message = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ error: `Export failed: ${message}` });
+    }
+  });
+
+  // POST /api/v1/admin/import — upload and restore state directory from tar.gz
+  app.post('/api/v1/admin/import', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const stateDir = config._stateDir || '';
+
+    if (!stateDir) {
+      return reply.code(500).send({ error: 'State directory not configured' });
+    }
+
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const tmpFile = path.join(os.tmpdir(), `kairo-import-${Date.now()}.tar.gz`);
+
+    try {
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ error: 'No file uploaded' });
+      }
+
+      const writable = fs.createWriteStream(tmpFile);
+      for await (const chunk of data.file) {
+        writable.write(chunk);
+      }
+      await new Promise<void>((resolve, reject) => {
+        writable.end(() => resolve());
+        writable.on('error', reject);
+      });
+
+      // Verify it's a valid tar.gz and check for path traversal
+      try {
+        const { stdout } = await execFileAsync('tar', ['-tzf', tmpFile], { timeout: 10_000 });
+        const entries = stdout.split('\n').filter(Boolean);
+        const hasTraversal = entries.some(e => e.startsWith('/') || e.includes('..'));
+        if (hasTraversal) {
+          fs.unlinkSync(tmpFile);
+          return reply.code(400).send({ error: 'Archive contains unsafe paths (absolute or ..). Rejected.' });
+        }
+      } catch {
+        try { fs.unlinkSync(tmpFile); } catch {}
+        return reply.code(400).send({ error: 'Invalid archive. Must be a .tar.gz file.' });
+      }
+
+      // Backup current state before overwriting
+      const backupFile = path.join(os.tmpdir(), `kairo-backup-${Date.now()}.tar.gz`);
+      try {
+        await execFileAsync('tar', ['-czf', backupFile, '-C', stateDir, '.'], { timeout: 30_000 });
+      } catch { /* backup is best-effort */ }
+
+      // Extract with --no-same-owner to avoid permission issues across environments
+      fs.mkdirSync(stateDir, { recursive: true });
+      await execFileAsync('tar', ['-xzf', tmpFile, '--no-same-owner', '-C', stateDir], { timeout: 30_000 });
+
+      // Set safe permissions on sensitive files
+      const secretsPath = path.join(stateDir, 'secrets.json');
+      if (fs.existsSync(secretsPath)) {
+        fs.chmodSync(secretsPath, 0o600);
+      }
+
+      fs.unlinkSync(tmpFile);
+
+      return {
+        success: true,
+        message: 'Import complete. Restart the server to apply changes.',
+        backup: backupFile,
+      };
+    } catch (e: unknown) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      const message = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ error: `Import failed: ${message}` });
+    }
+  });
 };

@@ -414,6 +414,35 @@ export async function rejectSender(id: number): Promise<{ success: boolean }> {
   return request(`/admin/channels/pending-senders/${id}/reject`, { method: 'POST', body: {} });
 }
 
+// ── Admin: Export/Import ──────────────────
+export function getExportUrl(): string {
+  const token = localStorage.getItem('agw_api_key') || '';
+  return `${API_BASE}/admin/export?token=${encodeURIComponent(token)}`;
+}
+
+export async function importState(file: File): Promise<{ success: boolean; message?: string }> {
+  const apiKey = getApiKey();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const res = await fetch(`${API_BASE}/admin/import`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const data = await res.json(); msg = data.error || msg; } catch {}
+    throw new ApiError(msg, res.status);
+  }
+
+  return res.json();
+}
+
 // ── Admin: Workspace ──────────────────────
 export async function getWorkspaceFiles(): Promise<{ files: Array<{ name: string; exists: boolean; size: number; modified: string | null }> }> {
   return request('/workspace/files');

@@ -16,6 +16,8 @@
     type ChatMessage as ChatMessageType,
   } from '$lib/stores/chat.svelte';
   import { initSessionListeners, destroySessionListeners, loadSessions } from '$lib/stores/sessions.svelte';
+  import { logout } from '$lib/stores/auth.svelte';
+  import { goto } from '$app/navigation';
   import * as ws from '$lib/ws';
 
   let messages = $derived(getMessages());
@@ -129,6 +131,14 @@
           </svg>
           Admin Dashboard
         </a>
+        <button class="sidebar-signout" onclick={() => { logout(); goto('/login'); }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Sign Out
+        </button>
       </div>
     </div>
   {/if}
@@ -294,6 +304,25 @@
   .sidebar-admin-link:hover {
     background: var(--bg-raised);
     color: var(--text-primary);
+  }
+  .sidebar-signout {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    width: 100%;
+    font-family: var(--font);
+    transition: all var(--duration) var(--ease);
+  }
+  .sidebar-signout:hover {
+    background: var(--bg-raised);
+    color: var(--red);
   }
 
   /* Main area */

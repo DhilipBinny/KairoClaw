@@ -38,12 +38,14 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     if (!request.url.startsWith('/api/')) return;
 
     const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Support ?token= query param for download links (browser can't set auth headers on <a href>)
+    const queryToken = (request.query as Record<string, string>)?.token;
+    if (!authHeader?.startsWith('Bearer ') && !queryToken) {
       reply.code(401).send({ error: 'Missing or invalid Authorization header', statusCode: 401 });
       return;
     }
 
-    const apiKey = authHeader.slice(7); // Remove 'Bearer '
+    const apiKey = queryToken || authHeader!.slice(7);
     const keyHash = hashApiKey(apiKey);
 
     // Look up user by hashed API key
