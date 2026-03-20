@@ -224,13 +224,13 @@
     background: transparent;
   }
   .message.user:hover {
-    background: rgba(255, 255, 255, 0.01);
+    background: var(--bg-wash);
   }
   .message.assistant {
     background: var(--bg-surface);
   }
   .message.assistant:hover {
-    background: rgba(19, 19, 28, 0.9);
+    background: var(--bg-raised);
   }
   .message.error {
     background: rgba(244, 63, 94, 0.04);

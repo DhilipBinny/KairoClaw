@@ -149,7 +149,6 @@
 }
 
 /* Light theme overrides for hardcoded dark values */
-[data-theme="light"] .message.assistant:hover { background: #f4f4f8; }
 [data-theme="light"] .chat-input-wrapper { background: rgba(255, 255, 255, 0.9); }
 [data-theme="light"] .sidebar-backdrop { background: rgba(0, 0, 0, 0.2); }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); }
