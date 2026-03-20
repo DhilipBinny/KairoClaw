@@ -223,7 +223,8 @@ IMPORTANT delivery rules:
             for (const target of targets) {
               const needsAutoFill = !target.to
                 || target.to === '_current' || target.to === 'current' || target.to === 'same'
-                || (target.channel === 'whatsapp' && target.to && !target.to.includes('@'));
+                || (target.channel === 'whatsapp' && target.to && !target.to.includes('@'))
+                || (target.channel === 'whatsapp' && target.to && target.to.includes('@lid'));
 
               if (needsAutoFill && sessionChatId) {
                 if (target.channel === 'whatsapp' && sessionChannel === 'whatsapp') {

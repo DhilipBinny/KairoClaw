@@ -489,10 +489,17 @@ class WhatsAppChannel implements Channel {
     // Get sender name from push name or phone
     const senderName = msg.pushName || senderPhone || 'Unknown';
 
+    // For private chats, use the resolved phone JID (not raw LID) so that
+    // session chat_id is a deliverable address (e.g. "6590890177@s.whatsapp.net")
+    // rather than an internal LID (e.g. "145256465039448@lid").
+    const resolvedChatJid = (!isGroup && senderPhone && jid.includes('@lid'))
+      ? `${senderPhone}@s.whatsapp.net`
+      : jid;
+
     const inbound: InboundMessage = {
       text: msgText,
       channel: 'whatsapp',
-      chatId: `whatsapp:${jid}`,
+      chatId: `whatsapp:${resolvedChatJid}`,
       chatType: isGroup ? 'group' : 'private',
       userId: senderPhone,
       senderName,
