@@ -6,7 +6,7 @@
 
 <div class="admin-layout">
   <AdminNav />
-  <main class="admin-content">
+  <main class="admin-content" id="main-content">
     {@render children()}
   </main>
 </div>

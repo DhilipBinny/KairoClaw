@@ -60,7 +60,7 @@
   class:done={groupStatus === 'done'}
   class:errored={groupStatus === 'error'}
 >
-  <button class="tool-header" onclick={() => expanded = !expanded}>
+  <button class="tool-header" onclick={() => expanded = !expanded} aria-expanded={expanded}>
     <span class="tool-status-icon">
       {#if groupStatus === 'running'}
         <span class="tc-spinner"></span>
@@ -100,7 +100,7 @@
         <!-- Grouped tool calls -->
         {#each tools as tool, idx}
           <div class="tool-group-item">
-            <button class="tool-group-header" onclick={() => toggleItem(idx)}>
+            <button class="tool-group-header" onclick={() => toggleItem(idx)} aria-expanded={!!expandedItems[idx]}>
               <span class="tool-status-icon-sm">
                 {#if tool.status === 'running'}
                   <span class="tc-spinner sm"></span>

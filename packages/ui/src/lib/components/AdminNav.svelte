@@ -56,7 +56,7 @@
     <div class="nav-group-label">Configuration</div>
     {#each configItems as item}
       <a href={item.href} class="nav-item" class:active={isActive(item.href)}>
-        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           {@html item.icon}
         </svg>
         <span class="nav-label">{item.label}</span>
@@ -71,7 +71,7 @@
     <div class="nav-group-label">Operations</div>
     {#each opsItems as item}
       <a href={item.href} class="nav-item" class:active={isActive(item.href)}>
-        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           {@html item.icon}
         </svg>
         <span class="nav-label">{item.label}</span>

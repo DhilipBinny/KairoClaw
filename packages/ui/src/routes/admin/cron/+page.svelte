@@ -333,6 +333,9 @@
             <div class="form-group">
               <label class="label" for="prompt">Prompt</label>
               <textarea class="input" id="prompt" bind:value={formPrompt} placeholder="What should the AI do when this job fires?"></textarea>
+              <span class="char-count" class:warn={formPrompt.length > 4000}>
+                {formPrompt.length} / 5000
+              </span>
             </div>
           </div>
 
@@ -427,6 +430,9 @@
                     <div class="form-group">
                       <label class="label">Prompt</label>
                       <textarea class="input" bind:value={editPrompt} rows="5"></textarea>
+                      <span class="char-count" class:warn={editPrompt.length > 4000}>
+                        {editPrompt.length} / 5000
+                      </span>
                     </div>
                   </div>
                   <div class="form-group">
@@ -498,11 +504,11 @@
                 </div>
 
                 {#if job.lastError}
-                  <div class="job-error">Error: {truncate(job.lastError, 200)}</div>
+                  <div class="job-error" title={job.lastError}>Error: {truncate(job.lastError, 200)}</div>
                 {/if}
 
                 {#if job.lastResult}
-                  <div class="job-result">Last result: {truncate(job.lastResult, 200)}</div>
+                  <div class="job-result" title={job.lastResult}>Last result: {truncate(job.lastResult, 200)}</div>
                 {/if}
 
                 <div class="job-actions">
@@ -789,5 +795,22 @@
     height: 16px;
     accent-color: var(--accent);
     cursor: pointer;
+  }
+
+  .char-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+    display: block;
+    margin-top: 4px;
+  }
+  .char-count.warn {
+    color: var(--yellow);
+  }
+
+  @media (max-width: 768px) {
+    .form-row-2 {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
