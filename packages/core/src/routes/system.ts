@@ -158,10 +158,11 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // 4. Check Telegram
     if (config.channels.telegram?.enabled) {
-      if (config.channels.telegram?.botToken) {
+      const tgBotToken = secretsStore?.get('channels.telegram', 'botToken') || config.channels.telegram?.botToken;
+      if (tgBotToken && !tgBotToken.startsWith('${')) {
         try {
           const resp = await fetch(
-            `https://api.telegram.org/bot${config.channels.telegram.botToken}/getMe`,
+            `https://api.telegram.org/bot${tgBotToken}/getMe`,
             { signal: AbortSignal.timeout(5000) },
           );
           if (resp.ok) {

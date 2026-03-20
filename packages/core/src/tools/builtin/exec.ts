@@ -50,7 +50,11 @@ export const execTools: ToolRegistration[] = [
       }
 
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const defaultTimeout = EXEC_DEFAULT_TIMEOUT_SECONDS;
+      const ctx = context as Record<string, unknown>;
+      const configTimeout = (ctx.config as Record<string, unknown>)?.tools
+        ? ((ctx.config as Record<string, Record<string, Record<string, unknown>>>).tools?.exec?.timeout as number)
+        : undefined;
+      const defaultTimeout = typeof configTimeout === 'number' && configTimeout > 0 ? configTimeout : EXEC_DEFAULT_TIMEOUT_SECONDS;
       const timeout = Math.min((args.timeout as number) || defaultTimeout, EXEC_MAX_TIMEOUT_SECONDS) * 1000;
       const cwd = args.workdir ? safePath(args.workdir as string, workspace) : workspace;
 

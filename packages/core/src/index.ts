@@ -88,7 +88,9 @@ async function main(): Promise<void> {
     console.log('\n' + '='.repeat(60));
     console.log('  FIRST RUN — Your admin API key:');
     console.log(`  ${apiKey}`);
+    console.log('');
     console.log('  Save this key! It will not be shown again.');
+    console.log('  Tip: Set AGW_ADMIN_KEY env var to choose your own key.');
     console.log('='.repeat(60) + '\n');
   }
 
@@ -141,10 +143,17 @@ async function main(): Promise<void> {
   // 6b. Initialize audit service
   const auditService = new AuditService(db);
 
-  // 7. Initialize tool registry with built-in tools
+  // 7. Initialize tool registry with built-in tools (config-aware filtering)
   const toolRegistry = new ToolRegistry();
   toolRegistry.setAuditService(auditService);
+  const toolEnabledMap: Record<string, boolean> = {
+    exec: config.tools?.exec?.enabled !== false,
+    web_search: config.tools?.webSearch?.enabled !== false,
+    web_fetch: config.tools?.webFetch?.enabled !== false,
+  };
   for (const tool of builtinTools) {
+    const name = tool.definition.name;
+    if (name in toolEnabledMap && !toolEnabledMap[name]) continue;
     toolRegistry.register(tool);
   }
 
@@ -230,6 +239,7 @@ async function main(): Promise<void> {
         // Inject shared services into tool context
         const enrichedCtx = {
           ...ctx,
+          config,
           cronScheduler: sharedServices.cronScheduler,
           telegramSend: sharedServices.telegramSend,
           whatsappSend: sharedServices.whatsappSend,
@@ -262,8 +272,32 @@ async function main(): Promise<void> {
         server.log.info('WhatsApp channel stopped via Settings');
       }
     }
+    // Tool toggle hot-reload
+    if (dotPath.startsWith('tools.') && dotPath.endsWith('.enabled')) {
+      const toolKeyMap: Record<string, string> = {
+        'tools.exec.enabled': 'exec',
+        'tools.webSearch.enabled': 'web_search',
+        'tools.webFetch.enabled': 'web_fetch',
+      };
+      const toolName = toolKeyMap[dotPath];
+      if (toolName) {
+        if (value) {
+          const tool = builtinTools.find(t => t.definition.name === toolName);
+          if (tool && !toolRegistry.has(toolName)) {
+            toolRegistry.register(tool);
+            server.log.info(`Tool ${toolName} enabled via Settings`);
+          }
+        } else {
+          if (toolRegistry.has(toolName)) {
+            toolRegistry.unregister(toolName);
+            server.log.info(`Tool ${toolName} disabled via Settings`);
+          }
+        }
+      }
+    }
     if (dotPath === 'channels.telegram.enabled') {
-      if (value && !channelRegistry.telegram && config.channels.telegram.botToken) {
+      const tgToken = secretsStore.get('channels.telegram', 'botToken') || config.channels.telegram.botToken;
+      if (value && !channelRegistry.telegram && tgToken) {
         const tgChannel = createTelegramChannel(config, db, tenantId, secretsStore);
         await tgChannel.start(createRunner);
         channelRegistry.telegram = tgChannel;
@@ -338,8 +372,9 @@ async function main(): Promise<void> {
     return channelRegistry.whatsapp.sendToChat(text, jid);
   };
 
-  // Start Telegram (if enabled)
-  if (config.channels?.telegram?.enabled && config.channels.telegram.botToken) {
+  // Start Telegram (if enabled — check secrets store first, then config)
+  const startupTgToken = secretsStore.get('channels.telegram', 'botToken') || config.channels?.telegram?.botToken;
+  if (config.channels?.telegram?.enabled && startupTgToken) {
     const tgChannel = createTelegramChannel(config, db, tenantId, secretsStore);
     await tgChannel.start(createRunner);
     channelRegistry.telegram = tgChannel;
@@ -356,7 +391,7 @@ async function main(): Promise<void> {
   await server.register(registerWhatsAppRoutes, { channelRegistry });
 
   // Register unified channels status route
-  await server.register(registerChannelRoutes, { channelRegistry, config });
+  await server.register(registerChannelRoutes, { channelRegistry, config, secretsStore });
 
   // 16. Serve static UI files
   // Try SvelteKit build first, fall back to legacy public/index.html

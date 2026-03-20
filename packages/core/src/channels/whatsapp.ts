@@ -250,11 +250,60 @@ class WhatsAppChannel implements Channel {
     log.debug({ jid, isGroup, senderPhone }, 'WhatsApp: message received');
 
     // Allowlist check for direct messages
+    const waSenderName = msg.pushName || senderPhone || 'Unknown';
     if (!isGroup && cfg.allowFrom?.length > 0) {
       if (!cfg.allowFrom.includes(senderPhone)) {
         log.warn({ senderPhone }, 'WhatsApp: sender not in allowFrom list — rejected');
+        try {
+          // Evict oldest pending if at 50-row cap
+          this.db.run(`
+            DELETE FROM pending_senders WHERE id IN (
+              SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND status = 'pending'
+              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'whatsapp' AND status = 'pending') - 49)
+            )
+          `);
+          this.db.run(`
+            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
+            ON CONFLICT(channel, sender_id) DO UPDATE SET
+              sender_name = excluded.sender_name,
+              last_seen = datetime('now'),
+              message_count = message_count + 1,
+              status = 'pending'
+          `, ['whatsapp', senderPhone, waSenderName]);
+        } catch { /* non-critical */ }
         return;
       }
+    } else if (!isGroup) {
+      // No allowlist — record sender as 'seen' for onboarding (fixed 5-row budget)
+      try {
+        const exists = this.db.get<{ id: number }>(
+          "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status = 'seen'",
+          [senderPhone],
+        );
+        if (exists) {
+          this.db.run(`
+            UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1
+            WHERE channel = 'whatsapp' AND sender_id = ? AND status = 'seen'
+          `, [waSenderName, senderPhone]);
+        } else {
+          const count = this.db.get<{ c: number }>(
+            "SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'whatsapp' AND status = 'seen'",
+          );
+          if ((count?.c ?? 0) >= 5) {
+            this.db.run(`
+              DELETE FROM pending_senders WHERE id = (
+                SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND status = 'seen'
+                ORDER BY last_seen ASC LIMIT 1
+              )
+            `);
+          }
+          this.db.run(`
+            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'seen')
+          `, ['whatsapp', senderPhone, waSenderName]);
+        }
+      } catch { /* non-critical */ }
     }
 
     // Group handling

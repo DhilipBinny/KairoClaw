@@ -84,7 +84,7 @@ export async function getMe(): Promise<{ user: { id: string; name: string; role:
 }
 
 // ── Health ────────────────────────────────
-export async function getHealth(): Promise<{ status: string; version: string; uptime: number; model: string }> {
+export async function getHealth(): Promise<{ status: string; version: string; uptime: number; model: string; firstRun?: boolean }> {
   return request('/health');
 }
 
@@ -116,6 +116,10 @@ export async function getConfig(): Promise<{ config: Record<string, unknown> }> 
 
 export async function updateConfig(configPath: string, value: unknown): Promise<{ success: boolean }> {
   return request('/admin/config', { method: 'PATCH', body: { path: configPath, value } });
+}
+
+export async function saveFullConfig(config: Record<string, unknown>): Promise<{ success: boolean }> {
+  return request('/admin/config', { method: 'PUT', body: { config } });
 }
 
 // ── Admin: System ─────────────────────────
@@ -320,7 +324,7 @@ export async function runCronJob(id: string): Promise<{ success: boolean; lastRe
 
 // ── Admin: Channels (unified) ────────────
 export async function getChannelsStatus(): Promise<{
-  telegram: { enabled: boolean; connected: boolean; botUsername: string | null };
+  telegram: { enabled: boolean; connected: boolean; botUsername: string | null; hasToken?: boolean; tokenHint?: string | null };
   whatsapp: { enabled: boolean; status: string; phone: string | null; name: string | null };
 }> {
   return request('/admin/channels/status');
@@ -337,6 +341,56 @@ export async function getWhatsAppQR(): Promise<{ qr: string | null; qrDataUrl: s
 
 export async function unpairWhatsApp(): Promise<{ success: boolean }> {
   return request('/admin/whatsapp/unpair', { method: 'POST', body: {} });
+}
+
+// ── Admin: Telegram Test ─────────────────
+export async function testTelegramBot(token?: string): Promise<{ success: boolean; username?: string; error?: string }> {
+  return request('/admin/channels/telegram/test', { method: 'POST', body: { token } });
+}
+
+// ── Admin: Tools Config ──────────────────
+export interface ToolField {
+  key: string;
+  type: 'boolean' | 'number';
+  label?: string;
+  hint?: string;
+  showWhen?: string;
+  min?: number;
+}
+
+export interface ToolMeta {
+  key: string;
+  label: string;
+  hint: string;
+  fields: ToolField[];
+}
+
+export async function getToolsConfig(): Promise<{ tools: ToolMeta[] }> {
+  return request('/admin/tools');
+}
+
+// ── Admin: Pending Senders ───────────────
+export interface PendingSender {
+  id: number;
+  channel: string;
+  sender_id: string;
+  sender_name: string;
+  first_seen: string;
+  last_seen: string;
+  message_count: number;
+  status: string;
+}
+
+export async function getPendingSenders(): Promise<{ senders: PendingSender[] }> {
+  return request('/admin/channels/pending-senders');
+}
+
+export async function approveSender(id: number): Promise<{ success: boolean }> {
+  return request(`/admin/channels/pending-senders/${id}/approve`, { method: 'POST', body: {} });
+}
+
+export async function rejectSender(id: number): Promise<{ success: boolean }> {
+  return request(`/admin/channels/pending-senders/${id}/reject`, { method: 'POST', body: {} });
 }
 
 // ── Admin: Workspace ──────────────────────
