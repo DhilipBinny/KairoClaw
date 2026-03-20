@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, getExportUrl, importState } from '$lib/api';
   import type { ToolMeta } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
@@ -9,6 +9,27 @@
   let system: Record<string, unknown> | null = $state(null);
   let loading = $state(true);
   let toolsMeta: ToolMeta[] = $state([]);
+
+  // Export/Import
+  let importing = $state(false);
+  let importMsg = $state('');
+  let importFileInput: HTMLInputElement | undefined = $state();
+
+  async function handleImport() {
+    const file = importFileInput?.files?.[0];
+    if (!file) return;
+    importing = true;
+    importMsg = '';
+    try {
+      const result = await importState(file);
+      importMsg = result.message || 'Import complete. Restart the server to apply changes.';
+    } catch (e: unknown) {
+      importMsg = e instanceof Error ? e.message : 'Import failed';
+    } finally {
+      importing = false;
+      if (importFileInput) importFileInput.value = '';
+    }
+  }
 
   // Email SMTP credentials
   let emailUser = $state('');
@@ -680,6 +701,49 @@
         </div>
       </div>
     {/if}
+
+    <!-- Export/Import -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Data
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <span class="field-label">Export</span>
+            <span class="field-hint">Download all data (config, database, secrets, WhatsApp auth, workspace)</span>
+          </div>
+          <div class="field-control">
+            <a href={getExportUrl()} class="btn btn-sm" download>Download .tar.gz</a>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <span class="field-label">Import</span>
+            <span class="field-hint">Restore from a previous export. Server restart required after import.</span>
+          </div>
+          <div class="field-control">
+            <input type="file" accept=".tar.gz,.tgz" bind:this={importFileInput} onchange={handleImport} style="display:none" />
+            <button class="btn btn-sm" onclick={() => importFileInput?.click()} disabled={importing}>
+              {importing ? 'Importing...' : 'Upload .tar.gz'}
+            </button>
+          </div>
+        </div>
+        {#if importMsg}
+          <div class="field-row">
+            <div class="field-info"></div>
+            <div class="field-control">
+              <span class="field-feedback" class:ok={importMsg.includes('complete')} class:err={!importMsg.includes('complete')}>{importMsg}</span>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
 
     <!-- Account -->
     <div class="section">

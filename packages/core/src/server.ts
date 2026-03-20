@@ -33,6 +33,9 @@ export async function createServer(context: ServerContext): Promise<FastifyInsta
     origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : ['http://localhost:18181', 'http://localhost:5173'],
     credentials: true,
   });
+  await app.register(import('@fastify/multipart'), {
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max for import
+  });
   await app.register(import('@fastify/rate-limit'), {
     max: RATE_LIMIT_MAX,
     timeWindow: '1 minute',
