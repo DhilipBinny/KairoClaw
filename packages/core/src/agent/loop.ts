@@ -77,7 +77,7 @@ export async function runAgent(
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
-  const { onDelta, onToolStart, onToolEnd, onRoundStart, onRoundEnd } = callbacks;
+  const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
   const requestId = `req-${Date.now().toString(36)}`;
 
@@ -186,10 +186,17 @@ export async function runAgent(
   });
   let userMsgPersisted = true;
 
+  // ── Build thinking config if enabled + model supports it ──
+  const thinkingCfg = config.agent?.thinking;
+  const thinkingConfig = (thinkingCfg?.enabled && caps.supportsThinking)
+    ? { enabled: true as const, mode: thinkingCfg.mode || ('adaptive' as const), budgetTokens: thinkingCfg.budgetTokens }
+    : undefined;
+
   // ── ReAct loop ──────────────────────────────────────────
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let fullText = '';
+  let finalThinkingText: string | null = null;
   let round = 0;
   let lastResponseHadToolCalls = false;
 
@@ -217,7 +224,9 @@ export async function runAgent(
         tools: tools.length > 0 ? tools : undefined,
         model,
         systemPrompt,
-        onDelta,  // Always stream — providers only call onDelta for text, not tool calls
+        onDelta,
+        onThinkingDelta,
+        thinkingConfig,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -260,6 +269,7 @@ export async function runAgent(
     // If no tool calls, we're done
     if (!response.toolCalls) {
       fullText = response.text || '';
+      finalThinkingText = response.thinkingText || null;
       if (onRoundEnd) onRoundEnd(round, maxToolRounds);
       break;
     }
@@ -269,6 +279,7 @@ export async function runAgent(
       role: 'assistant',
       content: response.text || '',
       tool_calls: response.toolCalls,
+      thinking_blocks: response.thinkingBlocks,
     };
     messages.push(assistantMsg);
 
@@ -379,6 +390,14 @@ export async function runAgent(
     if (onRoundEnd) onRoundEnd(round, maxToolRounds);
   }
 
+  // Strip thinking blocks from older turns to save memory
+  // (Anthropic only needs them on the immediately preceding assistant turn)
+  for (let i = 0; i < messages.length - 1; i++) {
+    if (messages[i].thinking_blocks) {
+      delete messages[i].thinking_blocks;
+    }
+  }
+
   if (round >= maxToolRounds) {
     fullText += '\n\nReached maximum tool call rounds.';
   }
@@ -429,6 +448,7 @@ export async function runAgent(
 
   return {
     text: fullText || null,
+    thinkingText: finalThinkingText,
     usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
   };
 }

@@ -179,6 +179,25 @@ export interface ToolsConfig {
 
 
 
+/** Per-channel visibility for thinking output. */
+export interface ThinkingShowConfig {
+  web: boolean;
+  telegram: boolean;
+  whatsapp: boolean;
+}
+
+/** Extended thinking / chain-of-thought configuration. */
+export interface AgentThinkingConfig {
+  /** Whether extended thinking is enabled. */
+  enabled: boolean;
+  /** Thinking mode: 'adaptive' lets the model decide, 'enabled' uses a fixed budget. */
+  mode: 'enabled' | 'adaptive';
+  /** Token budget for thinking (used when mode is 'enabled'). */
+  budgetTokens: number;
+  /** Per-channel visibility of thinking output. */
+  showThinking: ThinkingShowConfig;
+}
+
 /** Agent behaviour configuration. */
 export interface AgentConfig {
   /** Display name of the assistant. */
@@ -191,6 +210,8 @@ export interface AgentConfig {
   compactionThreshold: number;
   /** Number of recent messages to keep after compaction. */
   keepRecentMessages: number;
+  /** Extended thinking / chain-of-thought configuration. */
+  thinking?: AgentThinkingConfig;
 }
 
 /** User/auto-detected model capability overrides. */

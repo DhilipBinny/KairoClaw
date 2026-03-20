@@ -17,6 +17,7 @@ const MODEL_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
     supportsVision: true,
     supportsToolCalling: true,
     supportsStreaming: true,
+    supportsThinking: true,
   },
   'claude-sonnet-4-6': {
     contextWindow: 200000,
@@ -27,6 +28,7 @@ const MODEL_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
     supportsVision: true,
     supportsToolCalling: true,
     supportsStreaming: true,
+    supportsThinking: true,
   },
   'claude-haiku-4-5-20251001': {
     contextWindow: 200000,
@@ -91,6 +93,7 @@ const MODEL_DEFAULTS: ModelCapabilities = {
   supportsVision: false,
   supportsToolCalling: true,
   supportsStreaming: true,
+  supportsThinking: false,
 };
 
 /**

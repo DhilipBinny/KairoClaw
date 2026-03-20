@@ -514,11 +514,23 @@ class WhatsAppChannel implements Channel {
     const sessionKey = `whatsapp:${jid}`;
 
     try {
+      let thinkingText = '';
+      const showThinking = this.config.agent?.thinking?.showThinking?.whatsapp ?? false;
+
       const result = await this.queue.enqueue(sessionKey, () =>
         this.runner!(inbound, {
           onDelta: () => {},
+          onThinkingDelta: showThinking ? (delta: string) => { thinkingText += delta; } : undefined,
         }),
       );
+
+      // Send thinking as a separate message before the response
+      if (showThinking && thinkingText) {
+        const truncated = thinkingText.slice(0, 3000);
+        try {
+          await this.sock?.sendMessage(jid, { text: `_Thinking..._\n\n${truncated}` });
+        } catch { /* non-critical */ }
+      }
 
       // Clear composing
       try {

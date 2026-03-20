@@ -32,11 +32,22 @@ export interface ProviderResponse {
   toolCalls: import('./message.js').ToolCall[] | null;
   /** Token usage for this request. */
   usage: TokenUsage;
+  /** Accumulated thinking text from extended thinking, if any. */
+  thinkingText?: string | null;
+  /** Structured thinking blocks with signatures (Anthropic only). */
+  thinkingBlocks?: import('./message.js').ThinkingBlock[];
 }
 
 /**
  * Arguments passed to a provider's `chat()` method.
  */
+/** Extended thinking configuration passed to providers. */
+export interface ThinkingConfig {
+  enabled: boolean;
+  mode: 'enabled' | 'adaptive';
+  budgetTokens?: number;
+}
+
 export interface ChatArgs {
   /** Conversation messages (history + current user message). */
   messages: Message[];
@@ -48,6 +59,10 @@ export interface ChatArgs {
   systemPrompt: string;
   /** Streaming callback — called with each text delta. */
   onDelta?: (delta: string) => void;
+  /** Streaming callback — called with each thinking delta. */
+  onThinkingDelta?: (delta: string) => void;
+  /** Extended thinking configuration. */
+  thinkingConfig?: ThinkingConfig;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
 }
@@ -86,6 +101,8 @@ export interface ModelCapabilities {
   supportsToolCalling: boolean;
   /** Whether the model can stream responses. */
   supportsStreaming: boolean;
+  /** Whether the model supports extended thinking / chain-of-thought. */
+  supportsThinking: boolean;
 }
 
 /**

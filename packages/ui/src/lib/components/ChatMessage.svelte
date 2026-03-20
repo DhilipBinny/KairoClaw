@@ -120,6 +120,19 @@
   </div>
 
   <div class="message-body">
+    {#if message.thinkingContent}
+      <details class="thinking-section" open={message.isThinking}>
+        <summary class="thinking-summary">
+          {#if message.isThinking}
+            <span class="thinking-indicator"></span> Thinking...
+          {:else}
+            Thought process
+          {/if}
+        </summary>
+        <div class="thinking-content">{message.thinkingContent}</div>
+      </details>
+    {/if}
+
     {#if message.role === 'user'}
       <div class="message-text">{message.content}</div>
     {:else if isError}
@@ -233,6 +246,54 @@
     color: var(--red);
     font-size: 13px;
     font-family: var(--font-mono);
+  }
+
+  /* Thinking section */
+  .thinking-section {
+    margin-bottom: 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .thinking-summary {
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.02);
+    transition: color var(--duration) var(--ease);
+  }
+  .thinking-summary:hover {
+    color: var(--text-secondary);
+  }
+  .thinking-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    animation: thinkingPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes thinkingPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+  .thinking-content {
+    padding: 10px 14px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    line-height: 1.6;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border-top: 1px solid var(--border-subtle);
   }
 
   /* Tool calls section - visually separated */
