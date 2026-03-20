@@ -527,7 +527,15 @@
                 <span class="field-label">{key}</span>
               </div>
               <div class="field-control">
-                <span class="system-value">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                {#if val && typeof val === 'object'}
+                  <div class="system-value system-object">
+                    {#each Object.entries(val as Record<string, unknown>) as [k, v]}
+                      <div class="system-kv"><span class="system-key">{k}:</span> {String(v)}</div>
+                    {/each}
+                  </div>
+                {:else}
+                  <span class="system-value">{String(val)}</span>
+                {/if}
               </div>
             </div>
           {/each}
@@ -674,6 +682,17 @@
     font-size: 12px;
     color: var(--text-secondary);
     word-break: break-all;
+  }
+  .system-object {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .system-kv {
+    line-height: 1.5;
+  }
+  .system-key {
+    color: var(--text-muted);
   }
 
   /* Toggle button */
