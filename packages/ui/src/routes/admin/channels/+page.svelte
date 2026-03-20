@@ -1007,7 +1007,15 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
     .field-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .field-control { width: 100%; }
+    .channel-card { padding: 14px 16px; }
+    .inline-form { flex-wrap: wrap; }
+    .qr-image { width: 100%; max-width: 260px; height: auto; }
+    .pending-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .channel-header { flex-wrap: wrap; gap: 10px; }
+    .input-action { flex-wrap: wrap; }
   }
 </style>

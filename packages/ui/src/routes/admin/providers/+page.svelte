@@ -949,4 +949,37 @@
     border-radius: var(--radius);
     margin-bottom: 4px;
   }
+
+  @media (max-width: 768px) {
+    .page-title { font-size: 20px; }
+    .page-desc { font-size: 13px; }
+    .provider-header {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .cred-input-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .cred-input-row .cred-input { flex: none; }
+    .model-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .model-row-actions {
+      flex-wrap: wrap;
+    }
+    .caps-row {
+      flex-wrap: wrap;
+    }
+    .caps-input { width: 100%; }
+    .current-model {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .model-caps-inline { margin-left: 0; }
+    .model-id { font-size: 13px; word-break: break-all; }
+  }
 </style>
