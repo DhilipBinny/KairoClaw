@@ -3,6 +3,7 @@ import { execTools } from './exec.js';
 import { webTools } from './web.js';
 import { memoryTools } from './memory.js';
 import { messagingTools } from './messaging.js';
+import { emailTools } from './email.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -11,6 +12,7 @@ export const builtinTools: ToolRegistration[] = [
   ...webTools,
   ...memoryTools,
   ...messagingTools,
+  ...emailTools,
 ];
 
 export { fileTools } from './files.js';
@@ -18,4 +20,5 @@ export { execTools } from './exec.js';
 export { webTools } from './web.js';
 export { memoryTools, setMemorySystem } from './memory.js';
 export { messagingTools } from './messaging.js';
+export { emailTools } from './email.js';
 export { safePath } from './files.js';

@@ -351,7 +351,7 @@ export async function testTelegramBot(token?: string): Promise<{ success: boolea
 // ── Admin: Tools Config ──────────────────
 export interface ToolField {
   key: string;
-  type: 'boolean' | 'number';
+  type: 'boolean' | 'number' | 'text';
   label?: string;
   hint?: string;
   showWhen?: string;
@@ -367,6 +367,15 @@ export interface ToolMeta {
 
 export async function getToolsConfig(): Promise<{ tools: ToolMeta[] }> {
   return request('/admin/tools');
+}
+
+// ── Admin: Email/SMTP ────────────────────
+export async function saveEmailCredentials(creds: { user?: string; pass?: string }): Promise<{ success: boolean }> {
+  return request('/admin/tools/email/credentials', { method: 'PATCH', body: creds });
+}
+
+export async function testEmailConnection(creds?: { user?: string; pass?: string }): Promise<{ success: boolean; error?: string }> {
+  return request('/admin/tools/email/test', { method: 'POST', body: creds || {} });
 }
 
 // ── Admin: Pending Senders ───────────────

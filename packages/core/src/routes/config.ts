@@ -61,6 +61,10 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.exec.enabled', 'tools.exec.timeout',
       'tools.webSearch.enabled',
       'tools.webFetch.enabled', 'tools.webFetch.maxChars',
+      'tools.email.enabled', 'tools.email.host', 'tools.email.port', 'tools.email.secure',
+      'tools.email.from', 'tools.email.allowedDomains', 'tools.email.allowedRecipients',
+      'tools.email.maxRecipientsPerMessage',
+      'tools.email.rateLimit.perMinute', 'tools.email.rateLimit.perHour', 'tools.email.rateLimit.perDay', 'tools.email.rateLimit.perRecipientPerHour',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
@@ -154,6 +158,19 @@ export const registerConfigRoutes: FastifyPluginAsync<{
           fields: [
             { key: 'enabled', type: 'boolean' },
             { key: 'maxChars', type: 'number', label: 'Max Characters', hint: 'Maximum characters to fetch from a web page', showWhen: 'enabled', min: 0 },
+          ],
+        },
+        {
+          key: 'email',
+          label: 'Email (SMTP)',
+          hint: 'Allow the agent to send emails via SMTP',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
+            { key: 'host', type: 'text', label: 'SMTP Host', hint: 'e.g. smtp.gmail.com', showWhen: 'enabled' },
+            { key: 'port', type: 'number', label: 'Port', hint: '587 (STARTTLS) or 465 (SSL)', showWhen: 'enabled', min: 1 },
+            { key: 'secure', type: 'boolean', label: 'Use SSL', hint: 'Enable for port 465. Leave off for 587 (auto STARTTLS).', showWhen: 'enabled' },
+            { key: 'from', type: 'text', label: 'From Address', hint: 'Sender email (locked — LLM cannot change this)', showWhen: 'enabled' },
+            { key: 'maxRecipientsPerMessage', type: 'number', label: 'Max Recipients', hint: 'Max to+cc+bcc per email', showWhen: 'enabled', min: 1 },
           ],
         },
       ],

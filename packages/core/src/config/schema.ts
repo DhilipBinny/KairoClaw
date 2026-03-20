@@ -73,10 +73,28 @@ const webFetchToolSchema = z.object({
   maxChars: z.number().int().min(0).default(50000),
 });
 
+const emailToolSchema = z.object({
+  enabled: z.boolean().default(false),
+  host: z.string().default(''),
+  port: z.number().int().min(1).max(65535).default(587),
+  secure: z.boolean().default(false),
+  from: z.string().default(''),
+  allowedDomains: z.array(z.string()).default([]),
+  allowedRecipients: z.array(z.string()).default([]),
+  maxRecipientsPerMessage: z.number().int().min(1).default(5),
+  rateLimit: withObjectDefault(z.object({
+    perMinute: z.number().int().min(1).default(5),
+    perHour: z.number().int().min(1).default(20),
+    perDay: z.number().int().min(1).default(50),
+    perRecipientPerHour: z.number().int().min(1).default(3),
+  })),
+});
+
 const toolsSchema = z.object({
   exec: withObjectDefault(execToolSchema),
   webSearch: withObjectDefault(webSearchToolSchema),
   webFetch: withObjectDefault(webFetchToolSchema),
+  email: withObjectDefault(emailToolSchema),
 });
 
 const telegramChannelSchema = z.object({
@@ -196,6 +214,17 @@ export const configDefaults: GatewayConfig = {
     exec: { enabled: true, timeout: 30 },
     webSearch: { enabled: false, apiKey: '${BRAVE_API_KEY}' },
     webFetch: { enabled: true, maxChars: 50000 },
+    email: {
+      enabled: false,
+      host: '',
+      port: 587,
+      secure: false,
+      from: '',
+      allowedDomains: [],
+      allowedRecipients: [],
+      maxRecipientsPerMessage: 5,
+      rateLimit: { perMinute: 5, perHour: 20, perDay: 50, perRecipientPerHour: 3 },
+    },
   },
   agent: {
     name: 'Assistant',

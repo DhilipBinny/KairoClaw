@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection } from '$lib/api';
   import type { ToolMeta } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
@@ -9,6 +9,14 @@
   let system: Record<string, unknown> | null = $state(null);
   let loading = $state(true);
   let toolsMeta: ToolMeta[] = $state([]);
+
+  // Email SMTP credentials
+  let emailUser = $state('');
+  let emailPass = $state('');
+  let emailCredsSaving = $state(false);
+  let emailCredsMsg = $state('');
+  let emailTesting = $state(false);
+  let emailTestResult = $state<{ success: boolean; error?: string } | null>(null);
 
   // Per-field feedback: key = dot path, value = { msg, ok }
   let feedback: Record<string, { msg: string; ok: boolean }> = $state({});
@@ -164,6 +172,36 @@
     rawJsonDirty = false;
     rawJsonError = '';
     configViewMode = 'view';
+  }
+
+  async function handleSaveEmailCreds() {
+    if (!emailUser && !emailPass) return;
+    emailCredsSaving = true;
+    emailCredsMsg = '';
+    try {
+      await saveEmailCredentials({ user: emailUser || undefined, pass: emailPass || undefined });
+      emailCredsMsg = 'Credentials saved';
+      emailPass = '';
+      setTimeout(() => { emailCredsMsg = ''; }, 5000);
+    } catch (e: unknown) {
+      emailCredsMsg = e instanceof Error ? e.message : 'Failed';
+    } finally {
+      emailCredsSaving = false;
+    }
+  }
+
+  async function handleTestEmail() {
+    emailTesting = true;
+    emailTestResult = null;
+    try {
+      emailTestResult = await testEmailConnection(
+        emailUser || emailPass ? { user: emailUser || undefined, pass: emailPass || undefined } : undefined,
+      );
+    } catch (e: unknown) {
+      emailTestResult = { success: false, error: e instanceof Error ? e.message : 'Test failed' };
+    } finally {
+      emailTesting = false;
+    }
   }
 
   function handleLogout() {
@@ -378,7 +416,7 @@
       <div class="card settings-card">
         {#each toolsMeta as tool (tool.key)}
           {#each tool.fields as field (field.key)}
-            {#if field.type === 'boolean'}
+            {#if field.type === 'boolean' && field.key === 'enabled'}
               <div class="field-row">
                 <div class="field-info">
                   <label class="field-label">{tool.label}</label>
@@ -394,6 +432,30 @@
                   >
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                     <span class="toggle-label">{getVal(`tools.${tool.key}.${field.key}`) ? 'Enabled' : 'Disabled'}</span>
+                  </button>
+                  {#if feedback[`tools.${tool.key}.${field.key}`]?.msg}
+                    <span class="field-feedback" class:ok={feedback[`tools.${tool.key}.${field.key}`].ok} class:err={!feedback[`tools.${tool.key}.${field.key}`].ok}>
+                      {feedback[`tools.${tool.key}.${field.key}`].msg}
+                    </span>
+                  {/if}
+                </div>
+              </div>
+            {:else if field.type === 'boolean' && field.key !== 'enabled' && (!field.showWhen || getVal(`tools.${tool.key}.${field.showWhen}`))}
+              <div class="field-row sub-field">
+                <div class="field-info">
+                  <label class="field-label">{field.label || field.key}</label>
+                  {#if field.hint}<span class="field-hint">{field.hint}</span>{/if}
+                </div>
+                <div class="field-control">
+                  <button
+                    class="toggle-btn"
+                    class:active={!!getVal(`tools.${tool.key}.${field.key}`)}
+                    disabled={!!saving[`tools.${tool.key}.${field.key}`]}
+                    onclick={() => saveToggle(`tools.${tool.key}.${field.key}`, !!getVal(`tools.${tool.key}.${field.key}`))}
+                    aria-label="Toggle {field.label || field.key}"
+                  >
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    <span class="toggle-label">{getVal(`tools.${tool.key}.${field.key}`) ? 'On' : 'Off'}</span>
                   </button>
                   {#if feedback[`tools.${tool.key}.${field.key}`]?.msg}
                     <span class="field-feedback" class:ok={feedback[`tools.${tool.key}.${field.key}`].ok} class:err={!feedback[`tools.${tool.key}.${field.key}`].ok}>
@@ -428,8 +490,84 @@
                   {/if}
                 </div>
               </div>
+            {:else if field.type === 'text' && (!field.showWhen || getVal(`tools.${tool.key}.${field.showWhen}`))}
+              <div class="field-row sub-field">
+                <div class="field-info">
+                  <label class="field-label" for="tools-{tool.key}-{field.key}">{field.label || field.key}</label>
+                  {#if field.hint}<span class="field-hint">{field.hint}</span>{/if}
+                </div>
+                <div class="field-control">
+                  <div class="input-action">
+                    <input
+                      id="tools-{tool.key}-{field.key}"
+                      class="input"
+                      type="text"
+                      value={getVal(`tools.${tool.key}.${field.key}`) ?? ''}
+                      onblur={(e) => saveStringField(`tools.${tool.key}.${field.key}`, e)}
+                      onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                    />
+                    {#if saving[`tools.${tool.key}.${field.key}`]}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+                  </div>
+                  {#if feedback[`tools.${tool.key}.${field.key}`]?.msg}
+                    <span class="field-feedback" class:ok={feedback[`tools.${tool.key}.${field.key}`].ok} class:err={!feedback[`tools.${tool.key}.${field.key}`].ok}>
+                      {feedback[`tools.${tool.key}.${field.key}`].msg}
+                    </span>
+                  {/if}
+                </div>
+              </div>
             {/if}
           {/each}
+          <!-- Email SMTP credentials (special section) -->
+          {#if tool.key === 'email' && getVal('tools.email.enabled')}
+            <div class="field-row sub-field">
+              <div class="field-info">
+                <label class="field-label" for="email-user">SMTP Username</label>
+                <span class="field-hint">Usually your email address</span>
+              </div>
+              <div class="field-control">
+                <div class="input-action">
+                  <input id="email-user" class="input" type="text" bind:value={emailUser} placeholder="user@example.com" />
+                </div>
+              </div>
+            </div>
+            <div class="field-row sub-field">
+              <div class="field-info">
+                <label class="field-label" for="email-pass">SMTP Password</label>
+                <span class="field-hint">App password or SMTP password (stored in secrets, never in config)</span>
+              </div>
+              <div class="field-control">
+                <div class="input-action">
+                  <input id="email-pass" class="input" type="password" bind:value={emailPass} placeholder="app-password" />
+                </div>
+              </div>
+            </div>
+            <div class="field-row sub-field">
+              <div class="field-info">
+                <span class="field-label">Credentials</span>
+              </div>
+              <div class="field-control">
+                <button class="btn btn-sm btn-primary" onclick={handleSaveEmailCreds} disabled={emailCredsSaving || (!emailUser && !emailPass)}>
+                  {emailCredsSaving ? 'Saving...' : 'Save Credentials'}
+                </button>
+                <button class="btn btn-sm" onclick={handleTestEmail} disabled={emailTesting}>
+                  {emailTesting ? 'Testing...' : 'Test Connection'}
+                </button>
+              </div>
+            </div>
+            {#if emailCredsMsg || emailTestResult}
+              <div class="field-row sub-field">
+                <div class="field-info"></div>
+                <div class="field-control">
+                  {#if emailCredsMsg}<span class="field-feedback ok">{emailCredsMsg}</span>{/if}
+                  {#if emailTestResult}
+                    <span class="field-feedback" class:ok={emailTestResult.success} class:err={!emailTestResult.success}>
+                      {emailTestResult.success ? 'SMTP connection OK' : emailTestResult.error}
+                    </span>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          {/if}
         {/each}
       </div>
     </div>

@@ -499,6 +499,57 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     return reply.code(400).send({ error: `Unknown channel: ${id}. Supported: telegram` });
   });
 
+  // PATCH /api/v1/admin/tools/email/credentials — save SMTP credentials
+  app.patch('/api/v1/admin/tools/email/credentials', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const body = request.body as { user?: string; pass?: string };
+
+    if (!secretsStore) {
+      return reply.code(500).send({ error: 'Secrets store not available' });
+    }
+
+    if (!body.user && !body.pass) {
+      return reply.code(400).send({ error: 'user or pass is required' });
+    }
+
+    if (body.user) secretsStore.set('tools.email', 'user', body.user);
+    if (body.pass) secretsStore.set('tools.email', 'pass', body.pass);
+
+    return { success: true };
+  });
+
+  // GET /api/v1/admin/tools/email/test — verify SMTP connection
+  app.post('/api/v1/admin/tools/email/test', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const emailConfig = config.tools?.email;
+    const host = (emailConfig?.host as string) || '';
+    const port = (emailConfig?.port as number) || 587;
+    const secure = (emailConfig?.secure as boolean) || false;
+
+    // Allow body to override for testing before save
+    const body = (request.body as { user?: string; pass?: string }) || {};
+    const user = body.user || secretsStore?.get('tools.email', 'user') || '';
+    const pass = body.pass || secretsStore?.get('tools.email', 'pass') || '';
+
+    if (!host) return { success: false, error: 'SMTP host not configured' };
+    if (!user || !pass) return { success: false, error: 'SMTP credentials not set' };
+
+    try {
+      const nodemailer = await import('nodemailer');
+      const transporter = nodemailer.default.createTransport({
+        host, port, secure,
+        auth: { user, pass },
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+      });
+      await transporter.verify();
+      transporter.close();
+      return { success: true };
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { success: false, error: message };
+    }
+  });
+
   // GET /api/v1/admin/model — current model configuration and capabilities
   app.get('/api/v1/admin/model', { preHandler: [requireRole('admin')] }, async (request) => {
     const config = (request as any).ctx.config as GatewayConfig;

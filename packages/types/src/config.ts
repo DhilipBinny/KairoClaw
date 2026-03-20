@@ -151,11 +151,30 @@ export interface WebFetchToolConfig {
   maxChars: number;
 }
 
+/** Email/SMTP tool settings. */
+export interface EmailToolConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  secure: boolean;
+  from: string;
+  allowedDomains: string[];
+  allowedRecipients: string[];
+  maxRecipientsPerMessage: number;
+  rateLimit: {
+    perMinute: number;
+    perHour: number;
+    perDay: number;
+    perRecipientPerHour: number;
+  };
+}
+
 /** Built-in tool configuration. */
 export interface ToolsConfig {
   exec: ExecToolConfig;
   webSearch: WebSearchToolConfig;
   webFetch: WebFetchToolConfig;
+  email: EmailToolConfig;
 }
 
 
