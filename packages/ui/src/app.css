@@ -606,48 +606,9 @@ select.input {
   .admin-layout {
     flex-direction: column;
   }
-  .admin-layout .admin-nav {
-    width: 100%;
-    height: auto;
-    max-height: none;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow: visible;
-  }
-  .admin-layout .admin-nav .nav-header {
-    display: flex;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .admin-layout .admin-nav .nav-items {
-    display: flex;
-    flex-wrap: wrap;
-    overflow-x: auto;
-    padding: 6px 8px;
-    gap: 4px;
-    flex: 0;
-  }
-  .admin-layout .admin-nav .nav-group-label,
-  .admin-layout .admin-nav .nav-divider {
-    display: none;
-  }
-  .admin-layout .admin-nav .nav-item {
-    padding: 6px 12px;
-    font-size: 12px;
-    white-space: nowrap;
-    margin-bottom: 0;
-    border-left: none;
-    border-radius: 6px;
-  }
-  .admin-layout .admin-nav .nav-item.active {
-    border-left: none;
-    padding-left: 12px;
-  }
-  .admin-layout .admin-nav .nav-active-dot {
-    display: none;
-  }
-  .admin-layout .admin-nav .nav-footer {
-    display: none;
+  /* Admin nav is hidden on mobile — shown as slide-over drawer via admin +layout.svelte */
+  .admin-layout {
+    flex-direction: column;
   }
   .admin-layout .admin-content {
     padding: 16px;
