@@ -150,6 +150,7 @@ async function main(): Promise<void> {
     exec: config.tools?.exec?.enabled !== false,
     web_search: config.tools?.webSearch?.enabled !== false,
     web_fetch: config.tools?.webFetch?.enabled !== false,
+    send_email: !!config.tools?.email?.enabled,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
@@ -240,6 +241,7 @@ async function main(): Promise<void> {
         const enrichedCtx = {
           ...ctx,
           config,
+          secretsStore,
           cronScheduler: sharedServices.cronScheduler,
           telegramSend: sharedServices.telegramSend,
           whatsappSend: sharedServices.whatsappSend,
@@ -278,6 +280,7 @@ async function main(): Promise<void> {
         'tools.exec.enabled': 'exec',
         'tools.webSearch.enabled': 'web_search',
         'tools.webFetch.enabled': 'web_fetch',
+        'tools.email.enabled': 'send_email',
       };
       const toolName = toolKeyMap[dotPath];
       if (toolName) {
