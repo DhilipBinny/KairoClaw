@@ -4,13 +4,13 @@ export const messagingTools: ToolRegistration[] = [
   {
     definition: {
       name: 'send_message',
-      description: 'Proactively send a message to a channel (web, telegram, or whatsapp). Use this to alert or notify the user.',
+      description: 'Proactively send a message to a channel (web, telegram, or whatsapp). Use this to alert or notify the user.\n\nFor the CURRENT chat: omit chatId — the system auto-fills it from the session. Do NOT ask the user for their phone number or chat ID.\nOnly provide chatId when sending to a DIFFERENT chat than the current one.',
       parameters: {
         type: 'object',
         properties: {
           channel: { type: 'string', description: 'Channel to send to: "web", "telegram", or "whatsapp"' },
           text: { type: 'string', description: 'Message text to send' },
-          chatId: { type: 'string', description: 'For telegram: chat ID. For whatsapp: JID (e.g. "1234567890@s.whatsapp.net"). Required for whatsapp.' },
+          chatId: { type: 'string', description: 'Optional. For telegram: chat ID. For whatsapp: JID. Leave empty to send to the current chat.' },
         },
         required: ['text', 'channel'],
       },
@@ -20,6 +20,19 @@ export const messagingTools: ToolRegistration[] = [
       if (!text) return { error: 'text is required' };
       const channel = (args.channel as string) || 'web';
       const ctx = context as Record<string, unknown>;
+
+      // Auto-fill chatId from session context when not provided
+      let chatId = args.chatId as string | undefined;
+      if (!chatId) {
+        const session = (ctx.session as Record<string, unknown>) || {};
+        const sessionChannel = session.channel as string || '';
+        const sessionChatId = session.chat_id as string || '';
+        if (channel === 'whatsapp' && sessionChannel === 'whatsapp' && sessionChatId) {
+          chatId = sessionChatId.replace(/^whatsapp:/, '');
+        } else if (channel === 'telegram' && sessionChannel === 'telegram' && sessionChatId) {
+          chatId = sessionChatId.replace(/^telegram:/, '');
+        }
+      }
 
       if (channel === 'web') {
         // Use the broadcast function injected via context
@@ -39,7 +52,7 @@ export const messagingTools: ToolRegistration[] = [
         const telegramSend = ctx.telegramSend as ((text: string, chatId?: string) => Promise<void>) | undefined;
         if (telegramSend) {
           try {
-            await telegramSend(text, args.chatId as string | undefined);
+            await telegramSend(text, chatId);
             return { success: true, channel: 'telegram', delivered: true };
           } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);
@@ -53,7 +66,7 @@ export const messagingTools: ToolRegistration[] = [
         const whatsappSend = ctx.whatsappSend as ((text: string, jid?: string) => Promise<void>) | undefined;
         if (whatsappSend) {
           try {
-            await whatsappSend(text, args.chatId as string | undefined);
+            await whatsappSend(text, chatId);
             return { success: true, channel: 'whatsapp', delivered: true };
           } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);
