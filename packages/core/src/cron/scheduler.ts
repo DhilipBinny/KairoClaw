@@ -124,7 +124,7 @@ export type JobDeliverer = (
 
 export class CronScheduler {
   private jobs = new Map<string, CronJob>();
-  private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private timers = new Map<string, { timer: ReturnType<typeof setTimeout>; type: 'timeout' | 'interval' }>();
   private runningJobs = new Set<string>();
   private cronInterval: ReturnType<typeof setInterval> | null = null;
   private jobsPath: string;
@@ -151,8 +151,8 @@ export class CronScheduler {
         }
         this.log.info({ count: this.jobs.size }, 'Cron jobs loaded');
       }
-    } catch (e: any) {
-      this.log.warn({ err: e.message }, 'Failed to load cron jobs');
+    } catch (e) {
+      this.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to load cron jobs');
     }
   }
 
@@ -160,8 +160,8 @@ export class CronScheduler {
     try {
       const data = Array.from(this.jobs.values());
       fs.writeFileSync(this.jobsPath, JSON.stringify(data, null, 2));
-    } catch (e: any) {
-      this.log.error({ err: e.message }, 'Failed to save cron jobs');
+    } catch (e) {
+      this.log.error({ err: e instanceof Error ? e.message : String(e) }, 'Failed to save cron jobs');
     }
   }
 
@@ -183,9 +183,12 @@ export class CronScheduler {
       clearInterval(this.cronInterval);
       this.cronInterval = null;
     }
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-      clearInterval(timer);
+    for (const entry of this.timers.values()) {
+      if (entry.type === 'interval') {
+        clearInterval(entry.timer);
+      } else {
+        clearTimeout(entry.timer);
+      }
     }
     this.timers.clear();
     this.log.info('Cron scheduler stopped');
@@ -195,9 +198,13 @@ export class CronScheduler {
 
   private _scheduleJob(job: CronJob): void {
     // Clear existing timer
-    if (this.timers.has(job.id)) {
-      clearTimeout(this.timers.get(job.id)!);
-      clearInterval(this.timers.get(job.id)!);
+    const existing = this.timers.get(job.id);
+    if (existing) {
+      if (existing.type === 'interval') {
+        clearInterval(existing.timer);
+      } else {
+        clearTimeout(existing.timer);
+      }
       this.timers.delete(job.id);
     }
 
@@ -214,14 +221,14 @@ export class CronScheduler {
         this.timers.delete(job.id);
         this._save();
       }, delay);
-      this.timers.set(job.id, timer);
+      this.timers.set(job.id, { timer, type: 'timeout' });
     } else if (job.schedule.type === 'every') {
       const ms = job.schedule.value as number;
       if (ms < CRON_MIN_INTERVAL_MS) return; // min 5 seconds
       const timer = setInterval(() => {
         void this._executeJob(job);
       }, ms);
-      this.timers.set(job.id, timer);
+      this.timers.set(job.id, { timer, type: 'interval' });
     }
     // 'cron' type handled by _checkCronJobs
   }
@@ -329,8 +336,8 @@ export class CronScheduler {
             try {
               await this.deliverer(responseText, target.channel, target.to);
               delivered.push(target.channel);
-            } catch (e: any) {
-              this.log.error({ jobId: job.id, channel: target.channel, err: e.message }, 'Cron delivery to channel failed');
+            } catch (e) {
+              this.log.error({ jobId: job.id, channel: target.channel, err: e instanceof Error ? e.message : String(e) }, 'Cron delivery to channel failed');
             }
           }
           job.lastDelivered = delivered.length > 0;
@@ -343,9 +350,10 @@ export class CronScheduler {
 
       this._save();
       this.log.info({ jobId: job.id, resultLen: responseText.length }, 'Cron job completed');
-    } catch (e: any) {
-      this.log.error({ jobId: job.id, err: e.message }, 'Cron job execution failed');
-      job.lastError = e.message;
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      this.log.error({ jobId: job.id, err: errMsg }, 'Cron job execution failed');
+      job.lastError = errMsg;
       this._save();
     } finally {
       this.runningJobs.delete(job.id);
@@ -436,10 +444,16 @@ export class CronScheduler {
     this._save();
     if (job.enabled) {
       this._scheduleJob(job);
-    } else if (this.timers.has(id)) {
-      clearTimeout(this.timers.get(id)!);
-      clearInterval(this.timers.get(id)!);
-      this.timers.delete(id);
+    } else {
+      const existing = this.timers.get(id);
+      if (existing) {
+        if (existing.type === 'interval') {
+          clearInterval(existing.timer);
+        } else {
+          clearTimeout(existing.timer);
+        }
+        this.timers.delete(id);
+      }
     }
     return job;
   }
@@ -447,9 +461,13 @@ export class CronScheduler {
   remove(id: string): boolean {
     const job = this.jobs.get(id);
     if (!job) return false;
-    if (this.timers.has(id)) {
-      clearTimeout(this.timers.get(id)!);
-      clearInterval(this.timers.get(id)!);
+    const existing = this.timers.get(id);
+    if (existing) {
+      if (existing.type === 'interval') {
+        clearInterval(existing.timer);
+      } else {
+        clearTimeout(existing.timer);
+      }
       this.timers.delete(id);
     }
     this.jobs.delete(id);

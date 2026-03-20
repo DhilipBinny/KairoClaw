@@ -44,6 +44,7 @@ export class MCPBridge {
   private _secretsStore: SecretsStore | null = null;
   private _reconnectAttempts = new Map<string, number>();
   private _reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private _reconnecting = new Set<string>();
   private static MAX_RECONNECT_ATTEMPTS = 10;
   private static MAX_RECONNECT_DELAY_MS = 60_000;
 
@@ -154,8 +155,10 @@ export class MCPBridge {
         await this._connectServer(id, serverConfig, pinnedHash);
         this._syncToolsToRegistry(id);
       } catch (err) {
-        const msg = (err as Error).message;
-        this.log.error({ server: id, err: msg }, 'Background MCP connection failed');
+        const error = err as Error;
+        this.log.error({ server: id, err: error.message, stack: error.stack }, 'Background MCP connection failed');
+      } finally {
+        this._reconnecting.delete(id);
       }
     })();
   }
@@ -204,7 +207,9 @@ export class MCPBridge {
       client.onTransportClose((_code) => {
         if (client._status === 'error') {
           this._unsyncToolsFromRegistry(id);
-          this._autoReconnect(id, serverConfig, pinnedHash);
+          if (!this._reconnecting.has(id)) {
+            this._autoReconnect(id, serverConfig, pinnedHash);
+          }
         }
       });
 
@@ -273,7 +278,8 @@ export class MCPBridge {
     serverConfig: MCPServerConfig,
     pinnedHash?: string | null,
   ): void {
-    // Guard: skip if a reconnect timer is already pending for this server
+    // Guard: skip if already reconnecting or a timer is pending
+    if (this._reconnecting.has(id)) return;
     if (this._reconnectTimers.has(id)) return;
 
     const attempts = this._reconnectAttempts.get(id) || 0;
@@ -284,6 +290,9 @@ export class MCPBridge {
         existing._status = 'error';
         existing._statusMessage = `Failed after ${attempts} reconnect attempts. Use reconnect to retry.`;
       }
+      // Clean up reconnect tracking state
+      this._reconnectAttempts.delete(id);
+      this._reconnectTimers.delete(id);
       return;
     }
 
@@ -294,6 +303,7 @@ export class MCPBridge {
 
     const timer = setTimeout(() => {
       this._reconnectTimers.delete(id);
+      this._reconnecting.add(id);
       const existing = this.clients.get(id);
       if (existing) {
         existing._status = 'connecting';
@@ -313,6 +323,7 @@ export class MCPBridge {
       this._reconnectTimers.delete(id);
     }
     this._reconnectAttempts.delete(id);
+    this._reconnecting.delete(id);
   }
 
   /**
@@ -567,6 +578,9 @@ export class MCPBridge {
     const promises = [...this.clients.values()].map(c => c.disconnect().catch(() => {}));
     await Promise.allSettled(promises);
     this.clients.clear();
+    this._reconnectAttempts.clear();
+    this._reconnectTimers.clear();
+    this._reconnecting.clear();
     this.log.info('MCP bridge shut down');
   }
 }
