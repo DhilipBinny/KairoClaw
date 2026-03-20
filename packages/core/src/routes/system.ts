@@ -432,36 +432,24 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       if (body.apiKey) {
         secretsStore.set(namespace, 'apiKey', body.apiKey);
         secretsStore.set(namespace, 'authToken', ''); // clear
-        // Update process.env for backward compat — provider registry reads env as fallback after secrets store
-        process.env.ANTHROPIC_API_KEY = body.apiKey;
-        delete process.env.ANTHROPIC_AUTH_TOKEN;
         changed = true;
       } else if (body.authToken) {
         secretsStore.set(namespace, 'authToken', body.authToken);
         secretsStore.set(namespace, 'apiKey', ''); // clear
-        // Update process.env for backward compat — provider registry reads env as fallback after secrets store
-        process.env.ANTHROPIC_AUTH_TOKEN = body.authToken;
-        delete process.env.ANTHROPIC_API_KEY;
         changed = true;
       }
       if (body.baseUrl !== undefined) {
         secretsStore.set(namespace, 'baseUrl', body.baseUrl);
-        if (body.baseUrl) process.env.ANTHROPIC_BASE_URL = body.baseUrl;
-        else delete process.env.ANTHROPIC_BASE_URL;
         changed = true;
       }
     } else if (id === 'openai') {
       if (body.apiKey !== undefined) {
         secretsStore.set(namespace, 'apiKey', body.apiKey || '');
-        if (body.apiKey) process.env.OPENAI_API_KEY = body.apiKey;
-        else delete process.env.OPENAI_API_KEY;
         changed = true;
       }
     } else if (id === 'ollama') {
       if (body.baseUrl !== undefined) {
         secretsStore.set(namespace, 'baseUrl', body.baseUrl || '');
-        if (body.baseUrl) process.env.OLLAMA_BASE_URL = body.baseUrl;
-        else delete process.env.OLLAMA_BASE_URL;
         changed = true;
       }
     }
@@ -504,8 +492,6 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         return reply.code(400).send({ error: 'botToken is required' });
       }
       secretsStore.set('channels.telegram', 'botToken', body.botToken);
-      // Also set in process.env for backward compat
-      process.env.TELEGRAM_BOT_TOKEN = body.botToken;
       return { success: true };
     }
 

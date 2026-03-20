@@ -16,6 +16,51 @@ import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
 const log = createModuleLogger('system');
 
+// ─── Per-user rate limiter ───────────────────────────────────
+
+const RATE_LIMIT_WINDOW_MS = 60_000;    // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 30;     // per user per window
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60_000; // 5 minutes
+
+interface RateLimitEntry {
+  count: number;
+  windowStart: number;
+}
+
+const rateLimitMap = new Map<string, RateLimitEntry>();
+
+// Periodically clean up stale entries
+const cleanupTimer = setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap) {
+    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
+      rateLimitMap.delete(key);
+    }
+  }
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+// Allow process to exit without waiting for the timer
+if (cleanupTimer.unref) cleanupTimer.unref();
+
+function checkRateLimit(userId: string, ip: string): { allowed: boolean; retryAfterMs: number } {
+  const key = userId !== 'anonymous' ? `user:${userId}` : `ip:${ip}`;
+  const now = Date.now();
+  const entry = rateLimitMap.get(key);
+
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
+    // Start a new window
+    rateLimitMap.set(key, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
+  entry.count++;
+  if (entry.count > RATE_LIMIT_MAX_REQUESTS) {
+    const retryAfterMs = RATE_LIMIT_WINDOW_MS - (now - entry.windowStart);
+    return { allowed: false, retryAfterMs };
+  }
+
+  return { allowed: true, retryAfterMs: 0 };
+}
+
 // ─── Request / response schemas (Fastify JSON Schema) ───────
 
 const chatBodySchema = {
@@ -49,6 +94,17 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       const userId = request.user?.id || 'anonymous';
       const tenantId = request.tenantId || 'default';
       const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
+
+      // Per-user rate limiting
+      const rateCheck = checkRateLimit(userId, request.ip);
+      if (!rateCheck.allowed) {
+        log.warn({ userId, ip: request.ip, requestId }, 'Chat rate limit exceeded');
+        return reply.code(429).send({
+          error: 'Too many requests. Please try again later.',
+          retryAfterMs: rateCheck.retryAfterMs,
+          statusCode: 429,
+        });
+      }
 
       // Input sanitization & prompt injection detection
       const sanitizedText = sanitizeInput(body.message.trim());
@@ -146,6 +202,17 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       const userId = request.user?.id || 'anonymous';
       const tenantId = request.tenantId || 'default';
       const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
+
+      // Per-user rate limiting
+      const rateSyncCheck = checkRateLimit(userId, request.ip);
+      if (!rateSyncCheck.allowed) {
+        log.warn({ userId, ip: request.ip, requestId }, 'Chat rate limit exceeded (sync)');
+        return reply.code(429).send({
+          error: 'Too many requests. Please try again later.',
+          retryAfterMs: rateSyncCheck.retryAfterMs,
+          statusCode: 429,
+        });
+      }
 
       // Input sanitization & prompt injection detection
       const sanitizedTextSync = sanitizeInput(body.message.trim());

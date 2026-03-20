@@ -1,10 +1,10 @@
 import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAULT_TIMEOUT_SECONDS } from '../../constants.js';
-import { exec as execCb } from 'node:child_process';
+import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { safePath } from './files.js';
 
-const execAsync = promisify(execCb);
+const execFileAsync = promisify(execFileCb);
 
 /** Maximum stdout size returned (10 KB). */
 const MAX_STDOUT = EXEC_MAX_STDOUT;
@@ -61,7 +61,10 @@ export const execTools: ToolRegistration[] = [
       }
 
       try {
-        const { stdout, stderr } = await execAsync(command, {
+        // Use execFile with /bin/sh -c to avoid shell metacharacter injection
+        // execFile does not spawn an intermediary shell, so the command string
+        // is passed as a single argument to /bin/sh, preventing injection.
+        const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', command], {
           cwd,
           timeout,
           maxBuffer: 1024 * 1024,

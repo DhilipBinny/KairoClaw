@@ -41,6 +41,10 @@ export function migrateToSecretsStore(stateDir: string): number {
     }
   } catch { /* proceed with migration */ }
 
+  // Pre-create secrets file with restrictive permissions before writing any content
+  fs.mkdirSync(path.dirname(secretsPath), { recursive: true });
+  fs.writeFileSync(secretsPath, '', { mode: 0o600 });
+
   // 1. Migrate from .env (via process.env, since dotenv already loaded it)
   for (const { envKey, namespace, secretKey } of ENV_TO_SECRETS) {
     const value = process.env[envKey];
