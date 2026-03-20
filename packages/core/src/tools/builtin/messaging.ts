@@ -107,13 +107,16 @@ Schedule examples:
 - One-shot: schedule.type="at", schedule.value="<ISO timestamp>"
 - Every 5 min: schedule.type="every", schedule.value=300000
 
-Delivery: use delivery.targets array for per-channel routing. Each target needs a channel and a "to" address.
-- Telegram: { channel: "telegram", to: "<chat_id like -1001234567890>" }
-- WhatsApp: { channel: "whatsapp", to: "<phone>@s.whatsapp.net" }
+Delivery: use delivery.targets array for per-channel routing. Each target needs a channel and optionally a "to" address.
+- Telegram: { channel: "telegram", to: "<chat_id>" } or { channel: "telegram" } for current chat
+- WhatsApp: { channel: "whatsapp", to: "<phone>@s.whatsapp.net" } or { channel: "whatsapp" } for current chat
 - Web: { channel: "web" } (no "to" needed)
 - Multi-channel: include multiple targets in the array.
 
-IMPORTANT: When the user asks to deliver to the current chat, auto-fill "to" from the current session context. For WhatsApp, the JID format is "<phone>@s.whatsapp.net". For Telegram, use the numeric chat ID. Every "announce" delivery MUST have targets with explicit "to" addresses — there is no fallback.`,
+IMPORTANT delivery rules:
+- For "this chat" / "same chat" / current conversation: leave "to" EMPTY or omit it entirely. The system auto-fills the correct address from the current session. Do NOT guess or fabricate phone numbers or chat IDs.
+- Only provide an explicit "to" when the user specifies a DIFFERENT chat/number than the current one.
+- WhatsApp "to" must be in JID format: "<phone>@s.whatsapp.net" (e.g. "6591234567@s.whatsapp.net").`,
       parameters: {
         type: 'object',
         properties: {
@@ -213,9 +216,16 @@ IMPORTANT: When the user asks to deliver to the current chat, auto-fill "to" fro
               targets = [{ channel: sessionChannel }];
             }
 
-            // Auto-fill 'to' for each target that's missing it, using session context
+            // Auto-fill 'to' for each target using session context.
+            // Fill when: missing, empty, or a sentinel like "_current"/"current"/"same".
+            // Also fill when the LLM provided a bare phone number without @s.whatsapp.net
+            // (likely hallucinated — override with actual session JID).
             for (const target of targets) {
-              if (!target.to && sessionChatId) {
+              const needsAutoFill = !target.to
+                || target.to === '_current' || target.to === 'current' || target.to === 'same'
+                || (target.channel === 'whatsapp' && target.to && !target.to.includes('@'));
+
+              if (needsAutoFill && sessionChatId) {
                 if (target.channel === 'whatsapp' && sessionChannel === 'whatsapp') {
                   target.to = sessionChatId.replace(/^whatsapp:/, '');
                 } else if (target.channel === 'telegram' && sessionChannel === 'telegram') {
@@ -226,12 +236,16 @@ IMPORTANT: When the user asks to deliver to the current chat, auto-fill "to" fro
 
             // Validate: announce mode requires at least one target
             if (targets.length === 0) {
-              return { error: 'delivery.mode is "announce" but no targets configured. Add targets: [{ channel: "whatsapp", to: "phone@s.whatsapp.net" }]' };
+              return { error: 'delivery.mode is "announce" but no targets configured. Add targets: [{ channel: "whatsapp" }] to deliver to current chat.' };
             }
             // Validate: telegram/whatsapp targets must have 'to'
             for (const target of targets) {
               if ((target.channel === 'whatsapp' || target.channel === 'telegram') && !target.to) {
-                return { error: `delivery target "${target.channel}" requires a "to" address. WhatsApp: "phone@s.whatsapp.net", Telegram: chat ID like "-1001234567890".` };
+                return { error: `delivery target "${target.channel}" requires a "to" address but could not auto-fill from current session (session channel: ${sessionChannel}). Provide an explicit address or create this cron from the target channel.` };
+              }
+              // Validate WhatsApp JID format
+              if (target.channel === 'whatsapp' && target.to && !target.to.includes('@')) {
+                return { error: `Invalid WhatsApp "to": "${target.to}". Must be in JID format: "<phone>@s.whatsapp.net".` };
               }
             }
 
@@ -249,7 +263,11 @@ IMPORTANT: When the user asks to deliver to the current chat, auto-fill "to" fro
             delivery: delivery || 'none',
             enabled: args.enabled !== false,
           });
-          return { success: true, job: { id: job.id, name: job.name, schedule: job.schedule, delivery: job.delivery } };
+          return {
+            success: true,
+            job: { id: job.id, name: job.name, schedule: job.schedule, delivery: job.delivery },
+            context: { sessionChannel, sessionChatId: sessionChatId || null },
+          };
         }
         case 'update': {
           if (!args.id) return { error: 'id is required for update' };
