@@ -5,6 +5,9 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
+  import { initTheme } from '$lib/stores/theme.svelte';
+
+  initTheme();
 
   let { children } = $props();
 
