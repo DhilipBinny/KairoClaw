@@ -2,9 +2,9 @@
  * One-time migration: seed outbound allowlists from existing active cron jobs.
  *
  * When outbound security (session-only policy) is first deployed, existing
- * cron delivery targets may not have sessions. This migration reads all active
- * crons, extracts their delivery targets, and adds any that would be blocked
- * to the channel's outboundAllowlist — so existing valid crons keep working.
+ * cron delivery targets need to be in the allowlist. This migration reads all
+ * active crons, extracts their delivery targets, and adds them to the channel's
+ * outboundAllowlist — so existing valid crons keep working.
  *
  * Safe to run multiple times — only adds targets not already in the list.
  */
@@ -12,7 +12,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GatewayConfig } from '@agw/types';
-import type { DatabaseAdapter } from '../db/index.js';
 import type { CronScheduler } from '../cron/scheduler.js';
 import { createModuleLogger } from '../observability/logger.js';
 
@@ -21,7 +20,6 @@ const log = createModuleLogger('security');
 export function migrateOutboundAllowlist(
   scheduler: CronScheduler,
   config: GatewayConfig,
-  db: DatabaseAdapter,
 ): void {
   const jobs = scheduler.list();
   const activeJobs = jobs.filter(j => j.enabled);
@@ -54,26 +52,13 @@ export function migrateOutboundAllowlist(
 
   if (targets.length === 0) return;
 
-  // Check which targets would be blocked (no session)
-  const needsAllowlist: Array<{ channel: 'whatsapp' | 'telegram'; to: string }> = [];
-
-  for (const { channel, to } of targets) {
-    const chatIdPattern = `${channel}:${to}`;
-    const session = db.get<{ id: string }>(
-      'SELECT id FROM sessions WHERE channel = ? AND chat_id = ? LIMIT 1',
-      [channel, chatIdPattern],
-    );
-    if (!session) {
-      // Also try LIKE fallback
-      const alt = db.get<{ id: string }>(
-        'SELECT id FROM sessions WHERE chat_id LIKE ? LIMIT 1',
-        [`%${to}%`],
-      );
-      if (!alt) {
-        needsAllowlist.push({ channel: channel as 'whatsapp' | 'telegram', to });
-      }
-    }
-  }
+  // All active cron delivery targets should be in the allowlist,
+  // regardless of whether they have sessions. Sessions can expire
+  // but the allowlist is the durable source of truth.
+  const needsAllowlist = targets.map(t => ({
+    channel: t.channel as 'whatsapp' | 'telegram',
+    to: t.to,
+  }));
 
   if (needsAllowlist.length === 0) return;
 

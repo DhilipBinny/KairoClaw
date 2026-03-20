@@ -375,7 +375,7 @@ async function main(): Promise<void> {
 
   // Migrate: seed outbound allowlists from existing active cron targets
   try {
-    migrateOutboundAllowlist(scheduler, config, db);
+    migrateOutboundAllowlist(scheduler, config);
   } catch { /* non-critical — existing crons may need manual allowlisting */ }
 
   // Register cron routes (needs scheduler)
