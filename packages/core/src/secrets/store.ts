@@ -154,7 +154,15 @@ export class SecretsStore {
       if (typeof v === 'string') {
         resolved[k] = v.replace(
           /\$\{([A-Z_][A-Z0-9_]*)\}/g,
-          (_, ref: string) => secrets[ref] || process.env[ref] || '',
+          (_, ref: string) => {
+            const value = secrets[ref] || process.env[ref] || '';
+            if (!value) {
+              console.warn(
+                `[secrets] resolveEnv(${serverId}): template variable \${${ref}} in key "${k}" could not be resolved`,
+              );
+            }
+            return value;
+          },
         );
       } else {
         resolved[k] = v;

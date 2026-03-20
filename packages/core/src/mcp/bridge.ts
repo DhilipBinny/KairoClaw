@@ -171,16 +171,22 @@ export class MCPBridge {
         ? this._secretsStore.resolveEnv(id, serverConfig.env || {})
         : serverConfig.env;
 
-      // Resolve ${VAR} references in args (using secrets store + process.env)
-      const secrets = this._secretsStore?.getServerSecrets(id) || {};
-      const resolvedArgs = (serverConfig.args || []).map(arg =>
-        typeof arg === 'string'
-          ? arg.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (_, key: string) =>
-              secrets[key] || process.env[key] || '')
-          : arg,
-      );
+      // Validate: secrets must ONLY be passed via env vars, never via args
+      const rawArgs = serverConfig.args || [];
+      for (const arg of rawArgs) {
+        if (typeof arg === 'string' && /\$\{/.test(arg)) {
+          this.log.warn(
+            { server: id, arg },
+            'MCP server arg contains ${} template — secrets must be passed via env, not args (leaks to process command line)',
+          );
+          throw new Error(
+            `MCP server "${id}": args must not contain \${} template variables. ` +
+            `Pass secrets via the env field instead.`,
+          );
+        }
+      }
 
-      const resolved: MCPServerConfig = { ...serverConfig, args: resolvedArgs, env: resolvedEnv };
+      const resolved: MCPServerConfig = { ...serverConfig, args: rawArgs, env: resolvedEnv };
       const client = new MCPClient(id, resolved, this.log);
       await client.connect();
 
