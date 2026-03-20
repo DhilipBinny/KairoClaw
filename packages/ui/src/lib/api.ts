@@ -131,6 +131,18 @@ export async function runDoctor(): Promise<{ overall: string; checks: Array<{ na
   return request('/admin/doctor');
 }
 
+// ── Admin: Provider Status ────────────────
+export interface ProviderStatus {
+  hasApiKey?: boolean;
+  hasAuthToken?: boolean;
+  hasBaseUrl?: boolean;
+  configured: boolean;
+}
+
+export async function getProviderStatus(): Promise<Record<string, ProviderStatus>> {
+  return request('/admin/providers/status');
+}
+
 // ── Admin: Model ──────────────────────────
 export interface ModelCapabilitiesInfo {
   contextWindow: number;

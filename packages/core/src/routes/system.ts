@@ -410,6 +410,28 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     },
   );
 
+  // GET /api/v1/admin/providers/status — credential status for each provider
+  app.get('/api/v1/admin/providers/status', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const hasVal = (v: unknown) => typeof v === 'string' && v !== '' && !v.startsWith('${');
+
+    return {
+      anthropic: {
+        hasApiKey: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey),
+        hasAuthToken: hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal(config.providers?.anthropic?.authToken),
+        configured: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey) || hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal(config.providers?.anthropic?.authToken),
+      },
+      openai: {
+        hasApiKey: hasVal(secretsStore?.get('providers.openai', 'apiKey')) || hasVal(config.providers?.openai?.apiKey),
+        configured: hasVal(secretsStore?.get('providers.openai', 'apiKey')) || hasVal(config.providers?.openai?.apiKey),
+      },
+      ollama: {
+        hasBaseUrl: hasVal(secretsStore?.get('providers.ollama', 'baseUrl')) || hasVal(config.providers?.ollama?.baseUrl),
+        configured: hasVal(secretsStore?.get('providers.ollama', 'baseUrl')) || hasVal(config.providers?.ollama?.baseUrl),
+      },
+    };
+  });
+
   // PATCH /api/v1/admin/providers/:id/credentials — save provider secrets
   app.patch('/api/v1/admin/providers/:id/credentials', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const config = (request as any).ctx.config as GatewayConfig;
