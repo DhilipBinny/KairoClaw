@@ -359,14 +359,25 @@ async function main(): Promise<void> {
           return;
         }
       }
-      if (channel === 'telegram' && channelRegistry.telegram) {
+      if (channel === 'telegram') {
+        if (!channelRegistry.telegram) {
+          const cronLog = createModuleLogger('cron');
+          cronLog.warn({ channel, to }, 'Cron delivery skipped: Telegram channel is disabled');
+          return;
+        }
         await channelRegistry.telegram.sendToChat(text, to);
-      } else if (channel === 'whatsapp' && channelRegistry.whatsapp) {
+      } else if (channel === 'whatsapp') {
+        if (!channelRegistry.whatsapp) {
+          const cronLog = createModuleLogger('cron');
+          cronLog.warn({ channel, to }, 'Cron delivery skipped: WhatsApp channel is disabled');
+          return;
+        }
         await channelRegistry.whatsapp.sendToChat(text, to);
       } else if (channel === 'web') {
         broadcastToWeb({ type: 'cron.delivery', text, ts: Date.now() });
       } else {
-        throw new Error(`Channel "${channel}" not available for delivery`);
+        const cronLog = createModuleLogger('cron');
+        cronLog.warn({ channel }, 'Cron delivery skipped: unknown channel');
       }
     },
   });
