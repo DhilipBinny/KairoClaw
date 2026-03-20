@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, testProvider, updateConfig, saveProviderCredentials, getModelInfo, saveModelCapabilities } from '$lib/api';
-  import type { ModelInfo } from '$lib/api';
+  import { getConfig, testProvider, updateConfig, saveProviderCredentials, getModelInfo, saveModelCapabilities, getProviderStatus } from '$lib/api';
+  import type { ModelInfo, ProviderStatus } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface ProviderConfig {
@@ -39,6 +39,7 @@
   let testResults: Record<string, TestResult | null> = $state({});
   let savingModel = $state('');
   let saveMessage = $state('');
+  let providerStatus: Record<string, ProviderStatus> = $state({});
 
   // Active model info (capabilities for top card)
   let primaryModel: ModelInfo | null = $state(null);
@@ -137,12 +138,7 @@
   }
 
   function isConfigured(id: string): boolean {
-    const pc = getProviderConfig(id);
-    if (!pc) return false;
-    if (id === 'anthropic') return !!(pc.apiKey || pc.authToken);
-    if (id === 'openai') return !!pc.apiKey;
-    if (id === 'ollama') return !!pc.baseUrl;
-    return false;
+    return providerStatus[id]?.configured ?? false;
   }
 
   function getBadgeVariant(providerId: string): 'green' | 'yellow' | 'default' {
@@ -269,7 +265,11 @@
 
   onMount(async () => {
     try {
-      const [configData] = await Promise.all([getConfig(), loadModelInfo()]);
+      const [configData, statusData] = await Promise.all([
+        getConfig(),
+        loadModelInfo(),
+        getProviderStatus().then(s => { providerStatus = s; }).catch(() => {}),
+      ]);
       config = configData.config;
     } catch (e) {
       console.error('Failed to load config:', e);
