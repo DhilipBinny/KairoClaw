@@ -272,7 +272,7 @@
     font-size: 13px;
   }
   .data-table th, .data-table td {
-    padding: 11px 16px;
+    padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border);
   }

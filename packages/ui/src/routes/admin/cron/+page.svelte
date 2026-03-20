@@ -718,6 +718,7 @@
   .job-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
   }
 
   /* Edit form (inline) */

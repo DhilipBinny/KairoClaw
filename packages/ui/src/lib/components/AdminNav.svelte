@@ -165,7 +165,7 @@
     font-size: 13px;
     font-weight: 500;
     transition: all var(--duration) var(--ease);
-    margin-bottom: 2px;
+    margin-bottom: 4px;
     position: relative;
   }
   .nav-item:hover {

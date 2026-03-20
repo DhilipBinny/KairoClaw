@@ -258,7 +258,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
   }
   .session-row {
     display: block;

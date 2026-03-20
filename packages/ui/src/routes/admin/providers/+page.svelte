@@ -731,6 +731,7 @@
   .provider-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
   }
   /* Credential form styles */
   .cred-form {
