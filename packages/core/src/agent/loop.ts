@@ -36,6 +36,7 @@ import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
+import { sniffBase64Mime } from '../media/store.js';
 import { autoSummarizeToMemory } from './auto-memory.js';
 
 const log = createModuleLogger('llm');
@@ -147,12 +148,8 @@ export async function runAgent(
       const parts: MessageContentPart[] = [];
       for (const img of inbound.images) {
         // Sniff actual MIME from base64 magic bytes — channels may report wrong type
-        let mimeType = img.mimeType;
-        const header = img.data.slice(0, 16);
-        if (header.startsWith('iVBOR')) mimeType = 'image/png';
-        else if (header.startsWith('/9j/')) mimeType = 'image/jpeg';
-        else if (header.startsWith('R0lGOD')) mimeType = 'image/gif';
-        else if (header.startsWith('UklGR')) mimeType = 'image/webp';
+        const sniffed = sniffBase64Mime(img.data);
+        const mimeType = sniffed?.mime || img.mimeType;
 
         parts.push({
           type: 'image',

@@ -151,12 +151,24 @@ const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string
 /**
  * Detect if a string value is likely a base64-encoded image.
  * Returns the format info if detected, null otherwise.
+ * Requires minimum length (designed for detecting base64 blobs in JSON).
  */
 export function detectBase64Image(value: string): { ext: string; mime: string } | null {
   if (typeof value !== 'string' || value.length < 1000) return null;
+  return sniffBase64Mime(value);
+}
 
+/**
+ * Sniff the actual MIME type from a base64-encoded image string
+ * by checking magic byte prefixes. Returns null if unrecognized.
+ *
+ * Use this to correct MIME types reported by channels — prevents
+ * Anthropic API 400 errors from type mismatches.
+ */
+export function sniffBase64Mime(base64Data: string): { ext: string; mime: string } | null {
+  if (!base64Data) return null;
   for (const sig of BASE64_IMAGE_SIGNATURES) {
-    if (value.startsWith(sig.prefix)) {
+    if (base64Data.startsWith(sig.prefix)) {
       return { ext: sig.ext, mime: sig.mime };
     }
   }
