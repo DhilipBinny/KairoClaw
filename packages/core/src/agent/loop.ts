@@ -30,7 +30,9 @@ import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { buildSystemPrompt } from './prompt.js';
 import { checkAndCompact } from './compaction.js';
 import { handleSlashCommand } from './slash-commands.js';
-import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS } from '../constants.js';
+import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS, TOOL_LOOP_THRESHOLD } from '../constants.js';
+import { SubAgentRegistry } from './subagent-registry.js';
+import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
@@ -59,6 +61,8 @@ export interface AgentContext {
   ) => Promise<unknown>;
   /** Model ID override (defaults to config.model.primary). */
   model?: string;
+  /** Sub-agent nesting depth (0 = top-level). */
+  subagentDepth?: number;
 }
 
 /** Observability callbacks fired around each round. */
@@ -200,6 +204,8 @@ export async function runAgent(
   let fullText = '';
   let finalThinkingText: string | null = null;
   const collectedMedia: MediaAttachment[] = [];
+  const toolCallCounts = new Map<string, number>();
+  const subagentRegistry = new SubAgentRegistry();
   let round = 0;
   let lastResponseHadToolCalls = false;
 
@@ -233,14 +239,36 @@ export async function runAgent(
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
-      // Clean up orphaned user message so it doesn't pollute future conversations
-      if (userMsgPersisted && userMsgResult?.id) {
+
+      // Context overflow recovery: compact and retry on first round
+      const isOverflow = /context.length|context.window|too.many.tokens|exceeds.*max|max.*token/i.test(msg);
+      if (isOverflow && round === 1) {
+        reqLog.warn({ err: msg }, 'Context overflow detected — attempting mid-turn compaction');
         try {
-          db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]);
-        } catch { /* best effort cleanup */ }
+          await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
+          // Reload messages after compaction
+          const freshRows = messageRepo.listBySession(session.id);
+          messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
+          response = await context.callLLM({
+            messages, tools: tools.length > 0 ? tools : undefined,
+            model, systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+          });
+          reqLog.info('LLM call succeeded after mid-turn compaction');
+        } catch (retryErr: unknown) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          reqLog.error({ err: retryMsg }, 'LLM call failed after compaction');
+          if (userMsgPersisted && userMsgResult?.id) {
+            try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+          }
+          return { text: `LLM error (after compaction): ${retryMsg}`, error: true };
+        }
+      } else {
+        reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
+        if (userMsgPersisted && userMsgResult?.id) {
+          try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+        }
+        return { text: `LLM error: ${msg}`, error: true };
       }
-      return { text: `LLM error: ${msg}`, error: true };
     }
 
     const llmLatencyMs = Date.now() - llmStart;
@@ -320,6 +348,20 @@ export async function runAgent(
         .join(', ');
       reqLog.info({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool called');
 
+      // Tool loop detection: skip if same tool+args called too many times
+      const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
+      const callCount = (toolCallCounts.get(toolHash) ?? 0) + 1;
+      toolCallCounts.set(toolHash, callCount);
+      if (callCount > TOOL_LOOP_THRESHOLD) {
+        reqLog.warn({ tool: toolName, callCount, threshold: TOOL_LOOP_THRESHOLD }, 'Tool loop detected — skipping execution');
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: `[Tool loop detected: "${toolName}" called ${callCount} times with similar arguments. Try a different approach or tool.]`,
+        });
+        continue;
+      }
+
       if (onToolStart) {
         try {
           onToolStart(toolName, toolArgs);
@@ -334,7 +376,7 @@ export async function runAgent(
 
       try {
         if (context.executeTool) {
-          result = await context.executeTool(toolName, toolArgs, { session });
+          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry } as any);
         } else {
           result = { error: 'No tool executor configured' };
           toolStatus = 'error';
@@ -423,7 +465,34 @@ export async function runAgent(
       });
     }
 
+    // ── Wait for pending sub-agents and inject results ──────
+    if (subagentRegistry.hasPending()) {
+      reqLog.info({ pending: subagentRegistry.size }, 'Waiting for sub-agents to complete');
+      await subagentRegistry.waitForAll();
+
+      // Build lightweight result summaries and inject as tool results
+      // We need to match childId → toolCallId from the spawn_agent calls
+      const summaries = subagentRegistry.buildResultSummaries();
+      for (const summary of summaries) {
+        // Find the tool message that spawned this child (by matching childId in content)
+        const spawnMsg = messages.find(
+          m => m.role === 'tool' && typeof m.content === 'string' &&
+               m.content.includes(summary.childId) && m.content.includes(SUBAGENT_PENDING_MARKER),
+        );
+        if (spawnMsg) {
+          // Replace the pending placeholder with the actual result
+          spawnMsg.content = JSON.stringify(summary.result);
+        }
+      }
+      reqLog.info({ completed: summaries.length }, 'Sub-agent results injected');
+    }
+
     if (onRoundEnd) onRoundEnd(round, maxToolRounds);
+  }
+
+  // Drain all sub-agent promises (including killed ones) to prevent floating promises
+  if (subagentRegistry.size > 0) {
+    await subagentRegistry.drainAll();
   }
 
   // Strip thinking blocks from older turns to save memory

@@ -59,8 +59,8 @@ export async function autoSummarizeToMemory(opts: {
   const workspace = config.agent.workspace;
   const messageRepo = new MessageRepository(db);
 
-  // Skip non-conversational sessions
-  if (channel === 'cron') {
+  // Skip non-conversational sessions (cron jobs, sub-agents)
+  if (channel === 'cron' || channel === 'internal') {
     log.debug({ channel }, 'Auto-memory: skipping non-conversational session');
     return;
   }

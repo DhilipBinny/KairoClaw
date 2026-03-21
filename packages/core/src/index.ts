@@ -263,10 +263,18 @@ async function main(): Promise<void> {
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: toolRegistry.getDefinitions(),
       executeTool: (name, args, ctx) => {
-        // Inject shared services into tool context
+        // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
           ...ctx,
+          db,
           config,
+          tenantId,
+          callLLM: (llmArgs: any) => providerRegistry.callWithFailover(llmArgs),
+          tools: toolRegistry.getDefinitions(),
+          executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
+            return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
+          },
+          subagentDepth: 0,
           secretsStore,
           cronScheduler: sharedServices.cronScheduler,
           telegramSend: sharedServices.telegramSend,

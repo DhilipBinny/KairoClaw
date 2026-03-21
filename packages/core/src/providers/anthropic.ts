@@ -170,15 +170,20 @@ export class AnthropicProvider implements ProviderInterface {
 
     const caps = getModelCapabilities(modelId, this.config);
 
-    // OAuth tokens require Claude Code identity in system prompt
+    // Build system content as array with cache_control for prompt caching
+    // Anthropic caches marked blocks for 5 min — saves ~90% on input tokens for repeat turns
     let systemContent: string | Anthropic.TextBlockParam[];
     if (this.authType === 'oauth-token') {
       systemContent = [
         { type: 'text' as const, text: "You are Claude Code, Anthropic's official CLI for Claude." },
-        ...(systemPrompt ? [{ type: 'text' as const, text: systemPrompt }] : []),
+        ...(systemPrompt ? [{ type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } }] : []),
+      ];
+    } else if (systemPrompt) {
+      systemContent = [
+        { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
       ];
     } else {
-      systemContent = systemPrompt || '';
+      systemContent = '';
     }
 
     const params: Anthropic.MessageCreateParams = {
