@@ -257,7 +257,11 @@ async function main(): Promise<void> {
 
     // Derive scope key for per-user memory isolation
     const scopeKey = deriveScopeKey(inbound.channel, inbound.userId);
-    if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey);
+    if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey, {
+      name: inbound.senderName,
+      channel: inbound.channel,
+      userId: inbound.userId,
+    });
 
     return runAgent(inbound, callbacks || {}, {
       db,

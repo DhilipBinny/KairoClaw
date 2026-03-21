@@ -81,12 +81,34 @@ export function getScopedMemoryDir(
 
 /**
  * Ensure the scope directory structure exists.
- * Called on first message from a new user.
+ * On first creation, seeds a USER.md with the sender's info so
+ * the agent knows who it's talking to from the very first message.
  */
 export function ensureScopeDir(
   workspace: string,
   scopeKey: string,
+  senderInfo?: { name?: string; channel?: string; userId?: string | number },
 ): void {
-  const memoryDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey, 'memory', 'sessions');
+  const scopeDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
+  const memoryDir = path.join(scopeDir, 'memory', 'sessions');
+  const isNew = !fs.existsSync(scopeDir);
+
   fs.mkdirSync(memoryDir, { recursive: true });
+
+  // Seed USER.md on first creation
+  if (isNew && senderInfo) {
+    const userMd = path.join(scopeDir, 'USER.md');
+    const channel = senderInfo.channel || scopeKey.split(':')[0];
+    const name = senderInfo.name || 'Unknown';
+    const userId = senderInfo.userId || scopeKey.split(':')[1];
+
+    const content = `# User Profile\n\n` +
+      `- **Name**: ${name}\n` +
+      `- **Channel**: ${channel}\n` +
+      `- **ID**: ${userId}\n` +
+      `- **First seen**: ${new Date().toISOString().split('T')[0]}\n\n` +
+      `_This is a new user. Learn their preferences as you chat._\n`;
+
+    fs.writeFileSync(userMd, content, 'utf8');
+  }
 }

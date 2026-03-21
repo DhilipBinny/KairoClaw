@@ -311,7 +311,12 @@
           {#each pendingSenders.filter(s => s.status === 'pending') as sender (sender.id)}
             <div class="pending-row">
               <div class="pending-info">
-                <span class="pending-name">{sender.sender_name || sender.sender_id}</span>
+                <span class="pending-name">
+                  {#if (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
+                    <span class="badge badge-group">Group</span>
+                  {/if}
+                  {sender.sender_name || sender.sender_id}
+                </span>
                 <span class="pending-meta">
                   {sender.channel} &middot; ID: <code>{sender.sender_id}</code> &middot; {sender.message_count} msg{sender.message_count > 1 ? 's' : ''} &middot; {new Date(sender.last_seen).toLocaleDateString()}
                 </span>
@@ -341,7 +346,12 @@
           {#each pendingSenders.filter(s => s.status === 'seen') as sender (sender.id)}
             <div class="pending-row">
               <div class="pending-info">
-                <span class="pending-name">{sender.sender_name || sender.sender_id}</span>
+                <span class="pending-name">
+                  {#if (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
+                    <span class="badge badge-group">Group</span>
+                  {/if}
+                  {sender.sender_name || sender.sender_id}
+                </span>
                 <span class="pending-meta">
                   {sender.channel} &middot; ID: <code>{sender.sender_id}</code> &middot; {sender.message_count} msg{sender.message_count > 1 ? 's' : ''} &middot; {new Date(sender.last_seen).toLocaleDateString()}
                 </span>
@@ -512,6 +522,24 @@
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   <span class="toggle-label">{getVal('channels.telegram.groupRequireMention') ? 'Yes' : 'No'}</span>
                 </button>
+              </div>
+            </div>
+            <!-- Group AllowFrom -->
+            <div class="field-row allow-from-row">
+              <div class="field-info">
+                <label class="field-label">Allowed Groups</label>
+                <span class="field-hint">Restrict which groups the bot responds in. Leave empty to allow all groups.</span>
+              </div>
+              <div class="field-control chip-field-control">
+                <ChipInput
+                  value={Array.isArray(getVal('channels.telegram.groupAllowFrom')) ? (getVal('channels.telegram.groupAllowFrom') as string[]).map(String) : []}
+                  placeholder="e.g. -1003564949686"
+                  onchange={(v) => saveList('channels.telegram.groupAllowFrom', v)}
+                />
+                {#if saving['channels.telegram.groupAllowFrom']}<span class="spinner-sm"></span>{/if}
+                {#if feedback['channels.telegram.groupAllowFrom']?.msg}
+                  <span class="field-msg" class:ok={feedback['channels.telegram.groupAllowFrom'].ok}>{feedback['channels.telegram.groupAllowFrom'].msg}</span>
+                {/if}
               </div>
             </div>
             <!-- AllowFrom -->
@@ -999,6 +1027,7 @@
   .pending-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-raised); border-radius: var(--radius); border: 1px solid var(--border-subtle); }
   .pending-info { display: flex; flex-direction: column; gap: 2px; }
   .pending-name { font-size: 13px; font-weight: 500; }
+  .badge-group { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--accent, #6366f1); color: #fff; margin-right: 4px; vertical-align: middle; }
   .pending-meta { font-size: 11px; color: var(--text-muted); }
   .pending-meta code { font-size: 11px; background: var(--bg-void); padding: 1px 4px; border-radius: 3px; font-family: var(--font-mono); }
   .pending-actions { display: flex; gap: 6px; }

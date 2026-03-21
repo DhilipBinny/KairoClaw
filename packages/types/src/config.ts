@@ -67,6 +67,8 @@ export interface TelegramChannelConfig {
   groupsEnabled: boolean;
   /** In groups, only respond when mentioned or replied to. */
   groupRequireMention: boolean;
+  /** Allowed group chat IDs. Empty = all groups allowed. */
+  groupAllowFrom: string[];
   /** Path to a file containing the bot token. */
   tokenFile?: string;
   /** Outbound message policy. 'session-only' restricts to contacts with existing sessions. */

@@ -150,9 +150,13 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    // Add to allowFrom in config and persist to disk
+    // Add to allowFrom (individuals) or groupAllowFrom (groups)
     const stateDir = liveConfig._stateDir || '';
     const configPath = path.join(stateDir, 'config.json');
+
+    // Detect if this is a group or individual by sender_id pattern
+    const isGroup = (sender.channel === 'telegram' && sender.sender_id.startsWith('-'))
+      || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'));
 
     try {
       const raw = fs.readFileSync(configPath, 'utf8');
@@ -160,9 +164,9 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
       let dotPath: string;
       if (sender.channel === 'telegram') {
-        dotPath = 'channels.telegram.allowFrom';
+        dotPath = isGroup ? 'channels.telegram.groupAllowFrom' : 'channels.telegram.allowFrom';
       } else if (sender.channel === 'whatsapp') {
-        dotPath = 'channels.whatsapp.allowFrom';
+        dotPath = isGroup ? 'channels.whatsapp.groupAllowFrom' : 'channels.whatsapp.allowFrom';
       } else {
         return reply.code(400).send({ error: `Unknown channel: ${sender.channel}` });
       }
