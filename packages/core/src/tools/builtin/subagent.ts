@@ -117,6 +117,7 @@ export const subagentTools: ToolRegistration[] = [
               executeTool: executeTool as any,
               model: modelOverride,
               subagentDepth: 1, // flat — children are always depth 1
+              scopeKey: (ctx.scopeKey as string | null) ?? null, // inherit parent's scope
             },
           );
         } finally {

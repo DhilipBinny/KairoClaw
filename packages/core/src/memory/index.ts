@@ -200,6 +200,7 @@ export class MemorySystem {
   private getMemoryFiles(): string[] {
     const files: string[] = [];
 
+    // Global memory files
     const memoryMd = path.join(this.workspace, 'MEMORY.md');
     if (fs.existsSync(memoryMd)) files.push(memoryMd);
 
@@ -211,6 +212,27 @@ export class MemorySystem {
           files.push(path.join(memoryDir, entry));
         }
       }
+    }
+
+    // Scoped memory files (scopes/*/memory/**/*.md)
+    const scopesDir = path.join(this.workspace, 'scopes');
+    if (fs.existsSync(scopesDir)) {
+      try {
+        for (const scope of fs.readdirSync(scopesDir)) {
+          const scopeMemDir = path.join(scopesDir, scope, 'memory');
+          if (!fs.existsSync(scopeMemDir)) continue;
+          for (const entry of fs.readdirSync(scopeMemDir)) {
+            const entryPath = path.join(scopeMemDir, entry);
+            if (entry.endsWith('.md')) {
+              files.push(entryPath);
+            } else if (entry === 'sessions' && fs.statSync(entryPath).isDirectory()) {
+              for (const sf of fs.readdirSync(entryPath)) {
+                if (sf.endsWith('.md')) files.push(path.join(entryPath, sf));
+              }
+            }
+          }
+        }
+      } catch { /* non-critical */ }
     }
 
     return files;
@@ -308,13 +330,16 @@ export class MemorySystem {
     const watchPaths = [
       path.join(this.workspace, 'MEMORY.md'),
       path.join(this.workspace, 'memory'),
+      path.join(this.workspace, 'scopes'),
     ];
 
     for (const watchPath of watchPaths) {
       if (!fs.existsSync(watchPath)) continue;
 
       try {
-        const w = fs.watch(watchPath, { recursive: false }, (_eventType, filename) => {
+        // Use recursive watching for scopes/ (nested scope dirs)
+        const isScopes = watchPath.endsWith('scopes');
+        const w = fs.watch(watchPath, { recursive: isScopes }, (_eventType, filename) => {
           // Debounce: wait for writes to settle
           const debounceKey = filename ? path.join(watchPath, filename) : watchPath;
           const existing = this._debounceTimers.get(debounceKey);
