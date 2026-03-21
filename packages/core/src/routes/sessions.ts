@@ -129,8 +129,12 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
+    // Delete all child records before the session (usage_records lacks ON DELETE CASCADE)
+    db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
+    db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
     messageRepo.deleteBySession(id);
     sessionRepo.delete(id);
+    // TODO: clean up scoped memory entries related to this session's date
     return { success: true };
   });
 };

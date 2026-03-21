@@ -31,6 +31,7 @@
   .admin-layout {
     display: flex;
     height: 100vh;
+    height: 100dvh;
     width: 100%;
   }
   .admin-nav-wrapper {
@@ -56,6 +57,7 @@
       top: 0;
       left: 0;
       height: 100vh;
+      height: 100dvh;
       z-index: 100;
       transform: translateX(-100%);
       transition: transform var(--duration-slow) var(--ease);
