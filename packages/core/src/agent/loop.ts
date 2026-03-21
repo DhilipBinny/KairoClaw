@@ -146,9 +146,17 @@ export async function runAgent(
       // Build multimodal content array
       const parts: MessageContentPart[] = [];
       for (const img of inbound.images) {
+        // Sniff actual MIME from base64 magic bytes — channels may report wrong type
+        let mimeType = img.mimeType;
+        const header = img.data.slice(0, 16);
+        if (header.startsWith('iVBOR')) mimeType = 'image/png';
+        else if (header.startsWith('/9j/')) mimeType = 'image/jpeg';
+        else if (header.startsWith('R0lGOD')) mimeType = 'image/gif';
+        else if (header.startsWith('UklGR')) mimeType = 'image/webp';
+
         parts.push({
           type: 'image',
-          source: { type: 'base64', media_type: img.mimeType, data: img.data },
+          source: { type: 'base64', media_type: mimeType, data: img.data },
         });
       }
       parts.push({ type: 'text', text: inbound.text });
