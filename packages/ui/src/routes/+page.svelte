@@ -17,6 +17,7 @@
   } from '$lib/stores/chat.svelte';
   import { initSessionListeners, destroySessionListeners, loadSessions } from '$lib/stores/sessions.svelte';
   import { logout } from '$lib/stores/auth.svelte';
+  import { uploadFile } from '$lib/api';
   import { goto } from '$app/navigation';
   import * as ws from '$lib/ws';
 
@@ -28,14 +29,43 @@
   let inputText = $state('');
   let messageContainer: HTMLDivElement | undefined = $state();
   let inputRef: HTMLTextAreaElement | undefined = $state();
+  let fileInputRef: HTMLInputElement | undefined = $state();
   let sidebarOpen = $state(true);
+  let pendingFiles: Array<{ file: File; path?: string; name: string; uploading: boolean; error?: string }> = $state([]);
+
+  async function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input.files?.length) return;
+    for (const file of Array.from(input.files)) {
+      const entry = { file, name: file.name, uploading: true, path: undefined as string | undefined, error: undefined as string | undefined };
+      pendingFiles = [...pendingFiles, entry];
+      try {
+        const result = await uploadFile(file);
+        entry.path = result.filePath;
+        entry.uploading = false;
+        pendingFiles = [...pendingFiles];
+      } catch (err) {
+        entry.uploading = false;
+        entry.error = (err as Error).message;
+        pendingFiles = [...pendingFiles];
+      }
+    }
+    input.value = '';
+  }
+
+  function removeFile(idx: number) {
+    pendingFiles = pendingFiles.filter((_, i) => i !== idx);
+  }
 
   function handleSend() {
     const text = inputText.trim();
-    if (!text || isStreaming) return;
-    sendMessage(text);
+    if ((!text && pendingFiles.length === 0) || isStreaming) return;
+    const uploadedFiles = pendingFiles
+      .filter(f => f.path && !f.uploading && !f.error)
+      .map(f => ({ path: f.path!, name: f.name }));
+    sendMessage(text || (uploadedFiles.length > 0 ? 'Please analyze the attached file(s).' : ''), uploadedFiles.length > 0 ? uploadedFiles : undefined);
     inputText = '';
-    // Reset textarea height
+    pendingFiles = [];
     if (inputRef) {
       inputRef.style.height = 'auto';
     }
@@ -221,7 +251,43 @@
 
     <!-- Input -->
     <div class="chat-input-area">
+      {#if pendingFiles.length > 0}
+        <div class="file-preview-bar">
+          {#each pendingFiles as pf, idx}
+            <div class="file-chip" class:uploading={pf.uploading} class:error={!!pf.error}>
+              <span class="file-chip-name">{pf.name}</span>
+              {#if pf.uploading}
+                <span class="file-chip-status"><span class="spinner-sm"></span></span>
+              {:else if pf.error}
+                <span class="file-chip-status" title={pf.error}>!</span>
+              {:else}
+                <span class="file-chip-status">OK</span>
+              {/if}
+              <button class="file-chip-remove" onclick={() => removeFile(idx)} aria-label="Remove file">&times;</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
       <div class="chat-input-wrapper">
+        <input
+          type="file"
+          bind:this={fileInputRef}
+          onchange={handleFileSelect}
+          multiple
+          style="display:none"
+          accept=".pdf,.doc,.docx,.txt,.csv,.json,.xml,.yaml,.yml,.md,.zip,.tar,.gz,.png,.jpg,.jpeg,.gif,.webp,.mp3,.mp4,.wav"
+        />
+        <button
+          class="chat-attach-btn"
+          onclick={() => fileInputRef?.click()}
+          disabled={isStreaming}
+          aria-label="Attach file"
+          title="Attach file"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"></path>
+          </svg>
+        </button>
         <textarea
           class="chat-input"
           bind:this={inputRef}
@@ -235,7 +301,7 @@
         <button
           class="chat-send-btn"
           onclick={handleSend}
-          disabled={!inputText.trim() || isStreaming}
+          disabled={(!inputText.trim() && pendingFiles.filter(f => f.path).length === 0) || isStreaming}
           aria-label="Send message"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -558,6 +624,75 @@
     opacity: 0.3;
     cursor: not-allowed;
     box-shadow: none;
+  }
+  .chat-attach-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all var(--duration) var(--ease);
+  }
+  .chat-attach-btn:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+  .chat-attach-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .file-preview-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 800px;
+    margin: 0 auto 6px;
+    padding: 0 4px;
+  }
+  .file-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .file-chip.uploading { opacity: 0.6; }
+  .file-chip.error { border-color: var(--error, #ef4444); }
+  .file-chip-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-chip-status { font-size: 10px; color: var(--text-muted); }
+  .file-chip-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+  }
+  .file-chip-remove:hover { color: var(--text-primary); }
+  .spinner-sm {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
   }
 
   /* Desktop: keep current flex behavior; hide when not open */
