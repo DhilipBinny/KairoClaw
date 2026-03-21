@@ -165,6 +165,56 @@ const mcpSectionSchema = z.object({
   servers: z.record(z.string(), mcpServerConfigSchema).default({}),
 });
 
+// ── Plugin schemas ──────────────────────────────────────────
+
+const cliPluginSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
+  command: z.string().min(1),
+  description: z.string().default(''),
+  enabled: z.boolean().default(true),
+  timeout: z.number().int().min(1).max(120).default(30),
+  allowedSubcommands: z.array(z.string()).default([]),
+  blockedSubcommands: z.array(z.string()).default([]),
+  requireConfirmation: z.array(z.string()).default([]),
+});
+
+const httpEndpointParameterSchema = z.object({
+  type: z.string().default('string'),
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+  default: z.unknown().optional(),
+});
+
+const httpEndpointSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
+  path: z.string().min(1),
+  description: z.string().default(''),
+  parameters: z.record(z.string(), httpEndpointParameterSchema).default({}),
+});
+
+const httpPluginAuthSchema = z.object({
+  type: z.enum(['bearer', 'header', 'query', 'basic']),
+  tokenSecret: z.string().min(1),
+  headerName: z.string().optional(),
+  queryParam: z.string().optional(),
+});
+
+const httpPluginSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
+  baseUrl: z.string().url(),
+  description: z.string().default(''),
+  enabled: z.boolean().default(true),
+  timeout: z.number().int().min(1).max(600).default(30),
+  auth: httpPluginAuthSchema.optional(),
+  endpoints: z.array(httpEndpointSchema).default([]),
+});
+
+export const pluginsSchema = z.object({
+  cli: z.array(cliPluginSchema).default([]),
+  http: z.array(httpPluginSchema).default([]),
+});
+
 export const configSchema = z.object({
   gateway: withObjectDefault(gatewayNetworkSchema),
   providers: withObjectDefault(providersSchema),

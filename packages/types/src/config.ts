@@ -235,6 +235,87 @@ export interface MCPSectionConfig {
 }
 
 // ──────────────────────────────────────────────
+// Plugin configs
+// ──────────────────────────────────────────────
+
+/** CLI plugin configuration. */
+export interface CliPluginConfig {
+  /** Unique plugin name (lowercase alphanumeric + underscores). */
+  name: string;
+  /** Binary name to execute (e.g. gh, docker, kubectl). */
+  command: string;
+  /** Human-readable description shown to the LLM. */
+  description: string;
+  /** Whether the plugin is enabled. */
+  enabled: boolean;
+  /** Command timeout in seconds (1-120). */
+  timeout: number;
+  /** Allowed subcommands (empty = all allowed). */
+  allowedSubcommands: string[];
+  /** Always-blocked subcommands. */
+  blockedSubcommands: string[];
+  /** Subcommands that require user confirmation. */
+  requireConfirmation: string[];
+}
+
+/** HTTP plugin endpoint configuration. */
+export interface HttpEndpointConfig {
+  /** Endpoint name (used in tool name). */
+  name: string;
+  /** HTTP method. */
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** URL path relative to baseUrl. */
+  path: string;
+  /** Human-readable description. */
+  description: string;
+  /** Parameter definitions for this endpoint. */
+  parameters: Record<string, {
+    type: string;
+    description?: string;
+    required?: boolean;
+    default?: unknown;
+  }>;
+}
+
+/** HTTP plugin auth configuration. */
+export interface HttpPluginAuth {
+  /** Auth type. */
+  type: 'bearer' | 'header' | 'query' | 'basic';
+  /** Key path in the secrets store (e.g. "plugins.myapi"). */
+  tokenSecret: string;
+  /** Header name for 'header' auth type. */
+  headerName?: string;
+  /** Query parameter name for 'query' auth type. */
+  queryParam?: string;
+}
+
+/** HTTP plugin configuration. */
+export interface HttpPluginConfig {
+  /** Unique plugin name (lowercase alphanumeric + underscores). */
+  name: string;
+  /** Base URL for API requests. */
+  baseUrl: string;
+  /** Human-readable description. */
+  description: string;
+  /** Whether the plugin is enabled. */
+  enabled: boolean;
+  /** Request timeout in seconds (1-600). Higher for slow endpoints like image gen. */
+  timeout: number;
+  /** Optional authentication configuration. */
+  auth?: HttpPluginAuth;
+  /** API endpoints exposed as tools. */
+  endpoints: HttpEndpointConfig[];
+}
+
+/** Plugin configuration section. */
+export interface PluginsConfig {
+  /** CLI plugins. */
+  cli: CliPluginConfig[];
+  /** HTTP plugins. */
+  http: HttpPluginConfig[];
+}
+
+// ──────────────────────────────────────────────
 // Top-level config
 // ──────────────────────────────────────────────
 
@@ -256,6 +337,9 @@ export interface GatewayConfig {
 
   /** MCP server configuration. */
   mcp: MCPSectionConfig;
+
+  /** Plugin configuration (CLI + HTTP). Loaded from plugins.json. */
+  plugins?: PluginsConfig;
 
   /** Internal: resolved path to the state directory (~/.agw). Set at runtime. */
   _stateDir?: string;

@@ -4,7 +4,7 @@ import type { ToolRegistration } from '../types.js';
  * Validate a URL for web_fetch to prevent SSRF attacks.
  * Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
  */
-function validateFetchUrl(urlStr: string): URL {
+export function validateFetchUrl(urlStr: string): URL {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
