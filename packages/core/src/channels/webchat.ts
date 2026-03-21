@@ -311,6 +311,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                 sessionKey,
                 text: result.text || '',
                 usage: result.usage,
+                ...(result.media && result.media.length > 0 ? { media: result.media } : {}),
                 requestId,
               });
             } catch (e: unknown) {

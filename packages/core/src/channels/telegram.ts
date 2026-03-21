@@ -9,8 +9,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Bot, InputFile } from 'grammy';
+import { extractMedia } from '../media/detector.js';
+import type { MediaItem } from '../media/detector.js';
 import type { Context } from 'grammy';
-import type { GatewayConfig, InboundMessage } from '@agw/types';
+import type { GatewayConfig, InboundMessage, MediaAttachment } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
@@ -358,37 +360,58 @@ class TelegramChannel implements Channel {
       }
 
       if (result.text) {
-        // Check if the reply references an image to send as photo
-        const imageMatch = result.text.match(
-          /!\[.*?\]\((.+?)\)|(?:^|\s)((?:\/|\.\/|\.\.\/).+?\.(?:jpg|jpeg|png|gif|webp))(?:\s|$)/i,
-        );
-        if (imageMatch) {
-          const imgPath = imageMatch[1] || imageMatch[2];
-          if (imgPath) {
-            const resolvedImg = path.resolve(
-              path.isAbsolute(imgPath)
-                ? imgPath
-                : path.join(this.config.agent.workspace, imgPath),
-            );
-            const workspace = path.resolve(this.config.agent.workspace);
-            if (!resolvedImg.startsWith(workspace + path.sep) && resolvedImg !== workspace) {
-              log.warn({ imgPath, resolvedImg }, 'Telegram: image path traversal blocked');
-            } else if (fs.existsSync(resolvedImg)) {
-              try {
-                await ctx.replyWithPhoto(new InputFile(fs.createReadStream(resolvedImg)), {
-                  caption: result.text.replace(imageMatch[0], '').trim().slice(0, 1024) || undefined,
-                  reply_parameters:
-                    chatType === 'group' && ctx.message
-                      ? { message_id: ctx.message.message_id }
-                      : undefined,
-                });
-                return;
-              } catch (e: unknown) {
-                const errMsg = e instanceof Error ? e.message : String(e);
-                log.debug({ err: errMsg }, 'Failed to send as photo, falling back to text');
-              }
+        // Prefer structured media from tool results; fall back to text extraction
+        const stateDir = this.config._stateDir || '';
+        const workspace = this.config.agent.workspace;
+
+        let mediaItems: MediaItem[];
+        let cleanText: string;
+
+        if (result.media && result.media.length > 0) {
+          // Convert MediaAttachment[] → MediaItem[] for sendTelegramMedia
+          mediaItems = result.media.map((a: MediaAttachment) => ({
+            type: a.type,
+            filePath: a.filePath,
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            caption: a.caption,
+            match: '',
+          }));
+          // Still strip markdown media refs from text for a clean caption
+          ({ cleanText } = extractMedia(result.text, stateDir, workspace));
+        } else {
+          ({ items: mediaItems, cleanText } = extractMedia(result.text, stateDir, workspace));
+        }
+
+        if (mediaItems.length > 0) {
+          const replyParams = chatType === 'group' && ctx.message
+            ? { message_id: ctx.message.message_id }
+            : undefined;
+          const caption = cleanText.slice(0, 1024) || undefined;
+          let mediaSent = false;
+
+          for (const item of mediaItems) {
+            try {
+              await this.sendTelegramMedia(ctx, item, caption && !mediaSent ? caption : undefined, replyParams);
+              mediaSent = true;
+            } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              log.debug({ err: errMsg, type: item.type, file: item.fileName }, 'Failed to send media, will fall back to text');
             }
           }
+
+          if (mediaSent) {
+            // If there's remaining text beyond the caption, send it as a separate message
+            if (cleanText.length > 1024) {
+              const remainingText = cleanText.slice(1024);
+              const chunks = splitMessage(remainingText, 4000);
+              for (const chunk of chunks) {
+                await sendWithRetry(ctx, chunk, { parse_mode: 'Markdown' });
+              }
+            }
+            return;
+          }
+          // If no media was sent successfully, fall through to text
         }
 
         // Split long messages (Telegram limit: 4096 chars)
@@ -471,6 +494,39 @@ class TelegramChannel implements Channel {
       const errMsg = e instanceof Error ? e.message : String(e);
       log.error({ err: errMsg }, 'Failed to download Telegram file as base64');
       return null;
+    }
+  }
+
+  /** Send a media item via the appropriate Telegram API method. */
+  private async sendTelegramMedia(
+    ctx: Context,
+    item: MediaItem,
+    caption?: string,
+    replyParams?: { message_id: number },
+  ): Promise<void> {
+    const file = new InputFile(fs.createReadStream(item.filePath));
+    const opts = {
+      caption,
+      reply_parameters: replyParams,
+    };
+
+    switch (item.type) {
+      case 'image':
+        await ctx.replyWithPhoto(file, opts);
+        break;
+      case 'audio':
+        await ctx.replyWithAudio(file, opts);
+        break;
+      case 'voice':
+        await ctx.replyWithVoice(file, opts);
+        break;
+      case 'video':
+        await ctx.replyWithVideo(file, opts);
+        break;
+      case 'document':
+      default:
+        await ctx.replyWithDocument(file, opts);
+        break;
     }
   }
 

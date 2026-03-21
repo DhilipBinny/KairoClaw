@@ -5,7 +5,8 @@
  * `http_{pluginName}_{endpointName}`.
  */
 
-import type { GatewayConfig, HttpPluginConfig, HttpEndpointConfig } from '@agw/types';
+import path from 'node:path';
+import type { GatewayConfig, HttpPluginConfig, HttpEndpointConfig, MediaAttachment } from '@agw/types';
 
 type EndpointParamDef = { type: string; description?: string; required?: boolean; default?: unknown };
 import type { ToolRegistration } from '../tools/types.js';
@@ -216,17 +217,27 @@ export function registerHttpPlugins(
               const buf = Buffer.from(await res.arrayBuffer());
               const filename = mediaStore.save(buf, imgExt);
               const mediaUrl = mediaStore.getUrl(filename);
+              const filePath = path.join(mediaStore.dir, filename);
+              const _media: MediaAttachment[] = [{
+                type: 'image',
+                filePath,
+                fileName: filename,
+                mimeType: contentType.split(';')[0].trim(),
+                url: mediaUrl,
+              }];
               return {
                 status: res.status,
                 mediaUrl,
                 mediaType: contentType,
                 sizeBytes: buf.length,
                 note: `Image saved. Use markdown to show: ![image](${mediaUrl})`,
+                _media,
               };
             }
 
             // ── JSON response — check for embedded base64 images ──
             let body: unknown;
+            const b64Media: MediaAttachment[] = [];
             if (contentType.includes('application/json')) {
               body = await res.json();
 
@@ -239,10 +250,18 @@ export function registerHttpPlugins(
                   if (detected) {
                     const filename = mediaStore.saveBase64(val, detected.ext);
                     const mediaUrl = mediaStore.getUrl(filename);
+                    const filePath = path.join(mediaStore.dir, filename);
                     obj[key] = mediaUrl;
                     // Add metadata so LLM knows this is an image URL
                     obj[`${key}_type`] = detected.mime;
                     obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
+                    b64Media.push({
+                      type: 'image',
+                      filePath,
+                      fileName: filename,
+                      mimeType: detected.mime,
+                      url: mediaUrl,
+                    });
                   }
                 }
               }
@@ -266,6 +285,7 @@ export function registerHttpPlugins(
             return {
               status: res.status,
               body: typeof body === 'string' ? truncated : body,
+              ...(b64Media.length > 0 ? { _media: b64Media } : {}),
             };
           } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e);

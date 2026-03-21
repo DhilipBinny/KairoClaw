@@ -7,6 +7,7 @@
  */
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import type {
   InboundMessage,
   AgentCallbacks,
@@ -18,6 +19,7 @@ import type {
   Message,
   MessageContentPart,
   ToolCall,
+  MediaAttachment,
 } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { SessionRow } from '../db/repositories/session.js';
@@ -77,7 +79,7 @@ export async function runAgent(
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
-  const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onRoundStart, onRoundEnd } = callbacks;
+  const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
   const requestId = `req-${Date.now().toString(36)}`;
 
@@ -197,6 +199,7 @@ export async function runAgent(
   let totalOutputTokens = 0;
   let fullText = '';
   let finalThinkingText: string | null = null;
+  const collectedMedia: MediaAttachment[] = [];
   let round = 0;
   let lastResponseHadToolCalls = false;
 
@@ -354,6 +357,35 @@ export async function runAgent(
         durationMs,
       });
 
+      // Collect _media attachments from tool results
+      if (result && typeof result === 'object' && !Array.isArray(result)) {
+        const resultObj = result as Record<string, unknown>;
+        const mediaArr = resultObj._media;
+        if (Array.isArray(mediaArr)) {
+          for (const item of mediaArr) {
+            if (!item || typeof item !== 'object') continue;
+            const m = item as Record<string, unknown>;
+            // Validate all required fields + file existence
+            if (
+              typeof m.filePath === 'string' &&
+              typeof m.fileName === 'string' &&
+              typeof m.mimeType === 'string' &&
+              typeof m.type === 'string' &&
+              fs.existsSync(m.filePath)
+            ) {
+              const attachment = item as MediaAttachment;
+              collectedMedia.push(attachment);
+              if (onMedia) {
+                try { onMedia(attachment); } catch { /* ignore callback errors */ }
+              }
+            }
+          }
+          // Strip _media from the result before stringifying for LLM context
+          // (avoids leaking absolute file paths into the conversation)
+          delete resultObj._media;
+        }
+      }
+
       const resultStr =
         typeof result === 'string' ? result : JSON.stringify(result);
       reqLog.debug({ tool: toolName, resultLen: resultStr.length, durationMs, category: 'tool' }, 'Tool completed');
@@ -450,6 +482,7 @@ export async function runAgent(
     text: fullText || null,
     thinkingText: finalThinkingText,
     usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+    ...(collectedMedia.length > 0 ? { media: collectedMedia } : {}),
   };
 }
 

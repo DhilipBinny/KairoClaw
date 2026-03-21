@@ -112,6 +112,24 @@ export interface TranscriptEntry {
 }
 
 /**
+ * A media attachment produced by a tool (via the `_media` convention).
+ * Collected by the agent loop into `AgentResult.media[]`.
+ */
+export interface MediaAttachment {
+  type: 'image' | 'document' | 'audio' | 'video' | 'voice';
+  /** Absolute path to the file on disk. */
+  filePath: string;
+  /** Display name (e.g. "photo.png"). */
+  fileName: string;
+  /** MIME type. */
+  mimeType: string;
+  /** Optional caption. */
+  caption?: string;
+  /** Media store URL (e.g. /api/v1/media/uuid.ext). */
+  url?: string;
+}
+
+/**
  * Callbacks provided to the agent loop for streaming and tool progress.
  */
 export interface AgentCallbacks {
@@ -123,6 +141,8 @@ export interface AgentCallbacks {
   onToolStart?: (toolName: string, args: Record<string, unknown>) => void;
   /** Called when a tool execution completes. */
   onToolEnd?: (toolName: string, resultPreview: string) => void;
+  /** Called when a tool produces a media attachment. */
+  onMedia?: (item: MediaAttachment) => void;
 }
 
 /**
@@ -142,4 +162,6 @@ export interface AgentResult {
   slashResult?: boolean;
   /** `true` if an error occurred. */
   error?: boolean;
+  /** Media attachments collected from tool results (via `_media` convention). */
+  media?: MediaAttachment[];
 }
