@@ -318,6 +318,7 @@
   .chat-layout {
     display: flex;
     height: 100vh;
+    height: 100dvh; /* dynamic viewport height — accounts for mobile browser chrome */
     width: 100%;
   }
 
@@ -712,6 +713,7 @@
       top: 0;
       left: 0;
       height: 100vh;
+      height: 100dvh;
       z-index: 100;
       transform: translateX(-100%);
       transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);

@@ -65,9 +65,9 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     const stateDir = config._stateDir || '';
     const checks: { name: string; status: string; message: string }[] = [];
 
-    // 1. Check Anthropic connectivity
-    const anthropicKey = config.providers.anthropic?.apiKey;
-    const anthropicToken = config.providers.anthropic?.authToken;
+    // 1. Check Anthropic connectivity (check secrets store + config + env)
+    const anthropicKey = secretsStore?.get('providers.anthropic', 'apiKey') || config.providers.anthropic?.apiKey;
+    const anthropicToken = secretsStore?.get('providers.anthropic', 'authToken') || config.providers.anthropic?.authToken;
     if (anthropicKey || anthropicToken) {
       try {
         const headers: Record<string, string> = {
@@ -112,11 +112,12 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       checks.push({ name: 'Anthropic API', status: 'skip', message: 'No API key or OAuth token configured' });
     }
 
-    // 2. Check OpenAI connectivity
-    if (config.providers.openai?.apiKey) {
+    // 2. Check OpenAI connectivity (check secrets store + config)
+    const openaiKey = secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey;
+    if (openaiKey) {
       try {
         const resp = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${config.providers.openai.apiKey}` },
+          headers: { Authorization: `Bearer ${openaiKey}` },
           signal: AbortSignal.timeout(10000),
         });
         if (resp.ok) {

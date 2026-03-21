@@ -104,6 +104,7 @@
     flex-direction: column;
     flex-shrink: 0;
     height: 100vh;
+    height: 100dvh;
   }
   .nav-header {
     padding: 20px 16px 16px;
