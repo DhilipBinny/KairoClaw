@@ -128,8 +128,19 @@ export function registerCliPlugins(
           if (process.env[key]) safeEnv[key] = process.env[key]!;
         }
 
-        // Resolve workspace for cwd
+        // Inject plugin-specific env vars from secrets store
         const ctx = context as Record<string, unknown>;
+        if (plugin.env && plugin.env.length > 0) {
+          const secrets = ctx.secretsStore as { get: (ns: string, key: string) => string | undefined } | undefined;
+          if (secrets) {
+            for (const envKey of plugin.env) {
+              const val = secrets.get(`plugins.${plugin.name}`, envKey);
+              if (val) safeEnv[envKey] = val;
+            }
+          }
+        }
+
+        // Resolve workspace for cwd
         const workspace = (ctx.workspace as string) ||
           ((ctx.config as Record<string, Record<string, string>>)?.agent?.workspace) ||
           process.cwd();
