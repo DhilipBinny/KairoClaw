@@ -9,6 +9,6 @@ export type ToolExecutor = (
 export interface ToolRegistration {
   definition: ToolDefinition;
   executor: ToolExecutor;
-  source: 'builtin' | 'mcp';
+  source: 'builtin' | 'mcp' | 'cli_plugin' | 'http_plugin';
   category?: 'read' | 'write' | 'execute' | 'destructive';
 }

@@ -4,7 +4,8 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
 import type { AuditService } from '../security/audit.js';
-import { configSchema } from '../config/schema.js';
+import { configSchema, pluginsSchema } from '../config/schema.js';
+import { loadPlugins, savePlugins } from '../plugins/store.js';
 
 /**
  * Set a nested property on an object by dot-separated path.
@@ -179,6 +180,68 @@ export const registerConfigRoutes: FastifyPluginAsync<{
         },
       ],
     };
+  });
+
+  // GET /api/v1/admin/plugins — read plugins.json
+  app.get('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const stateDir = config._stateDir || '';
+    const plugins = loadPlugins(stateDir);
+    return { plugins };
+  });
+
+  // PUT /api/v1/admin/plugins — save plugins.json (raw JSON editor)
+  app.put('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const { plugins: newPlugins } = request.body as { plugins?: Record<string, unknown> };
+
+    if (!newPlugins || typeof newPlugins !== 'object') {
+      return reply.code(400).send({ error: 'Missing or invalid "plugins" object' });
+    }
+
+    // Validate
+    const parseResult = pluginsSchema.safeParse(newPlugins);
+    if (!parseResult.success) {
+      const issues = (parseResult.error as any).issues ?? (parseResult.error as any).errors ?? [];
+      const firstIssue = issues[0];
+      const errorPath = firstIssue?.path?.join('.') || 'unknown';
+      const errorMsg = firstIssue?.message || 'Validation failed';
+      return reply.code(400).send({ error: `Validation failed at "${errorPath}": ${errorMsg}` });
+    }
+
+    // Save to disk
+    const stateDir = config._stateDir || '';
+    try {
+      savePlugins(stateDir, parseResult.data as any);
+    } catch {
+      return reply.code(500).send({ error: 'Failed to write plugins.json' });
+    }
+
+    // Update runtime config
+    config.plugins = parseResult.data as any;
+
+    // Trigger plugin hot-reload
+    if (onConfigChange) {
+      try { await onConfigChange('plugins', newPlugins); } catch { /* non-fatal */ }
+    }
+
+    // Audit
+    if (auditService) {
+      try {
+        auditService.log({
+          tenantId: (request as any).ctx.tenantId || 'default',
+          userId: (request as any).ctx.userId,
+          action: 'plugins.update',
+          resource: 'plugins.json',
+          details: {
+            cli: (parseResult.data as any).cli?.length || 0,
+            http: (parseResult.data as any).http?.length || 0,
+          },
+        });
+      } catch { /* non-fatal */ }
+    }
+
+    return { success: true };
   });
 
   // PUT /api/v1/admin/config — bulk save (raw JSON editor)

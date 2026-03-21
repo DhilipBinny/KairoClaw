@@ -88,6 +88,73 @@
     return new Date(ts).toLocaleString();
   }
 
+  /** Create a small SVG icon from a path string. */
+  function makeSvg(d: string): SVGSVGElement {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    for (const [k, v] of Object.entries({ width: '14', height: '14', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) {
+      svg.setAttribute(k, v);
+    }
+    // Split compound paths (space-separated segments starting with M)
+    for (const seg of d.split(/(?=M)/)) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', seg.trim());
+      svg.appendChild(path);
+    }
+    return svg;
+  }
+
+  /** Open a full-screen lightbox overlay for an image. */
+  function openLightbox(src: string, alt: string) {
+    // Remove existing lightbox if any
+    document.querySelector('.img-lightbox')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'img-lightbox';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', alt || 'Image preview');
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = alt || '';
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'img-lightbox-toolbar';
+
+    // Download
+    const dl = document.createElement('a');
+    dl.className = 'img-lightbox-btn';
+    dl.href = src;
+    dl.download = alt || 'image';
+    dl.title = 'Download';
+    dl.appendChild(makeSvg('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3'));
+    toolbar.appendChild(dl);
+
+    // Close
+    const close = document.createElement('button');
+    close.className = 'img-lightbox-btn';
+    close.title = 'Close';
+    close.appendChild(makeSvg('M18 6L6 18M6 6l12 12'));
+    close.addEventListener('click', () => overlay.remove());
+    toolbar.appendChild(close);
+
+    overlay.appendChild(toolbar);
+    overlay.appendChild(img);
+
+    // Click backdrop to close
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    // Esc to close
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    document.body.appendChild(overlay);
+  }
+
   let messageBodyRef: HTMLDivElement | undefined = $state();
 
   $effect(() => {
@@ -110,6 +177,46 @@
         });
         pre.style.position = 'relative';
         pre.appendChild(btn);
+      });
+
+      // Wrap images with thumbnail + action buttons
+      const imgs = messageBodyRef!.querySelectorAll('img');
+      imgs.forEach(img => {
+        if (img.parentElement?.classList.contains('img-wrap')) return;
+        const wrap = document.createElement('div');
+        wrap.className = 'img-wrap';
+        img.parentElement?.insertBefore(wrap, img);
+        wrap.appendChild(img);
+
+        const actions = document.createElement('div');
+        actions.className = 'img-actions';
+
+        // Expand button
+        const expand = document.createElement('button');
+        expand.className = 'img-action-btn';
+        expand.title = 'View full size';
+        expand.appendChild(makeSvg('M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7'));
+        expand.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openLightbox(img.src, img.alt);
+        });
+        actions.appendChild(expand);
+
+        // Download button
+        const dl = document.createElement('a');
+        dl.className = 'img-action-btn';
+        dl.setAttribute('href', img.src);
+        dl.setAttribute('download', img.alt || 'image');
+        dl.title = 'Download';
+        dl.appendChild(makeSvg('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3'));
+        dl.addEventListener('click', (e) => e.stopPropagation());
+        actions.appendChild(dl);
+
+        wrap.appendChild(actions);
+
+        // Click thumbnail to expand
+        img.style.cursor = 'pointer';
+        img.addEventListener('click', () => openLightbox(img.src, img.alt));
       });
     }, 0);
   });
@@ -393,8 +500,111 @@
     opacity: 1;
   }
 
+  /* ── Generated images: thumbnail ── */
+  :global(.img-wrap) {
+    position: relative;
+    display: inline-block;
+    margin: 8px 0;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: box-shadow 0.2s ease;
+  }
+  :global(.img-wrap:hover) {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+  :global(.img-wrap img) {
+    display: block;
+    max-width: 280px;
+    max-height: 200px;
+    border-radius: 10px;
+    object-fit: cover;
+  }
+  /* Action buttons container */
+  :global(.img-actions) {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  :global(.img-wrap:hover .img-actions) {
+    opacity: 1;
+  }
+  :global(.img-action-btn) {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    transition: background 0.15s ease;
+  }
+  :global(.img-action-btn:hover) {
+    background: rgba(0, 0, 0, 0.85);
+  }
+
+  /* ── Lightbox overlay ── */
+  :global(.img-lightbox) {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    animation: lightboxIn 0.2s ease-out;
+  }
+  @keyframes lightboxIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  :global(.img-lightbox img) {
+    max-width: 90vw;
+    max-height: 85vh;
+    border-radius: 8px;
+    object-fit: contain;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  }
+  :global(.img-lightbox-toolbar) {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    gap: 8px;
+  }
+  :global(.img-lightbox-btn) {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  :global(.img-lightbox-btn:hover) {
+    background: rgba(255, 255, 255, 0.25);
+  }
+
   @media (hover: none) {
     .message-actions {
+      opacity: 1;
+    }
+    :global(.img-actions) {
       opacity: 1;
     }
   }

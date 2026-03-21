@@ -13,7 +13,7 @@ const MAX_STDOUT = EXEC_MAX_STDOUT;
 const MAX_STDERR = EXEC_MAX_STDERR;
 
 /** Safe environment variables allowed in child processes (allowlist). */
-const SAFE_ENV_KEYS = [
+export const SAFE_ENV_KEYS = [
   'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
   'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
 ];

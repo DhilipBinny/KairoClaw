@@ -16,6 +16,9 @@ import { builtinTools } from './tools/builtin/index.js';
 import { setMemorySystem } from './tools/builtin/memory.js';
 import { MemorySystem } from './memory/index.js';
 import { MCPBridge } from './mcp/bridge.js';
+import { registerAllPlugins, reloadPlugins } from './plugins/index.js';
+import { loadPlugins } from './plugins/store.js';
+import { MediaStore } from './media/store.js';
 import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { runAgent } from './agent/loop.js';
@@ -44,6 +47,7 @@ import { chatRoutes } from './routes/chat.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
+import { registerMediaRoutes } from './routes/media.js';
 import { registerWhatsAppRoutes } from './routes/whatsapp.js';
 import { registerChannelRoutes } from './routes/channels.js';
 import { webchatPlugin } from './channels/webchat.js';
@@ -167,6 +171,19 @@ async function main(): Promise<void> {
     toolRegistry.register(tool);
   }
 
+  // 7a. Initialize media store + load plugins from plugins.json
+  const mediaStore = new MediaStore(stateDir);
+  mediaStore.startCleanup();
+
+  // Load plugins.json into runtime config
+  config.plugins = loadPlugins(stateDir);
+
+  const pluginLogger = createModuleLogger('plugins');
+  const pluginTools = registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+  if (pluginTools.length > 0) {
+    console.log(`  Plugins: ${pluginTools.length} tools registered`);
+  }
+
   // 7b. Initialize memory system
   const memorySystem = new MemorySystem(db, config.agent.workspace);
   memorySystem.init();
@@ -258,6 +275,8 @@ async function main(): Promise<void> {
           checkOutboundAllowed: (channel: 'whatsapp' | 'telegram', recipient: string) =>
             checkOutboundAllowed(channel, recipient, config, db),
           braveApiKey: secretsStore.get('tools.webSearch', 'apiKey') || config.tools?.webSearch?.apiKey || process.env.BRAVE_API_KEY || '',
+          pluginReloader: () => reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore),
+          mediaStore,
         };
         return toolRegistry.execute(name, args, enrichedCtx as any);
       },
@@ -309,6 +328,15 @@ async function main(): Promise<void> {
         }
       }
     }
+    // Plugin hot-reload
+    if (dotPath.startsWith('plugins.') || dotPath === 'plugins') {
+      try {
+        const reloaded = reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+        server.log.info({ count: reloaded.length }, 'Plugins reloaded via Settings');
+      } catch (e) {
+        server.log.error(e, 'Failed to reload plugins');
+      }
+    }
     if (dotPath === 'channels.telegram.enabled') {
       const tgToken = secretsStore.get('channels.telegram', 'botToken') || config.channels.telegram.botToken;
       if (value && !channelRegistry.telegram && tgToken) {
@@ -332,6 +360,7 @@ async function main(): Promise<void> {
   await server.register(chatRoutes, { runner: createRunner });
   await server.register(registerWorkspaceRoutes);
   await server.register(registerSystemRoutes, { providerRegistry, secretsStore });
+  await server.register(registerMediaRoutes, { mediaStore });
 
   // 13. Start cron scheduler
   const scheduler = new CronScheduler({
@@ -524,6 +553,9 @@ async function main(): Promise<void> {
 
     // Shutdown MCP bridge
     await mcpBridge.shutdown();
+
+    // Stop media cleanup
+    mediaStore.stopCleanup();
 
     // Stop memory system
     memorySystem.close();

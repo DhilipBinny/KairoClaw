@@ -111,6 +111,14 @@ export const CRON_MAX_JOBS = 50;
 /** Minimum interval for 'every' type jobs (ms) */
 export const CRON_MIN_INTERVAL_MS = 5_000;
 
+// ── Media ────────────────────────────────────────────────────
+
+/** Days to keep generated media files before auto-cleanup */
+export const MEDIA_RETENTION_DAYS = 7;
+
+/** Cleanup interval (6 hours) */
+export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 // ── Rate Limiting ───────────────────────────────────────────
 
 /** Global HTTP rate limit (requests per minute) */

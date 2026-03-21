@@ -455,3 +455,13 @@ export async function getWorkspaceFile(name: string): Promise<{ name: string; co
 export async function saveWorkspaceFile(name: string, content: string): Promise<{ success: boolean }> {
   return request(`/workspace/files/${name}`, { method: 'PUT', body: { content } });
 }
+
+// ── Plugins ──────────────────────────────────────
+
+export async function getPlugins(): Promise<{ plugins: Record<string, unknown> }> {
+  return request('/admin/plugins');
+}
+
+export async function savePlugins(plugins: Record<string, unknown>): Promise<{ success: boolean }> {
+  return request('/admin/plugins', { method: 'PUT', body: { plugins } });
+}

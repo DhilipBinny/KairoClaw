@@ -34,6 +34,9 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     const publicPaths = ['/api/v1/health', '/api/v1/auth/login'];
     if (publicPaths.some(p => request.url === p || request.url.startsWith(p + '?'))) return;
 
+    // Media files need to be loadable by <img> tags (no auth header possible)
+    if (request.url.startsWith('/api/v1/media/')) return;
+
     // Also skip non-API routes (static files, etc.)
     if (!request.url.startsWith('/api/')) return;
 

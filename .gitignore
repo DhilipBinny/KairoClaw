@@ -25,6 +25,13 @@ agw-data/
 *.sqlite-shm
 *.log
 
+agw-data-new/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.log
+
 # ── Dependencies ──
 node_modules/
 bun.lock
