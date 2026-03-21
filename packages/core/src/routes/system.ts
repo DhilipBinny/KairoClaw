@@ -684,6 +684,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       await execFileAsync('tar', [
         '-czf', tmpFile, '-C', stateDir,
         '--exclude', '*.sqlite-wal', '--exclude', '*.sqlite-shm',
+        '--exclude', 'logs', '--exclude', 'lost+found',
         '.',
       ], { timeout: 30_000 });
 
