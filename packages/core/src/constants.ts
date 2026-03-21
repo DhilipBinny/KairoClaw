@@ -127,6 +127,14 @@ export const TOOL_LOOP_THRESHOLD = 3;
 /** Max sub-agent nesting depth (1 = main can spawn workers, workers can't spawn) */
 export const SUBAGENT_MAX_DEPTH = 1;
 
+// ── Pending Senders ─────────────────────────────────────────
+
+/** Max 'seen' (discovered) senders to keep per channel */
+export const PENDING_SEEN_CAP = 5;
+
+/** Max 'pending' (rejected/awaiting approval) senders to keep per channel */
+export const PENDING_PENDING_CAP = 20;
+
 // ── Scoped Memory ───────────────────────────────────────────
 
 /** Directory name for user scopes under workspace */

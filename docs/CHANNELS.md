@@ -15,6 +15,7 @@ AGW supports three messaging channels: **Web Chat**, **Telegram**, and **WhatsAp
 - Tool call visualization with collapsible details
 - Markdown rendering with syntax highlighting
 - Image support (paste/upload)
+- File upload (PDF, documents, audio, video — via attach button)
 - Multi-session support
 
 ### Constraints
@@ -50,7 +51,8 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 | Bot Token | — | From [@BotFather](https://t.me/BotFather). Saved to secrets store. |
 | Groups Enabled | On | Whether the bot responds in group chats |
 | Require Mention | On | In groups, only respond when @mentioned or replied to |
-| Allow From | [] (all) | User/group IDs that can interact. Empty = no restriction. |
+| Allowed Groups | [] (all) | Group chat IDs. Empty = all groups allowed. |
+| Allow From | [] (all) | User IDs that can interact. Empty = no restriction. |
 
 ### Scenarios
 
@@ -103,6 +105,7 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 | Enabled | Off | Start/stop the WhatsApp connection |
 | Groups Enabled | On | Whether the bot responds in group chats |
 | Require Mention | On | In groups, only respond when @mentioned or replied to |
+| Allowed Groups | [] (all) | Group JIDs. Empty = all groups allowed. |
 | Read Receipts | On | Send blue ticks when bot reads a message |
 | Allow From | [] (all) | Phone numbers (e.g., `1234567890`). Empty = no restriction. |
 
@@ -167,10 +170,13 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 | Separate bot account | N/A | Yes | No (uses your number) |
 | Group support | No | Yes | Yes |
 | Image input | Yes | Yes | Yes |
-| Image output | No | Yes (inline) | No |
+| Image output | Markdown | Yes (native photo) | Yes (native photo) |
 | Voice messages | No | No | Yes (saved to disk) |
-| Documents | No | Yes | Yes (saved to disk) |
-| Allow-list | No (API key auth) | By user/group ID | By phone number |
+| Documents | Yes (file upload) | Yes | Yes (saved to disk) |
+| PDF analysis | Yes (via read_pdf) | Yes (via read_pdf) | Yes (via read_pdf) |
+| Allow-list (users) | No (API key auth) | By user ID | By phone number |
+| Allow-list (groups) | N/A | By group chat ID | By group JID |
+| Per-user memory | No (global) | Yes (scoped) | Yes (scoped) |
 | Hot-reload | N/A | Yes | Yes |
 | Read receipts | N/A | N/A | Configurable |
 | Mention in groups | N/A | @botname or reply | @phone or reply |
@@ -180,39 +186,66 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 
 ---
 
-## Sender Discovery & Pending Approvals
+## Sender & Group Discovery
 
-When users message the bot, their identity is tracked in a bounded `pending_senders` table for admin approval. This enables zero-friction onboarding (no need to manually find user IDs) and ongoing access management.
+Users AND groups are tracked in a bounded `pending_senders` table for admin approval. This enables zero-friction onboarding for both individual users and group chats.
 
 ### Design Constraints
 
 | Constraint | Value | Rationale |
 |------------|-------|-----------|
-| `seen` rows (discovery) | **5 per channel** | Only needed for initial onboarding (find yourself, add to allowlist). Oldest evicted when full. |
-| `pending` rows (rejected) | **50 per channel** | Ongoing approval queue. Oldest evicted when full. Prevents unbounded growth from bot abuse. |
+| `seen` rows (discovery) | **5 per channel** | For initial onboarding. Oldest evicted when full. |
+| `pending` rows (rejected) | **20 per channel** | Ongoing approval queue. Oldest evicted when full. Prevents unbounded growth. |
 | Data stored | **Metadata only** | sender ID, name, channel, timestamps, message count. No message content stored. |
-| Total max rows | **110** | 5 seen + 50 pending per channel, 2 channels (Telegram + WhatsApp). Fixed ceiling regardless of traffic. |
+| Total max rows | **50** | 5 seen + 20 pending per channel, 2 channels. Fixed ceiling regardless of traffic. |
+| Already approved/rejected | **Skipped** | Once approved or rejected, senders are not re-recorded. |
 
 ### How It Works
 
-| Allowlist state | Sender outcome | Recorded as | UI section |
-|-----------------|----------------|-------------|------------|
-| Empty (allow all) | Bot responds | `seen` | Discovered Users |
+| Allowlist state | Sender/Group outcome | Recorded as | UI section |
+|-----------------|---------------------|-------------|------------|
+| Empty (allow all) | Bot responds | `seen` | Discovered |
 | Has entries, sender matches | Bot responds | Not recorded | — |
 | Has entries, sender doesn't match | Bot ignores | `pending` | Pending Approvals |
 
-### Onboarding Flow
+Groups and individuals share the same `pending_senders` table. The admin UI shows a **"Group"** badge next to group entries.
+
+### Individual Onboarding
 
 1. Deploy with empty allowlist → bot allows everyone
-2. Message your bot → you appear in "Discovered Users" on Channels page
-3. Click "Add to allowlist" → your ID added to config, bot now restricted to you
-4. Anyone else who messages → silently rejected, appears in "Pending Approvals"
-5. Approve or dismiss from the admin UI
+2. Message your bot → you appear in "Discovered" on Channels page
+3. Click "Approve" → your ID added to `allowFrom`, bot now restricted
+4. Anyone else who messages → silently rejected, appears in "Pending"
+5. Approve or reject from the admin UI
+6. **Telegram**: Use `/myid` to discover your user ID
+
+### Group Onboarding
+
+1. Add bot to a group → group appears in "Discovered" or "Pending" on Channels page
+2. Admin clicks "Approve" → group ID added to `groupAllowFrom` (not `allowFrom`)
+3. Bot starts responding in that group
+4. **Telegram**: Use `/groupid` in a group to discover the group's chat ID
+
+### Approval Routing
+
+The approve endpoint automatically detects groups vs individuals:
+- **Telegram groups**: sender_id starts with `-` (negative number) → routes to `groupAllowFrom`
+- **WhatsApp groups**: sender_id ends with `@g.us` → routes to `groupAllowFrom`
+- **Individuals**: routes to `allowFrom`
+
+### Bot Commands (Telegram)
+
+| Command | Where | Description |
+|---------|-------|-------------|
+| `/start` | DM | Welcome message |
+| `/help` | DM | List commands |
+| `/myid` | DM | Show your user ID + allowlist instructions |
+| `/groupid` | Group | Show group chat ID + allowlist instructions |
 
 ### Abuse Scenario (1M bots hitting your endpoint)
 
-- Each unique rejected sender = 1 row, but table capped at 50 pending per channel
-- 51st sender evicts the oldest row → table never grows past 50
+- Each unique rejected sender = 1 row, but table capped at 20 pending per channel
+- 21st sender evicts the oldest row → table never grows past 20
 - Bot silently ignores all rejected senders — no response, no resource consumption beyond the allowlist check
 - Messages are NOT stored or processed
 

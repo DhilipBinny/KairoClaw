@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Bot, InputFile } from 'grammy';
+import { PENDING_SEEN_CAP, PENDING_PENDING_CAP } from '../constants.js';
 import { extractMedia } from '../media/detector.js';
 import type { MediaItem } from '../media/detector.js';
 import type { Context } from 'grammy';
@@ -107,7 +108,7 @@ class TelegramChannel implements Channel {
               const count = this.db.get<{ c: number }>(
                 "SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'telegram' AND status = 'seen'",
               );
-              if ((count?.c ?? 0) >= 5) {
+              if ((count?.c ?? 0) >= PENDING_SEEN_CAP) {
                 this.db.run(
                   "DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'seen' ORDER BY last_seen ASC LIMIT 1)",
                 );
@@ -151,12 +152,26 @@ class TelegramChannel implements Channel {
       );
     });
 
+    this.bot.command('groupid', async (ctx) => {
+      if (!ctx.chat || ctx.chat.type === 'private') {
+        await ctx.reply('This command only works in groups.');
+        return;
+      }
+      const title = ctx.chat.title || 'this group';
+      await ctx.reply(
+        `Group ID: \`${ctx.chat.id}\`\nName: ${title}\n\n` +
+        `Paste this ID into *Allowed Groups* on the admin Channels page to grant access.`,
+        { parse_mode: 'Markdown' },
+      );
+    });
+
     // Clear any old commands then set only ours
     this.bot.api.deleteMyCommands().catch(() => {});
     this.bot.api.setMyCommands([
       { command: 'start', description: 'Welcome message' },
       { command: 'help', description: 'List available commands' },
       { command: 'myid', description: 'Show your Telegram user ID' },
+      { command: 'groupid', description: 'Show this group\'s chat ID' },
     ]).catch(() => { /* non-critical */ });
 
     // ── Text messages ────────────────────────────
@@ -268,11 +283,11 @@ class TelegramChannel implements Channel {
       if (!allowed.includes(senderId)) {
         log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
         try {
-          // Evict oldest pending if at 50-row cap
+          // Evict oldest pending if at cap
           this.db.run(`
             DELETE FROM pending_senders WHERE id IN (
               SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'pending'
-              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'telegram' AND status = 'pending') - 49)
+              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'telegram' AND status = 'pending') - ${PENDING_PENDING_CAP - 1})
             )
           `);
           this.db.run(`
@@ -293,6 +308,54 @@ class TelegramChannel implements Channel {
     // Group handling
     if (chatType === 'group') {
       if (!cfg.groupsEnabled) return;
+
+      // Record group for admin discovery
+      const groupName = ctx.chat?.title || `Group ${chatId}`;
+      const hasGroupAllowlist = cfg.groupAllowFrom?.length > 0;
+      try {
+        const status = hasGroupAllowlist ? 'pending' : 'seen';
+        // Skip if already approved/rejected
+        const resolved = this.db.get<{ id: number }>(
+          "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('approved','rejected')",
+          [chatId],
+        );
+        if (!resolved) {
+          const existing = this.db.get<{ id: number }>(
+            "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('seen','pending')",
+            [chatId],
+          );
+          if (existing) {
+            this.db.run(
+              "UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1 WHERE channel = 'telegram' AND sender_id = ? AND status IN ('seen','pending')",
+              [groupName, chatId],
+            );
+          } else {
+            const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
+            const count = this.db.get<{ c: number }>(
+              `SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'telegram' AND status = ?`,
+              [status],
+            );
+            if ((count?.c ?? 0) >= cap) {
+              this.db.run(
+                `DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = ? ORDER BY last_seen ASC LIMIT 1)`,
+                [status],
+              );
+            }
+            this.db.run(
+              "INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, ?)",
+              ['telegram', chatId, groupName, status],
+            );
+          }
+        }
+      } catch { /* non-critical */ }
+
+      // Group allowlist (if set, only listed group IDs are allowed)
+      if (hasGroupAllowlist) {
+        if (!cfg.groupAllowFrom.map(String).includes(chatId)) {
+          log.debug({ chatId }, 'Telegram: group not in groupAllowFrom — ignored');
+          return;
+        }
+      }
 
       if (cfg.groupRequireMention && this.bot) {
         const botInfo = this.bot.botInfo;
