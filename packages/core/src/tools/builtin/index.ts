@@ -5,6 +5,7 @@ import { memoryTools } from './memory.js';
 import { messagingTools } from './messaging.js';
 import { emailTools } from './email.js';
 import { pluginTools } from './plugins.js';
+import { pdfTools } from './pdf.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -15,6 +16,7 @@ export const builtinTools: ToolRegistration[] = [
   ...messagingTools,
   ...emailTools,
   ...pluginTools,
+  ...pdfTools,
 ];
 
 export { fileTools } from './files.js';
@@ -24,4 +26,5 @@ export { memoryTools, setMemorySystem } from './memory.js';
 export { messagingTools } from './messaging.js';
 export { emailTools } from './email.js';
 export { pluginTools } from './plugins.js';
+export { pdfTools } from './pdf.js';
 export { safePath } from './files.js';
