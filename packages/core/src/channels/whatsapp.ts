@@ -28,7 +28,7 @@ import type { GatewayConfig, InboundMessage } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
-import { splitMessage } from './utils.js';
+import { splitMessage, markdownToWhatsApp } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('channel.whatsapp');
@@ -589,6 +589,9 @@ class WhatsAppChannel implements Channel {
       }
 
       if (result.text) {
+        // Convert markdown formatting for WhatsApp (**bold** → *bold*, etc.)
+        result.text = markdownToWhatsApp(result.text);
+
         // Prefer structured media from tool results; fall back to text extraction
         const stateDir = this.config._stateDir || '';
         const workspace = this.config.agent.workspace;
@@ -749,7 +752,7 @@ class WhatsAppChannel implements Channel {
     if (!this.sock) throw new Error('WhatsApp not connected');
     if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID (delivery.to). No silent fallback.');
 
-    const chunks = splitMessage(text, 4000);
+    const chunks = splitMessage(markdownToWhatsApp(text), 4000);
     for (const chunk of chunks) {
       await this.sock.sendMessage(jid, { text: chunk });
     }
@@ -760,6 +763,7 @@ class WhatsAppChannel implements Channel {
     if (!this.sock) throw new Error('WhatsApp not connected');
     if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID');
 
+    text = markdownToWhatsApp(text);
     const stateDir = this.config._stateDir || '';
     const workspace = this.config.agent.workspace;
 
