@@ -51,6 +51,49 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
       .send(stream);
   });
 
+  // POST /api/v1/media/upload — upload a file to workspace/media (auth required)
+  app.post('/api/v1/media/upload', { preHandler: [requireRole('user')] }, async (request, reply) => {
+    const config = (request as any).ctx?.config as { agent?: { workspace?: string } } | undefined;
+    const workspace = config?.agent?.workspace || process.cwd();
+
+    const data = await request.file();
+    if (!data) {
+      return reply.code(400).send({ error: 'No file uploaded' });
+    }
+
+    const MAX_UPLOAD_SIZE = 20 * 1024 * 1024; // 20MB
+    const chunks: Uint8Array[] = [];
+    let totalSize = 0;
+    for await (const chunk of data.file) {
+      totalSize += chunk.length;
+      if (totalSize > MAX_UPLOAD_SIZE) {
+        return reply.code(413).send({ error: 'File too large (max 20MB)' });
+      }
+      chunks.push(chunk);
+    }
+
+    const buffer = Buffer.concat(chunks);
+    const originalName = data.filename || 'upload';
+    const ext = path.extname(originalName).slice(1).toLowerCase() || 'bin';
+
+    // Save to workspace/media/ (not mediaStore) so safePath() allows tool access
+    const mediaDir = path.join(workspace, 'media');
+    fs.mkdirSync(mediaDir, { recursive: true });
+    const safeExt = ext.replace(/[^a-z0-9]/gi, '').slice(0, 10) || 'bin';
+    const savedName = `${Date.now()}-${originalName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60)}.${safeExt}`;
+    const filePath = path.join(mediaDir, savedName);
+    fs.writeFileSync(filePath, new Uint8Array(buffer));
+
+    return {
+      success: true,
+      filename: savedName,
+      originalName,
+      filePath,
+      mimeType: data.mimetype || 'application/octet-stream',
+      sizeBytes: buffer.length,
+    };
+  });
+
   // GET /api/v1/media — media storage stats (admin only)
   app.get('/api/v1/media', { preHandler: [requireRole('admin')] }, async () => {
     const stats = mediaStore.stats();

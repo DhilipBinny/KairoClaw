@@ -242,8 +242,21 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               .filter((img) => typeof img.data === 'string' && typeof img.mimeType === 'string')
               .map((img) => ({ data: img.data!, mimeType: img.mimeType!, filename: img.filename }));
 
+            // Prepend uploaded file references to the text
+            let fullText = text;
+            const rawFiles = Array.isArray(msg.files) ? msg.files as Array<{ path?: string; name?: string }> : [];
+            if (rawFiles.length > 0) {
+              const fileRefs = rawFiles
+                .filter((f) => typeof f.path === 'string')
+                .map((f) => `[Document "${f.name || 'file'}" at ${f.path}]`)
+                .join('\n');
+              if (fileRefs) {
+                fullText = `${fileRefs}\n\n${text}`;
+              }
+            }
+
             const inbound: InboundMessage = {
-              text,
+              text: fullText,
               channel: 'web',
               chatId: `web:${sessionKey}`,
               chatType: 'private',

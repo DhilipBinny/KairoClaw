@@ -74,6 +74,27 @@ async function request<T = unknown>(path: string, opts: FetchOptions = {}): Prom
   }
 }
 
+// ── File Upload ──────────────────────────────────
+export async function uploadFile(file: File): Promise<{ filename: string; filePath: string; originalName: string; mediaUrl: string; mimeType: string; sizeBytes: number }> {
+  const apiKey = getApiKey();
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/media/upload`, {
+    method: 'POST',
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const data = await res.json(); msg = data.error || msg; } catch {}
+    throw new ApiError(msg, res.status);
+  }
+
+  return res.json();
+}
+
 // ── Auth ──────────────────────────────────
 export async function login(apiKey: string): Promise<{ user: { id: string; name: string; role: string; email: string }; tenantId: string }> {
   const result = await request<{ user: { id: string; name: string; role: string; email: string }; tenantId: string }>('/auth/login', {

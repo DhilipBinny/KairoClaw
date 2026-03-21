@@ -219,12 +219,17 @@ export function destroyChatListeners(): void {
   _unsubscribers = [];
 }
 
-export function sendMessage(text: string): void {
+export function sendMessage(text: string, files?: Array<{ path: string; name: string }>): void {
+  // Build display text with file references
+  const displayText = files?.length
+    ? `${files.map(f => `[${f.name}]`).join(' ')}\n${text}`
+    : text;
+
   // Add user message
   _messages = [..._messages, {
     id: `msg-${++_msgCounter}`,
     role: 'user',
-    content: text,
+    content: displayText,
     timestamp: Date.now(),
   }];
 
@@ -233,6 +238,7 @@ export function sendMessage(text: string): void {
     type: 'chat.send',
     text,
     sessionKey: _currentSessionKey,
+    ...(files?.length ? { files } : {}),
   });
 }
 
