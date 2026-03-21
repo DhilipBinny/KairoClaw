@@ -119,6 +119,17 @@ export const MEDIA_RETENTION_DAYS = 7;
 /** Cleanup interval (6 hours) */
 export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+// ── PDF ─────────────────────────────────────────────────────
+
+/** Maximum pages to extract from a PDF */
+export const PDF_MAX_PAGES = 50;
+
+/** Minimum chars per page before OCR fallback triggers */
+export const PDF_OCR_MIN_CHARS_PER_PAGE = 50;
+
+/** Timeout for PDF extraction commands (ms) */
+export const PDF_TIMEOUT_MS = 60_000;
+
 // ── Rate Limiting ───────────────────────────────────────────
 
 /** Global HTTP rate limit (requests per minute) */
