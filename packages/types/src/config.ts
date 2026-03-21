@@ -256,6 +256,8 @@ export interface CliPluginConfig {
   blockedSubcommands: string[];
   /** Subcommands that require user confirmation. */
   requireConfirmation: string[];
+  /** Environment variable names to inject from secrets store. */
+  env?: string[];
 }
 
 /** HTTP plugin endpoint configuration. */

@@ -169,13 +169,14 @@ const mcpSectionSchema = z.object({
 
 const cliPluginSchema = z.object({
   name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
-  command: z.string().min(1),
+  command: z.string().min(1).regex(/^[a-zA-Z0-9_\-\.]+$/, 'Must be a simple binary name (alphanumeric, hyphens, underscores, dots)'),
   description: z.string().default(''),
   enabled: z.boolean().default(true),
   timeout: z.number().int().min(1).max(120).default(30),
   allowedSubcommands: z.array(z.string()).default([]),
   blockedSubcommands: z.array(z.string()).default([]),
   requireConfirmation: z.array(z.string()).default([]),
+  env: z.array(z.string()).default([]),
 });
 
 const httpEndpointParameterSchema = z.object({

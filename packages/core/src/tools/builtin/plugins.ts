@@ -1,117 +1,83 @@
 /**
- * manage_http_plugins — LLM-callable tool to discover, test, and configure HTTP API plugins.
+ * manage_plugins — unified tool for managing CLI and HTTP plugins.
  *
- * Actions:
- *   test   — probe any URL, return raw status/headers/body
- *   add    — save a fully structured HTTP plugin to config.json + hot-reload
- *   list   — show current HTTP plugins
- *   update — modify an existing plugin
- *   remove — delete a plugin
+ * Actions: list, add, update, remove
+ * Type: "cli" or "http" (required for add/update/remove, optional for list)
+ *
+ * Reads/writes plugins.json and triggers hot-reload after changes.
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
-import type { MediaStore } from '../../media/store.js';
-import { detectBase64Image, extFromContentType } from '../../media/store.js';
 import type { PluginsConfig } from '@agw/types';
+import { loadPlugins, savePlugins } from '../../plugins/store.js';
 
-const PLUGINS_FILENAME = 'plugins.json';
+const execFileAsync = promisify(execFileCb);
 
-/** Read plugins.json from disk. */
-function readPluginsFile(stateDir: string): PluginsConfig {
-  const filePath = path.join(stateDir, PLUGINS_FILENAME);
-  try {
-    if (fs.existsSync(filePath)) {
-      return JSON.parse(fs.readFileSync(filePath, 'utf8')) as PluginsConfig;
-    }
-  } catch { /* fall through */ }
-  return { cli: [], http: [] };
+/** Validate a command name is safe (no shell metacharacters). */
+function isValidCommand(cmd: string): boolean {
+  return /^[a-zA-Z0-9_\-\.]+$/.test(cmd);
 }
-
-/** Write plugins.json to disk. */
-function writePluginsFile(stateDir: string, plugins: PluginsConfig): void {
-  const filePath = path.join(stateDir, PLUGINS_FILENAME);
-  fs.writeFileSync(filePath, JSON.stringify(plugins, null, 2), { mode: 0o600 });
-}
-
-const MAX_RESPONSE_SIZE = 10 * 1024;
 
 export const pluginTools: ToolRegistration[] = [
   {
     definition: {
-      name: 'manage_http_plugins',
-      description: `Manage HTTP API plugins. Discover, test, and register external REST APIs as tools the agent can use.
+      name: 'manage_plugins',
+      description: `Manage plugins (CLI tools and HTTP APIs) that the agent can use.
 
-Workflow to add a new API:
-1. Use action="test" to probe the API (try /health, /openapi.json, etc.)
-2. Ask the user about endpoints, parameters, and auth requirements
-3. Test each endpoint with action="test" to confirm it works
-4. Use action="add" to save the full plugin configuration
+CLI plugins: wrap a command-line tool (gh, docker, kubectl) as a single agent tool. The LLM already knows CLI syntax from training — 1 tool ≈ 200 tokens vs MCP's 55,000 tokens for GitHub.
+HTTP plugins: connect REST APIs as agent tools. Each endpoint becomes a separate tool.
 
-The "test" action is a general-purpose HTTP probe — use it to explore any URL.
-The "add" action saves a structured plugin config and immediately registers the tools.
+Before adding a CLI plugin, use the exec tool to verify the command exists (e.g. exec "gh --version").
+Before adding an HTTP plugin, use exec with curl to test the endpoint.
 
-Auth: if the API needs authentication, ask the user for the type (bearer/header/query/basic) and the secret. The secret is stored securely in the secrets store, never in config.json.`,
+Plugins are stored in plugins.json (separate from config.json).`,
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['test', 'add', 'list', 'update', 'remove'],
+            enum: ['list', 'add', 'update', 'remove'],
             description: 'Action to perform',
           },
-          // --- test action params ---
-          url: { type: 'string', description: 'Full URL to probe (for "test" action)' },
-          method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], description: 'HTTP method (for "test", default: GET)' },
-          headers: {
-            type: 'object',
-            description: 'Request headers (for "test")',
+          type: {
+            type: 'string',
+            enum: ['cli', 'http'],
+            description: 'Plugin type. Required for add/update/remove. Optional for list (omit = show all).',
           },
-          body: {
-            type: 'object',
-            description: 'Request body as JSON (for "test" with POST/PUT/PATCH)',
+          name: {
+            type: 'string',
+            description: 'Plugin name (for update/remove)',
           },
-          timeout: { type: 'number', description: 'Request timeout in seconds (for "test", default: 15, max: 600). Use higher values for slow endpoints like image generation (e.g. 180 for 3 min).' },
-          // --- add/update action params ---
           plugin: {
             type: 'object',
-            description: 'Full plugin config (for "add" or "update"). Structure: { name, baseUrl, description, enabled, timeout, endpoints: [{ name, method, path, description, parameters: { paramName: { type, description, required, default } } }] }',
-            properties: {
-              name: { type: 'string', description: 'Unique plugin name (lowercase alphanumeric + underscores)' },
-              baseUrl: { type: 'string', description: 'Base URL for the API' },
-              description: { type: 'string', description: 'Human-readable description' },
-              enabled: { type: 'boolean', description: 'Whether the plugin is enabled (default: true)' },
-              timeout: { type: 'number', description: 'Request timeout in seconds (default: 30, max: 120)' },
-              endpoints: {
-                type: 'array',
-                description: 'API endpoints to register as tools',
-                items: {
-                  type: 'object',
-                  properties: {
-                    name: { type: 'string', description: 'Endpoint name (lowercase, used in tool name)' },
-                    method: { type: 'string', description: 'HTTP method' },
-                    path: { type: 'string', description: 'URL path relative to baseUrl' },
-                    description: { type: 'string' },
-                    parameters: { type: 'object', description: 'Parameter definitions: { paramName: { type, description, required, default } }' },
-                  },
-                },
-              },
-            },
+            description: `Plugin configuration (for add/update).
+
+CLI plugin fields:
+  name, command, description, enabled, timeout (max 120),
+  allowedSubcommands (empty=all), blockedSubcommands, requireConfirmation,
+  env: ["GITHUB_TOKEN", ...] — env var names to inject from secrets store
+
+HTTP plugin fields:
+  name, baseUrl, description, enabled, timeout (max 600),
+  endpoints: [{ name, method, path, description, parameters: { paramName: { type, description, required, default } } }]`,
           },
-          // --- auth config (for add/update) ---
+          // Secrets (CLI env vars or HTTP auth token) — stored in secrets.json, never in plugins.json
+          secrets: {
+            type: 'object',
+            description: 'Secret values to store. For CLI: env var values (e.g. { "GITHUB_TOKEN": "ghp_..." }). For HTTP: { "token": "sk-..." }. Stored securely in secrets store.',
+          },
+          // HTTP auth (add/update)
           auth: {
             type: 'object',
-            description: 'Auth config (for "add"/"update"). { type: "bearer"|"header"|"query"|"basic", headerName?: string, queryParam?: string }',
+            description: 'Auth config for HTTP plugins. { type: "bearer"|"header"|"query"|"basic", headerName?, queryParam? }',
             properties: {
               type: { type: 'string', enum: ['bearer', 'header', 'query', 'basic'] },
-              headerName: { type: 'string', description: 'Header name for "header" auth type' },
-              queryParam: { type: 'string', description: 'Query param name for "query" auth type' },
+              headerName: { type: 'string' },
+              queryParam: { type: 'string' },
             },
           },
-          authSecret: { type: 'string', description: 'Auth token/key value to store in secrets (for "add"/"update"). Stored securely, never in config.json.' },
-          // --- remove action params ---
-          name: { type: 'string', description: 'Plugin name (for "remove" or "update")' },
         },
         required: ['action'],
       },
@@ -122,6 +88,9 @@ Auth: if the API needs authentication, ask the user for the type (bearer/header/
 
       const ctx = context as Record<string, unknown>;
       const config = ctx.config as Record<string, unknown>;
+      const stateDir = (config as Record<string, unknown>)._stateDir as string || '';
+      const type = args.type as 'cli' | 'http' | undefined;
+
       const secretsStore = ctx.secretsStore as {
         get: (ns: string, key: string) => string | undefined;
         set: (ns: string, key: string, value: string) => void;
@@ -129,327 +98,299 @@ Auth: if the API needs authentication, ask the user for the type (bearer/header/
       } | undefined;
 
       switch (action) {
-        // ─── TEST ─────────────────────────────────────
-        case 'test': {
-          const url = args.url as string;
-          if (!url) return { error: 'url is required for test action' };
-
-          const method = (args.method as string || 'GET').toUpperCase();
-          const headers = (args.headers || {}) as Record<string, string>;
-          const body = args.body as Record<string, unknown> | undefined;
-          const timeoutSec = Math.min(Math.max((args.timeout as number) || 15, 1), 600);
-
-          // Basic SSRF protection
-          try {
-            const parsed = new URL(url);
-            if (!['http:', 'https:'].includes(parsed.protocol)) {
-              return { error: `Blocked: only http/https allowed, got ${parsed.protocol}` };
-            }
-            const hostname = parsed.hostname.toLowerCase();
-            // Block cloud metadata
-            if (['metadata.google.internal', 'metadata.google.com'].includes(hostname) ||
-                hostname === 'instance-data' ||
-                (hostname.match(/^169\.254\./) !== null)) {
-              return { error: 'Blocked: cloud metadata endpoint' };
-            }
-          } catch {
-            return { error: 'Invalid URL' };
-          }
-
-          try {
-            const fetchOpts: RequestInit = {
-              method,
-              headers: { 'User-Agent': 'Kairo/2.0', ...headers },
-              signal: AbortSignal.timeout(timeoutSec * 1000),
-            };
-
-            if (['POST', 'PUT', 'PATCH'].includes(method) && body) {
-              fetchOpts.headers = { ...fetchOpts.headers as Record<string, string>, 'Content-Type': 'application/json' };
-              fetchOpts.body = JSON.stringify(body);
-            }
-
-            const res = await fetch(url, fetchOpts);
-
-            // Read response
-            const contentType = res.headers.get('content-type') || '';
-            const media = ctx.mediaStore as MediaStore | undefined;
-            let responseBody: unknown;
-
-            // Binary image response — save to media store
-            const imgExt = extFromContentType(contentType);
-            if (imgExt && media) {
-              const buf = Buffer.from(await res.arrayBuffer());
-              const filename = media.save(buf, imgExt);
-              const mediaUrl = media.getUrl(filename);
-              return {
-                status: res.status,
-                statusText: res.statusText,
-                contentType,
-                mediaUrl,
-                sizeBytes: buf.length,
-                note: `Image saved. Use markdown to show: ![image](${mediaUrl})`,
-              };
-            } else if (imgExt) {
-              const buf = await res.arrayBuffer();
-              responseBody = `[Binary image: ${contentType}, ${buf.byteLength} bytes — media store not available]`;
-            } else if (contentType.includes('application/json')) {
-              try {
-                responseBody = await res.json();
-                // Scan for base64 images in JSON fields
-                if (media && responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)) {
-                  const obj = responseBody as Record<string, unknown>;
-                  for (const [key, val] of Object.entries(obj)) {
-                    if (typeof val !== 'string') continue;
-                    const detected = detectBase64Image(val);
-                    if (detected) {
-                      const filename = media.saveBase64(val, detected.ext);
-                      const mediaUrl = media.getUrl(filename);
-                      obj[key] = mediaUrl;
-                      obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
-                    }
-                  }
-                }
-              } catch {
-                responseBody = await res.text();
-              }
-            } else {
-              responseBody = await res.text();
-            }
-
-            // Truncate
-            const bodyStr = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody, null, 2);
-            const truncated = bodyStr.length > MAX_RESPONSE_SIZE
-              ? bodyStr.slice(0, MAX_RESPONSE_SIZE) + '\n... (truncated)'
-              : bodyStr;
-
-            return {
-              status: res.status,
-              statusText: res.statusText,
-              contentType,
-              body: truncated,
-            };
-          } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : String(e);
-            return { error: `Request failed: ${msg}` };
-          }
-        }
-
         // ─── LIST ─────────────────────────────────────
         case 'list': {
-          const plugins = ((config as Record<string, unknown>).plugins as Record<string, unknown>)?.http as Array<Record<string, unknown>> || [];
-          return {
-            count: plugins.length,
-            plugins: plugins.map(p => ({
-              name: p.name,
-              baseUrl: p.baseUrl,
-              description: p.description,
-              enabled: p.enabled,
-              timeout: p.timeout,
-              endpointCount: (p.endpoints as unknown[])?.length || 0,
-              endpoints: ((p.endpoints as Array<Record<string, unknown>>) || []).map(e => ({
-                name: e.name,
-                method: e.method,
-                path: e.path,
-                description: e.description,
+          const pluginsData = loadPlugins(stateDir);
+          const result: Record<string, unknown> = {};
+
+          if (!type || type === 'cli') {
+            result.cli = {
+              count: pluginsData.cli.length,
+              plugins: pluginsData.cli.map(p => ({
+                name: p.name,
+                command: p.command,
+                description: p.description,
+                enabled: p.enabled,
+                timeout: p.timeout,
+                allowedSubcommands: p.allowedSubcommands,
+                blockedSubcommands: p.blockedSubcommands,
+                requireConfirmation: p.requireConfirmation,
+                env: p.env || [],
               })),
-              hasAuth: !!(p.auth as Record<string, unknown>)?.type,
-            })),
-          };
+            };
+          }
+
+          if (!type || type === 'http') {
+            result.http = {
+              count: pluginsData.http.length,
+              plugins: pluginsData.http.map(p => ({
+                name: p.name,
+                baseUrl: p.baseUrl,
+                description: p.description,
+                enabled: p.enabled,
+                timeout: p.timeout,
+                endpointCount: p.endpoints?.length || 0,
+                endpoints: (p.endpoints || []).map(e => ({
+                  name: e.name,
+                  method: e.method,
+                  path: e.path,
+                  description: e.description,
+                })),
+                hasAuth: !!(p.auth as unknown as Record<string, unknown>)?.type,
+              })),
+            };
+          }
+
+          return result;
         }
 
         // ─── ADD ──────────────────────────────────────
         case 'add': {
+          if (!type) return { error: 'type is required for add (use "cli" or "http")' };
           const pluginData = args.plugin as Record<string, unknown> | undefined;
-          if (!pluginData) return { error: 'plugin object is required for add action' };
+          if (!pluginData) return { error: 'plugin object is required for add' };
 
           const name = pluginData.name as string;
           if (!name) return { error: 'plugin.name is required' };
           if (!/^[a-z0-9_]+$/.test(name)) return { error: 'plugin.name must be lowercase alphanumeric + underscores' };
 
-          const baseUrl = pluginData.baseUrl as string;
-          if (!baseUrl) return { error: 'plugin.baseUrl is required' };
+          const pluginsData = loadPlugins(stateDir);
 
-          const endpoints = pluginData.endpoints as Array<Record<string, unknown>> | undefined;
-          if (!endpoints || endpoints.length === 0) return { error: 'plugin.endpoints is required (at least one endpoint)' };
-
-          // Validate endpoint names
-          for (const ep of endpoints) {
-            if (!ep.name || !/^[a-z0-9_]+$/.test(ep.name as string)) {
-              return { error: `Endpoint name "${ep.name}" must be lowercase alphanumeric + underscores` };
-            }
+          // Check name collision across both types
+          if (pluginsData.cli.some(p => p.name === name) || pluginsData.http.some(p => p.name === name)) {
+            return { error: `Plugin "${name}" already exists (check both CLI and HTTP). Use action="update" or choose a different name.` };
           }
 
-          // Build the plugin config object
-          const pluginConfig: Record<string, unknown> = {
-            name,
-            baseUrl,
-            description: pluginData.description || '',
-            enabled: pluginData.enabled !== false,
-            timeout: Math.min(Math.max((pluginData.timeout as number) || 30, 1), 600),
-            endpoints: endpoints.map(ep => ({
-              name: ep.name,
-              method: (ep.method as string || 'GET').toUpperCase(),
-              path: ep.path || '/',
-              description: ep.description || '',
-              parameters: ep.parameters || {},
-            })),
-          };
+          if (type === 'cli') {
+            const command = pluginData.command as string;
+            if (!command) return { error: 'plugin.command is required for CLI plugins' };
 
-          // Handle auth
-          const authConfig = args.auth as Record<string, unknown> | undefined;
-          const authSecret = args.authSecret as string | undefined;
+            // Validate command is a safe binary name (prevent shell injection in `which`)
+            if (!isValidCommand(command)) {
+              return { error: `Invalid command "${command}". Must be a simple binary name (letters, numbers, hyphens, underscores, dots).` };
+            }
 
-          if (authConfig?.type) {
-            const secretNamespace = `plugins.${name}`;
-            pluginConfig.auth = {
-              type: authConfig.type,
-              tokenSecret: secretNamespace,
-              ...(authConfig.headerName ? { headerName: authConfig.headerName } : {}),
-              ...(authConfig.queryParam ? { queryParam: authConfig.queryParam } : {}),
+            // Verify command exists
+            try {
+              await execFileAsync('/bin/sh', ['-c', `which ${command}`], { timeout: 5000 });
+            } catch {
+              return { error: `Command "${command}" not found. Install it first (e.g. use exec tool to run: sudo apt install ${command}).` };
+            }
+
+            const envVars = (pluginData.env as string[]) || [];
+
+            pluginsData.cli.push({
+              name,
+              command,
+              description: (pluginData.description as string) || `${command} CLI`,
+              enabled: pluginData.enabled !== false,
+              timeout: Math.min(Math.max((pluginData.timeout as number) || 30, 1), 120),
+              allowedSubcommands: (pluginData.allowedSubcommands as string[]) || [],
+              blockedSubcommands: (pluginData.blockedSubcommands as string[]) || [],
+              requireConfirmation: (pluginData.requireConfirmation as string[]) || [],
+              env: envVars,
+            });
+
+            // Store secrets if provided
+            const secrets = args.secrets as Record<string, string> | undefined;
+            if (secrets && secretsStore) {
+              for (const [key, val] of Object.entries(secrets)) {
+                secretsStore.set(`plugins.${name}`, key, val);
+              }
+            }
+
+            try { savePlugins(stateDir, pluginsData); } catch {
+              return { error: 'Failed to write plugins file' };
+            }
+            (config as Record<string, unknown>).plugins = pluginsData;
+
+            const reloader = ctx.pluginReloader as (() => string[]) | undefined;
+            const tools = reloader ? reloader() : [];
+
+            return { success: true, type: 'cli', plugin: name, tool: `cli_${name}`, totalPluginTools: tools.length };
+
+          } else {
+            // HTTP
+            const baseUrl = pluginData.baseUrl as string;
+            if (!baseUrl) return { error: 'plugin.baseUrl is required for HTTP plugins' };
+
+            const endpoints = pluginData.endpoints as Array<Record<string, unknown>> | undefined;
+            if (!endpoints || endpoints.length === 0) return { error: 'plugin.endpoints is required (at least one)' };
+
+            for (const ep of endpoints) {
+              if (!ep.name || !/^[a-z0-9_]+$/.test(ep.name as string)) {
+                return { error: `Endpoint name "${ep.name}" must be lowercase alphanumeric + underscores` };
+              }
+            }
+
+            const pluginConfig: Record<string, unknown> = {
+              name,
+              baseUrl,
+              description: (pluginData.description as string) || '',
+              enabled: pluginData.enabled !== false,
+              timeout: Math.min(Math.max((pluginData.timeout as number) || 30, 1), 600),
+              endpoints: endpoints.map(ep => ({
+                name: ep.name,
+                method: ((ep.method as string) || 'GET').toUpperCase(),
+                path: ep.path || '/',
+                description: ep.description || '',
+                parameters: ep.parameters || {},
+              })),
             };
 
-            // Store the secret
-            if (authSecret && secretsStore) {
-              secretsStore.set(secretNamespace, 'token', authSecret);
+            // Handle auth
+            const authConfig = args.auth as Record<string, unknown> | undefined;
+            const secrets = args.secrets as Record<string, string> | undefined;
+            if (authConfig?.type) {
+              const secretNamespace = `plugins.${name}`;
+              pluginConfig.auth = {
+                type: authConfig.type,
+                tokenSecret: secretNamespace,
+                ...(authConfig.headerName ? { headerName: authConfig.headerName } : {}),
+                ...(authConfig.queryParam ? { queryParam: authConfig.queryParam } : {}),
+              };
+              if (secrets?.token && secretsStore) {
+                secretsStore.set(secretNamespace, 'token', secrets.token);
+              }
             }
+
+            pluginsData.http.push(pluginConfig as any);
+
+            try { savePlugins(stateDir, pluginsData); } catch {
+              return { error: 'Failed to write plugins file' };
+            }
+            (config as Record<string, unknown>).plugins = pluginsData;
+
+            const reloader = ctx.pluginReloader as (() => string[]) | undefined;
+            const tools = reloader ? reloader() : [];
+
+            return {
+              success: true,
+              type: 'http',
+              plugin: name,
+              endpoints: endpoints.map(e => `http_${name}_${e.name}`),
+              totalPluginTools: tools.length,
+            };
           }
-
-          // Read plugins.json
-          const stateDir = (config as Record<string, unknown>)._stateDir as string || '';
-          const pluginsData = readPluginsFile(stateDir);
-
-          // Check for duplicate name
-          if (pluginsData.http.some(p => p.name === name)) {
-            return { error: `Plugin "${name}" already exists. Use action="update" to modify it, or action="remove" to delete it first.` };
-          }
-
-          pluginsData.http.push(pluginConfig as any);
-
-          // Write plugins.json
-          try {
-            writePluginsFile(stateDir, pluginsData);
-          } catch {
-            return { error: 'Failed to write plugins file' };
-          }
-
-          // Update runtime config
-          (config as Record<string, unknown>).plugins = pluginsData;
-
-          // Trigger hot-reload
-          const reloader = ctx.pluginReloader as (() => string[]) | undefined;
-          let registeredTools: string[] = [];
-          if (reloader) {
-            registeredTools = reloader();
-          }
-
-          return {
-            success: true,
-            plugin: name,
-            endpoints: (pluginConfig.endpoints as Array<Record<string, unknown>>).map(e => `http_${name}_${e.name}`),
-            totalPluginTools: registeredTools.length,
-          };
         }
 
         // ─── UPDATE ───────────────────────────────────
         case 'update': {
+          if (!type) return { error: 'type is required for update (use "cli" or "http")' };
           const pluginName = (args.name || (args.plugin as Record<string, unknown>)?.name) as string;
-          if (!pluginName) return { error: 'name is required for update action' };
+          if (!pluginName) return { error: 'name is required for update' };
 
-          const stateDir = (config as Record<string, unknown>)._stateDir as string || '';
-          const pluginsData = readPluginsFile(stateDir);
-
-          const idx = pluginsData.http.findIndex(p => p.name === pluginName);
-          if (idx < 0) return { error: `Plugin "${pluginName}" not found` };
-
-          // Merge updates
+          const pluginsData = loadPlugins(stateDir);
           const updates = args.plugin as Record<string, unknown> | undefined;
-          if (updates) {
-            const target = pluginsData.http[idx] as unknown as Record<string, unknown>;
-            if (updates.baseUrl) target.baseUrl = updates.baseUrl;
-            if (updates.description !== undefined) target.description = updates.description;
-            if (updates.enabled !== undefined) target.enabled = updates.enabled;
-            if (updates.timeout !== undefined) target.timeout = Math.min(Math.max(updates.timeout as number, 1), 600);
-            if (updates.endpoints) target.endpoints = (updates.endpoints as Array<Record<string, unknown>>).map(ep => ({
-              name: ep.name,
-              method: (ep.method as string || 'GET').toUpperCase(),
-              path: ep.path || '/',
-              description: ep.description || '',
-              parameters: ep.parameters || {},
-            }));
-          }
 
-          // Handle auth update
-          const authConfig = args.auth as Record<string, unknown> | undefined;
-          const authSecret = args.authSecret as string | undefined;
-          if (authConfig?.type) {
-            const secretNamespace = `plugins.${pluginName}`;
-            (pluginsData.http[idx] as unknown as Record<string, unknown>).auth = {
-              type: authConfig.type,
-              tokenSecret: secretNamespace,
-              ...(authConfig.headerName ? { headerName: authConfig.headerName } : {}),
-              ...(authConfig.queryParam ? { queryParam: authConfig.queryParam } : {}),
-            };
-            if (authSecret && secretsStore) {
-              secretsStore.set(secretNamespace, 'token', authSecret);
+          if (type === 'cli') {
+            const idx = pluginsData.cli.findIndex(p => p.name === pluginName);
+            if (idx < 0) return { error: `CLI plugin "${pluginName}" not found` };
+
+            if (updates) {
+              const target = pluginsData.cli[idx] as unknown as Record<string, unknown>;
+              if (updates.command) target.command = updates.command;
+              if (updates.description !== undefined) target.description = updates.description;
+              if (updates.enabled !== undefined) target.enabled = updates.enabled;
+              if (updates.timeout !== undefined) target.timeout = Math.min(Math.max(updates.timeout as number, 1), 120);
+              if (updates.allowedSubcommands) target.allowedSubcommands = updates.allowedSubcommands;
+              if (updates.blockedSubcommands) target.blockedSubcommands = updates.blockedSubcommands;
+              if (updates.requireConfirmation) target.requireConfirmation = updates.requireConfirmation;
+              if (updates.env) target.env = updates.env;
+            }
+
+            // Store/update secrets
+            const secrets = args.secrets as Record<string, string> | undefined;
+            if (secrets && secretsStore) {
+              for (const [key, val] of Object.entries(secrets)) {
+                secretsStore.set(`plugins.${pluginName}`, key, val);
+              }
+            }
+          } else {
+            const idx = pluginsData.http.findIndex(p => p.name === pluginName);
+            if (idx < 0) return { error: `HTTP plugin "${pluginName}" not found` };
+
+            if (updates) {
+              const target = pluginsData.http[idx] as unknown as Record<string, unknown>;
+              if (updates.baseUrl) target.baseUrl = updates.baseUrl;
+              if (updates.description !== undefined) target.description = updates.description;
+              if (updates.enabled !== undefined) target.enabled = updates.enabled;
+              if (updates.timeout !== undefined) target.timeout = Math.min(Math.max(updates.timeout as number, 1), 600);
+              if (updates.endpoints) target.endpoints = (updates.endpoints as Array<Record<string, unknown>>).map(ep => ({
+                name: ep.name,
+                method: ((ep.method as string) || 'GET').toUpperCase(),
+                path: ep.path || '/',
+                description: ep.description || '',
+                parameters: ep.parameters || {},
+              }));
+            }
+
+            // Handle auth update
+            const authConfig = args.auth as Record<string, unknown> | undefined;
+            const secrets = args.secrets as Record<string, string> | undefined;
+            if (authConfig?.type) {
+              const secretNamespace = `plugins.${pluginName}`;
+              (pluginsData.http[pluginsData.http.findIndex(p => p.name === pluginName)] as unknown as Record<string, unknown>).auth = {
+                type: authConfig.type,
+                tokenSecret: secretNamespace,
+                ...(authConfig.headerName ? { headerName: authConfig.headerName } : {}),
+                ...(authConfig.queryParam ? { queryParam: authConfig.queryParam } : {}),
+              };
+              if (secrets?.token && secretsStore) {
+                secretsStore.set(secretNamespace, 'token', secrets.token);
+              }
             }
           }
 
-          // Write plugins.json
-          try {
-            writePluginsFile(stateDir, pluginsData);
-          } catch {
+          try { savePlugins(stateDir, pluginsData); } catch {
             return { error: 'Failed to write plugins file' };
           }
-
-          // Update runtime config
           (config as Record<string, unknown>).plugins = pluginsData;
 
-          // Trigger hot-reload
           const reloader = ctx.pluginReloader as (() => string[]) | undefined;
           if (reloader) reloader();
 
-          return { success: true, plugin: pluginName };
+          return { success: true, type, plugin: pluginName };
         }
 
         // ─── REMOVE ───────────────────────────────────
         case 'remove': {
+          if (!type) return { error: 'type is required for remove (use "cli" or "http")' };
           const pluginName = args.name as string;
-          if (!pluginName) return { error: 'name is required for remove action' };
+          if (!pluginName) return { error: 'name is required for remove' };
 
-          const stateDir = (config as Record<string, unknown>)._stateDir as string || '';
-          const pluginsData = readPluginsFile(stateDir);
+          const pluginsData = loadPlugins(stateDir);
 
-          const idx = pluginsData.http.findIndex(p => p.name === pluginName);
-          if (idx < 0) return { error: `Plugin "${pluginName}" not found` };
+          if (type === 'cli') {
+            const idx = pluginsData.cli.findIndex(p => p.name === pluginName);
+            if (idx < 0) return { error: `CLI plugin "${pluginName}" not found` };
+            pluginsData.cli.splice(idx, 1);
+          } else {
+            const idx = pluginsData.http.findIndex(p => p.name === pluginName);
+            if (idx < 0) return { error: `HTTP plugin "${pluginName}" not found` };
+            pluginsData.http.splice(idx, 1);
+          }
 
-          pluginsData.http.splice(idx, 1);
+          // Clean up secrets for both types
+          {
+            if (secretsStore) {
+              try { secretsStore.deleteNamespace(`plugins.${pluginName}`); } catch { /* non-fatal */ }
+            }
+          }
 
-          // Write plugins.json
-          try {
-            writePluginsFile(stateDir, pluginsData);
-          } catch {
+          try { savePlugins(stateDir, pluginsData); } catch {
             return { error: 'Failed to write plugins file' };
           }
-
-          // Update runtime config
           (config as Record<string, unknown>).plugins = pluginsData;
 
-          // Clean up secrets
-          if (secretsStore) {
-            try {
-              secretsStore.deleteNamespace(`plugins.${pluginName}`);
-            } catch { /* non-fatal */ }
-          }
-
-          // Trigger hot-reload
           const reloader = ctx.pluginReloader as (() => string[]) | undefined;
           if (reloader) reloader();
 
-          return { success: true, removed: pluginName };
+          return { success: true, type, removed: pluginName };
         }
 
         default:
-          return { error: `Unknown action: ${action}. Use: test, add, list, update, remove` };
+          return { error: `Unknown action: ${action}. Use: list, add, update, remove` };
       }
     },
     source: 'builtin',
