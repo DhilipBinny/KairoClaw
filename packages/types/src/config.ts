@@ -69,6 +69,8 @@ export interface TelegramChannelConfig {
   groupRequireMention: boolean;
   /** Allowed group chat IDs. Empty = all groups allowed. */
   groupAllowFrom: string[];
+  /** In groups, only respond to users who are in allowFrom. Default true. */
+  groupRequireAllowFrom: boolean;
   /** Path to a file containing the bot token. */
   tokenFile?: string;
   /** Outbound message policy. 'session-only' restricts to contacts with existing sessions. */
@@ -89,6 +91,8 @@ export interface WhatsAppChannelConfig {
   groupRequireMention: boolean;
   /** Allowed group JIDs. Empty = all groups allowed. */
   groupAllowFrom: string[];
+  /** In groups, only respond to users who are in allowFrom. Default true. */
+  groupRequireAllowFrom: boolean;
   /** Send read receipts. */
   sendReadReceipts: boolean;
   /** Outbound message policy. 'session-only' restricts to contacts with existing sessions. */
