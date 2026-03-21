@@ -172,6 +172,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
           sendSSE('done', {
             text: result.text || '',
             usage: result.usage,
+            ...(result.media && result.media.length > 0 ? { media: result.media } : {}),
             requestId,
           });
         }
@@ -243,6 +244,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
           text: result.text || null,
           sessionId: `api:${userId}`,
           usage: result.usage || { inputTokens: 0, outputTokens: 0 },
+          ...(result.media && result.media.length > 0 ? { media: result.media } : {}),
         };
 
         return reply.send(response);

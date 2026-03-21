@@ -73,6 +73,8 @@ export interface ChatResponse {
     inputTokens: number;
     outputTokens: number;
   };
+  /** Media attachments from tool results. */
+  media?: import('./message.js').MediaAttachment[];
 }
 
 /**

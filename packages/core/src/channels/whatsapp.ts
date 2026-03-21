@@ -8,6 +8,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { extractMedia } from '../media/detector.js';
+import type { MediaItem } from '../media/detector.js';
+import type { MediaAttachment } from '@agw/types';
 import {
   makeWASocket,
   useMultiFileAuthState,
@@ -547,6 +550,54 @@ class WhatsAppChannel implements Channel {
       }
 
       if (result.text) {
+        // Prefer structured media from tool results; fall back to text extraction
+        const stateDir = this.config._stateDir || '';
+        const workspace = this.config.agent.workspace;
+
+        let mediaItems: MediaItem[];
+        let cleanText: string;
+
+        if (result.media && result.media.length > 0) {
+          mediaItems = result.media.map((a: MediaAttachment) => ({
+            type: a.type,
+            filePath: a.filePath,
+            fileName: a.fileName,
+            mimeType: a.mimeType,
+            caption: a.caption,
+            match: '',
+          }));
+          ({ cleanText } = extractMedia(result.text, stateDir, workspace));
+        } else {
+          ({ items: mediaItems, cleanText } = extractMedia(result.text, stateDir, workspace));
+        }
+
+        if (mediaItems.length > 0) {
+          const caption = cleanText.slice(0, 1024) || undefined;
+          let mediaSent = false;
+
+          for (const item of mediaItems) {
+            try {
+              await this.sendWhatsAppMedia(jid, item, !mediaSent ? caption : undefined);
+              mediaSent = true;
+            } catch (e: unknown) {
+              const errMsg = e instanceof Error ? e.message : String(e);
+              log.debug({ err: errMsg, type: item.type, file: item.fileName }, 'Failed to send media, will fall back to text');
+            }
+          }
+
+          if (mediaSent) {
+            // Send remaining text if longer than caption
+            if (cleanText.length > 1024) {
+              const remaining = cleanText.slice(1024);
+              const chunks = splitMessage(remaining, 4000);
+              for (const chunk of chunks) {
+                await this.sock?.sendMessage(jid, { text: chunk });
+              }
+            }
+            return;
+          }
+        }
+
         const chunks = splitMessage(result.text, 4000);
         for (const chunk of chunks) {
           try {
@@ -624,6 +675,37 @@ class WhatsAppChannel implements Channel {
   // ── Public API ──────────────────────────────────────────
 
   /** Send a message to a specific WhatsApp chat. Requires an explicit JID. */
+  /** Send a media item via the appropriate WhatsApp message type. */
+  private async sendWhatsAppMedia(jid: string, item: MediaItem, caption?: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const data = fs.readFileSync(item.filePath);
+
+    switch (item.type) {
+      case 'image':
+        await this.sock.sendMessage(jid, { image: data, caption });
+        break;
+      case 'audio':
+      case 'voice':
+        await this.sock.sendMessage(jid, {
+          audio: data,
+          mimetype: item.mimeType,
+          ptt: item.type === 'voice',
+        });
+        break;
+      case 'video':
+        await this.sock.sendMessage(jid, { video: data, caption });
+        break;
+      case 'document':
+      default:
+        await this.sock.sendMessage(jid, {
+          document: data,
+          mimetype: item.mimeType,
+          fileName: item.fileName,
+        });
+        break;
+    }
+  }
+
   async sendToChat(text: string, jid?: string): Promise<void> {
     if (!this.sock) throw new Error('WhatsApp not connected');
     if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID (delivery.to). No silent fallback.');
