@@ -22,12 +22,7 @@ jobs:
         run: docker build -t kairoclaw:latest .
 
       - name: Deploy stack
-        working-directory: /home/binny/Binny/KAIROCLAW
-        run: |
-          set -a && source .env && set +a
-          echo "KAIRO_DATA_DIR=$KAIRO_DATA_DIR"
-          echo "KAIRO_PORT=$KAIRO_PORT"
-          docker stack deploy --compose-file <(docker compose config) kairoclaw
+        run: docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
 
       - name: Wait for healthy
         run: |
@@ -35,6 +30,7 @@ jobs:
           for i in $(seq 1 30); do
             if curl -sf http://localhost:18181/api/v1/health > /dev/null 2>&1; then
               echo "KairoClaw is healthy"
+              docker stack services kairoclaw
               exit 0
             fi
             sleep 2
