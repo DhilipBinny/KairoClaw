@@ -413,6 +413,30 @@ class WhatsAppChannel implements Channel {
           return;
         }
       }
+
+      // Per-user check inside groups: sender must be in allowFrom
+      if (cfg.groupRequireAllowFrom && cfg.allowFrom?.length > 0) {
+        if (!cfg.allowFrom.includes(senderPhone)) {
+          log.debug({ senderPhone, jid }, 'WhatsApp: group sender not in allowFrom — ignored');
+          // Record as pending for admin approval
+          try {
+            const resolved = this.db.get<{ id: number }>(
+              "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status IN ('approved','rejected')",
+              [senderPhone],
+            );
+            if (!resolved) {
+              this.db.run(
+                `INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
+                 VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
+                 ON CONFLICT(channel, sender_id) DO UPDATE SET
+                   sender_name = excluded.sender_name, last_seen = datetime('now'), message_count = message_count + 1`,
+                ['whatsapp', senderPhone, waSenderName],
+              );
+            }
+          } catch { /* non-critical */ }
+          return;
+        }
+      }
     }
 
 

@@ -524,6 +524,23 @@
                 </button>
               </div>
             </div>
+            <!-- Group Require AllowFrom -->
+            <div class="field-row">
+              <div class="field-info">
+                <label class="field-label">Require User Allowlist in Groups</label>
+                <span class="field-hint">Only respond to users who are in the Allowed Users list, even inside allowed groups.</span>
+              </div>
+              <div class="field-control">
+                <button class="toggle-btn" class:active={!!getVal('channels.telegram.groupRequireAllowFrom')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.telegram.groupRequireAllowFrom')}
+                  disabled={!!saving['channels.telegram.groupRequireAllowFrom']}
+                  onclick={() => saveToggle('channels.telegram.groupRequireAllowFrom', !!getVal('channels.telegram.groupRequireAllowFrom'))}>
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  <span class="toggle-label">{getVal('channels.telegram.groupRequireAllowFrom') ? 'Yes' : 'No'}</span>
+                </button>
+              </div>
+            </div>
             <!-- Group AllowFrom -->
             <div class="field-row allow-from-row">
               <div class="field-info">
@@ -769,6 +786,22 @@
               <p class="allow-from-alt">
                 Phone numbers without + or spaces (e.g. <code>971501234567</code>). Easiest way: leave empty, message your bot from WhatsApp, then click <strong>Add to allowlist</strong> on the <strong>Discovered Users</strong> card above.
               </p>
+            </div>
+            <div class="field-row">
+              <div class="field-info">
+                <label class="field-label">Require User Allowlist in Groups</label>
+                <span class="field-hint">Only respond to users who are in the Allowed Users list, even inside allowed groups.</span>
+              </div>
+              <div class="field-control">
+                <button class="toggle-btn" class:active={!!getVal('channels.whatsapp.groupRequireAllowFrom')}
+                  role="switch"
+                  aria-checked={!!getVal('channels.whatsapp.groupRequireAllowFrom')}
+                  disabled={!!saving['channels.whatsapp.groupRequireAllowFrom']}
+                  onclick={() => saveToggle('channels.whatsapp.groupRequireAllowFrom', !!getVal('channels.whatsapp.groupRequireAllowFrom'))}>
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  <span class="toggle-label">{getVal('channels.whatsapp.groupRequireAllowFrom') ? 'Yes' : 'No'}</span>
+                </button>
+              </div>
             </div>
             <div class="field-row">
               <div class="field-info">

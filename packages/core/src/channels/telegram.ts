@@ -364,6 +364,32 @@ class TelegramChannel implements Channel {
         const replied = ctx.message.reply_to_message?.from?.id === botInfo.id;
         if (!mentioned && !replied) return;
       }
+
+      // Per-user check inside groups: sender must be in allowFrom
+      if (cfg.groupRequireAllowFrom && cfg.allowFrom?.length > 0) {
+        const allowed = cfg.allowFrom.map(String);
+        if (!allowed.includes(senderId)) {
+          log.debug({ senderId, chatId }, 'Telegram: group sender not in allowFrom — ignored');
+          // Record as pending for admin approval
+          try {
+            const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
+            const resolved = this.db.get<{ id: number }>(
+              "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('approved','rejected')",
+              [senderId],
+            );
+            if (!resolved) {
+              this.db.run(
+                `INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
+                 VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
+                 ON CONFLICT(channel, sender_id) DO UPDATE SET
+                   sender_name = excluded.sender_name, last_seen = datetime('now'), message_count = message_count + 1`,
+                ['telegram', senderId, senderName],
+              );
+            }
+          } catch { /* non-critical */ }
+          return;
+        }
+      }
     }
 
     const msgText = overrideText || ctx.message.text || '';
