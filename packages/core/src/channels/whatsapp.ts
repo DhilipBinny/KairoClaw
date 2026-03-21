@@ -755,6 +755,52 @@ class WhatsAppChannel implements Channel {
     }
   }
 
+  /** Send media attachments with optional text to a WhatsApp chat. */
+  async sendMediaToChat(media: MediaAttachment[], text: string, jid?: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID');
+
+    const stateDir = this.config._stateDir || '';
+    const workspace = this.config.agent.workspace;
+
+    // Convert MediaAttachment[] → MediaItem[] and send
+    const items: MediaItem[] = media
+      .filter(a => fs.existsSync(a.filePath))
+      .map(a => ({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' }));
+
+    // Also extract from text as fallback
+    if (items.length === 0) {
+      const extracted = extractMedia(text, stateDir, workspace);
+      items.push(...extracted.items);
+    }
+
+    if (items.length > 0) {
+      const { cleanText } = extractMedia(text, stateDir, workspace);
+      const caption = cleanText.slice(0, 1024) || undefined;
+      let mediaSent = false;
+      for (const item of items) {
+        try {
+          await this.sendWhatsAppMedia(jid, item, !mediaSent ? caption : undefined);
+          mediaSent = true;
+        } catch (e) {
+          log.debug({ err: (e as Error).message, type: item.type }, 'Failed to send media in cron delivery');
+        }
+      }
+      if (mediaSent) {
+        if (cleanText.length > 1024) {
+          const chunks = splitMessage(cleanText.slice(1024), 4000);
+          for (const chunk of chunks) {
+            await this.sock.sendMessage(jid, { text: chunk });
+          }
+        }
+        return;
+      }
+    }
+
+    // Fallback to text
+    await this.sendToChat(text, jid);
+  }
+
   /** Returns current QR code string for admin UI pairing. */
   getQRCode(): string | null {
     return this.currentQR;
@@ -798,6 +844,7 @@ class WhatsAppChannel implements Channel {
 
 export interface WhatsAppChannelInstance extends Channel {
   sendToChat(text: string, jid?: string): Promise<void>;
+  sendMediaToChat(media: import('@agw/types').MediaAttachment[], text: string, jid?: string): Promise<void>;
   getQRCode(): string | null;
   getConnectionStatus(): 'disconnected' | 'qr' | 'connected';
   getConnectedPhone(): string | null;

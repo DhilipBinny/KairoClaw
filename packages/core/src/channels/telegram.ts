@@ -611,6 +611,66 @@ class TelegramChannel implements Channel {
     }
   }
 
+  /** Send media attachments with optional text to a Telegram chat. */
+  async sendMediaToChat(media: MediaAttachment[], text: string, chatId?: string): Promise<void> {
+    if (!this.bot) throw new Error('Telegram bot not started');
+    const targetChatId = chatId || this.lastActiveChatId;
+    if (!targetChatId) throw new Error('No chat ID specified and no recent active chat');
+
+    const stateDir = this.config._stateDir || '';
+    const workspace = this.config.agent.workspace;
+
+    const items: MediaItem[] = media
+      .filter(a => fs.existsSync(a.filePath))
+      .map(a => ({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' }));
+
+    if (items.length === 0) {
+      const extracted = extractMedia(text, stateDir, workspace);
+      items.push(...extracted.items);
+    }
+
+    if (items.length > 0) {
+      const { cleanText } = extractMedia(text, stateDir, workspace);
+      const caption = cleanText.slice(0, 1024) || undefined;
+      let mediaSent = false;
+      for (const item of items) {
+        const file = new InputFile(fs.createReadStream(item.filePath));
+        const opts = { caption: !mediaSent ? caption : undefined };
+        try {
+          switch (item.type) {
+            case 'image':
+              await this.bot.api.sendPhoto(targetChatId, file, opts);
+              break;
+            case 'audio':
+              await this.bot.api.sendAudio(targetChatId, file, opts);
+              break;
+            case 'voice':
+              await this.bot.api.sendVoice(targetChatId, file, opts);
+              break;
+            case 'video':
+              await this.bot.api.sendVideo(targetChatId, file, opts);
+              break;
+            default:
+              await this.bot.api.sendDocument(targetChatId, file, opts);
+              break;
+          }
+          mediaSent = true;
+        } catch (e) {
+          log.debug({ err: (e as Error).message, type: item.type }, 'Failed to send media in cron delivery');
+        }
+      }
+      if (mediaSent) {
+        if (cleanText.length > 1024) {
+          await this.sendToChat(cleanText.slice(1024), targetChatId);
+        }
+        return;
+      }
+    }
+
+    // Fallback to text
+    await this.sendToChat(text, chatId);
+  }
+
   private lastActiveChatId: string | null = null;
 }
 
@@ -621,6 +681,7 @@ class TelegramChannel implements Channel {
  */
 export interface TelegramChannelInstance extends Channel {
   sendToChat(text: string, chatId?: string): Promise<void>;
+  sendMediaToChat(media: import('@agw/types').MediaAttachment[], text: string, chatId?: string): Promise<void>;
   getBotInfo(): { username?: string; id?: number } | null;
 }
 
