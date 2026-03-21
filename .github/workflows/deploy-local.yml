@@ -19,10 +19,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t kairoclaw:latest .
+        run: |
+          docker tag kairoclaw:latest kairoclaw:prev 2>/dev/null || true
+          docker build -t kairoclaw:latest .
 
       - name: Deploy stack
         run: docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
+
+      - name: Cleanup previous kairoclaw image
+        run: docker rmi kairoclaw:prev 2>/dev/null || true
 
       - name: Wait for healthy
         run: |
