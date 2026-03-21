@@ -64,6 +64,8 @@ export interface AgentContext {
   model?: string;
   /** Sub-agent nesting depth (0 = top-level). */
   subagentDepth?: number;
+  /** Scope key for per-user memory isolation (e.g., "telegram:8606526093"). */
+  scopeKey?: string | null;
 }
 
 /** Observability callbacks fired around each round. */
@@ -131,7 +133,7 @@ export async function runAgent(
 
   // ── Build system prompt ─────────────────────────────────
   const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools);
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey);
 
   // ── Load conversation history ───────────────────────────
   const historyRows = messageRepo.listBySession(session.id);
@@ -545,6 +547,7 @@ export async function runAgent(
     autoSummarizeToMemory({
       sessionId: session.id,
       channel: inbound.channel,
+      scopeKey: context.scopeKey,
       db,
       config,
       callLLM: context.callLLM,

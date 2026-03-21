@@ -23,6 +23,7 @@ import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
+import { deriveScopeKey, ensureScopeDir } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -254,12 +255,17 @@ async function main(): Promise<void> {
       } catch { /* audit should not break session creation */ }
     }
 
+    // Derive scope key for per-user memory isolation
+    const scopeKey = deriveScopeKey(inbound.channel, inbound.userId);
+    if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey);
+
     return runAgent(inbound, callbacks || {}, {
       db,
       config,
       session: sessionRow,
       tenantId,
       userId: validUserId,
+      scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: toolRegistry.getDefinitions(),
       executeTool: (name, args, ctx) => {
@@ -275,6 +281,7 @@ async function main(): Promise<void> {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
           subagentDepth: 0,
+          scopeKey,
           secretsStore,
           cronScheduler: sharedServices.cronScheduler,
           telegramSend: sharedServices.telegramSend,

@@ -127,6 +127,20 @@ export const TOOL_LOOP_THRESHOLD = 3;
 /** Max sub-agent nesting depth (1 = main can spawn workers, workers can't spawn) */
 export const SUBAGENT_MAX_DEPTH = 1;
 
+// ── Scoped Memory ───────────────────────────────────────────
+
+/** Directory name for user scopes under workspace */
+export const SCOPE_DIR_NAME = 'scopes';
+
+/** Files that are ALWAYS global (never overridden per scope) */
+export const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'TOOLS.md'];
+
+/** Files that cascade: scope override → global fallback */
+export const CASCADING_FILES = ['SOUL.md', 'USER.md', 'MEMORY.md'];
+
+/** Channels that get scoped memory */
+export const SCOPED_CHANNELS = ['telegram', 'whatsapp'];
+
 // ── PDF ─────────────────────────────────────────────────────
 
 /** Maximum pages to extract from a PDF */

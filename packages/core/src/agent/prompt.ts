@@ -19,17 +19,20 @@ import {
   MEMORY_SESSION_MAX_CHARS,
   MEMORY_RECENT_DAYS,
 } from '../constants.js';
+import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
 
 /**
  * Build the full system prompt from config, workspace files, and tool
  * definitions.
  *
- * @param config  Gateway configuration (provides agent name, workspace, model).
- * @param tools   Tool definitions to list in the prompt (optional).
+ * @param config   Gateway configuration (provides agent name, workspace, model).
+ * @param tools    Tool definitions to list in the prompt (optional).
+ * @param scopeKey Scope key for per-user memory isolation (optional).
  */
 export function buildSystemPrompt(
   config: GatewayConfig,
   tools: ToolDefinition[] = [],
+  scopeKey?: string | null,
 ): string {
   const workspace = config.agent.workspace;
 
@@ -71,16 +74,20 @@ Model: ${config.model.primary}`);
 When you have nothing to say, respond with ONLY: NO_REPLY
 It must be your ENTIRE message — nothing else.`);
 
-  // Memory
+  // Memory — tell the agent the correct paths for its scope
+  const memoryBasePath = scopeKey
+    ? `scopes/${scopeKey}/memory`
+    : 'memory';
   sections.push(`## Memory
 You wake up fresh each session. Your memory files are your continuity:
-- **memory/PROFILE.md** — your long-term memory (user profile, preferences, key facts)
-- **memory/sessions/YYYY-MM-DD.md** — recent session notes (last 7 days)
+- **${memoryBasePath}/PROFILE.md** — your long-term memory (user profile, preferences, key facts)
+- **${memoryBasePath}/sessions/YYYY-MM-DD.md** — recent session notes (last 7 days)
 - **MEMORY.md** — additional curated notes
-If someone says "remember this", write it to PROFILE.md or a memory file.`);
+If someone says "remember this", write it to ${memoryBasePath}/PROFILE.md.`);
 
-  // Inject layered memory: profile + recent sessions
-  const profilePath = path.join(workspace, 'memory', 'PROFILE.md');
+  // Inject layered memory: profile + recent sessions (scoped per user)
+  const memoryDir = getScopedMemoryDir(workspace, scopeKey ?? null);
+  const profilePath = path.join(memoryDir, 'PROFILE.md');
   if (fs.existsSync(profilePath)) {
     const profile = fs.readFileSync(profilePath, 'utf8').slice(0, MEMORY_PROFILE_MAX_CHARS);
     if (profile.trim()) {
@@ -88,7 +95,7 @@ If someone says "remember this", write it to PROFILE.md or a memory file.`);
     }
   }
 
-  const sessionsDir = path.join(workspace, 'memory', 'sessions');
+  const sessionsDir = path.join(memoryDir, 'sessions');
   if (fs.existsSync(sessionsDir)) {
     const sessionFiles = fs.readdirSync(sessionsDir)
       .filter(f => f.endsWith('.md'))
@@ -107,10 +114,10 @@ If someone says "remember this", write it to PROFILE.md or a memory file.`);
     }
   }
 
-  // Inject workspace files
+  // Inject workspace files (with scope cascading for SOUL.md, USER.md, MEMORY.md)
   sections.push('\n## Project Context (Workspace Files)');
   for (const filename of PROMPT_BOOTSTRAP_FILES) {
-    const filePath = path.join(workspace, filename);
+    const filePath = resolveScopedFile(workspace, filename, scopeKey ?? null);
     if (fs.existsSync(filePath)) {
       let content = fs.readFileSync(filePath, 'utf8');
       if (content.length > PROMPT_MAX_FILE_CHARS) {

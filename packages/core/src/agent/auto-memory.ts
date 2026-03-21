@@ -22,6 +22,7 @@ import type { GatewayConfig, ChatArgs, ProviderResponse } from '@agw/types';
 import { MessageRepository } from '../db/repositories/message.js';
 import { MEMORY_SESSION_RETENTION_DAYS, MEMORY_MIN_TURNS, MEMORY_MAX_CONVERSATION_CHARS } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { getScopedMemoryDir } from './scope.js';
 
 const log = createModuleLogger('memory');
 
@@ -50,12 +51,13 @@ function ensureDir(dirPath: string): void {
 export async function autoSummarizeToMemory(opts: {
   sessionId: string;
   channel: string;
+  scopeKey?: string | null;
   db: DatabaseAdapter;
   config: GatewayConfig;
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   minTurns?: number;
 }): Promise<void> {
-  const { sessionId, channel, db, config, callLLM, minTurns = MEMORY_MIN_TURNS } = opts;
+  const { sessionId, channel, scopeKey, db, config, callLLM, minTurns = MEMORY_MIN_TURNS } = opts;
   const workspace = config.agent.workspace;
   const messageRepo = new MessageRepository(db);
 
@@ -78,12 +80,13 @@ export async function autoSummarizeToMemory(opts: {
       .join('\n')
       .slice(0, MEMORY_MAX_CONVERSATION_CHARS);
 
-    // Read existing memory for deduplication
-    const profilePath = path.join(workspace, PROFILE_FILE);
+    // Read existing memory for deduplication (scoped per user)
+    const memoryDir = getScopedMemoryDir(workspace, scopeKey ?? null);
+    const profilePath = path.join(memoryDir, 'PROFILE.md');
     const existingProfile = readFileOrEmpty(profilePath);
 
     const date = new Date().toISOString().split('T')[0];
-    const sessionsDir = path.join(workspace, SESSIONS_DIR);
+    const sessionsDir = path.join(memoryDir, 'sessions');
     const sessionFile = path.join(sessionsDir, `${date}.md`);
     const existingSessionNotes = readFileOrEmpty(sessionFile);
 
@@ -126,9 +129,10 @@ Rules:
     fs.appendFileSync(sessionFile, entry, 'utf8');
 
     log.info({
-      file: `${SESSIONS_DIR}/${date}.md`,
+      file: path.relative(workspace, sessionFile),
       summaryLength: summary.length,
       channel,
+      scopeKey: scopeKey || 'global',
     }, 'Auto-memory: saved session notes');
 
     // Clean up expired session files
@@ -150,11 +154,13 @@ Rules:
 export async function consolidateMemory(opts: {
   config: GatewayConfig;
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
+  scopeKey?: string | null;
 }): Promise<void> {
-  const { config, callLLM } = opts;
+  const { config, callLLM, scopeKey } = opts;
   const workspace = config.agent.workspace;
-  const profilePath = path.join(workspace, PROFILE_FILE);
-  const sessionsDir = path.join(workspace, SESSIONS_DIR);
+  const memoryDir = getScopedMemoryDir(workspace, scopeKey ?? null);
+  const profilePath = path.join(memoryDir, 'PROFILE.md');
+  const sessionsDir = path.join(memoryDir, 'sessions');
 
   const existingProfile = readFileOrEmpty(profilePath);
 
