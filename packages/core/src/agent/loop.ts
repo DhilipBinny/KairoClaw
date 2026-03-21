@@ -273,6 +273,10 @@ export async function runAgent(
     if (!response.toolCalls) {
       fullText = response.text || '';
       finalThinkingText = response.thinkingText || null;
+      if (finalThinkingText) {
+        reqLog.info({ thinkingLen: finalThinkingText.length }, 'Thinking complete');
+        reqLog.debug({ thinking: finalThinkingText.slice(0, 2000) }, 'Thinking content');
+      }
       if (onRoundEnd) onRoundEnd(round, maxToolRounds);
       break;
     }
