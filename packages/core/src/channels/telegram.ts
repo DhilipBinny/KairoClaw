@@ -335,21 +335,67 @@ class TelegramChannel implements Channel {
     const sessionKey = `telegram:${chatId}`;
 
     try {
-      let thinkingText = '';
       const showThinking = this.config.agent?.thinking?.showThinking?.telegram ?? false;
+
+      // Live-updating thinking message state
+      let thinkingText = '';
+      let thinkingMsgId: number | null = null;
+      let thinkingDirty = false;
+      let thinkingInterval: ReturnType<typeof setInterval> | undefined;
+
+      if (showThinking) {
+        // Edit the thinking message every 2s to show progress
+        thinkingInterval = setInterval(async () => {
+          if (!thinkingDirty || !thinkingText) return;
+          thinkingDirty = false;
+          const display = `_Thinking..._\n\n${thinkingText.slice(-3000)}`;
+          try {
+            if (!thinkingMsgId) {
+              const sent = await ctx.reply(display, {
+                parse_mode: 'Markdown',
+                reply_parameters:
+                  chatType === 'group' && ctx.message
+                    ? { message_id: ctx.message.message_id }
+                    : undefined,
+              });
+              thinkingMsgId = sent.message_id;
+            } else {
+              await ctx.api.editMessageText(ctx.chat!.id, thinkingMsgId, display, {
+                parse_mode: 'Markdown',
+              });
+            }
+          } catch { /* rate limit or parse error — skip this update */ }
+        }, 2_000);
+      }
 
       const result = await this.queue.enqueue(sessionKey, () =>
         this.runner!(inbound, {
           onDelta: () => {},
-          onThinkingDelta: showThinking ? (delta: string) => { thinkingText += delta; } : undefined,
+          onThinkingDelta: showThinking ? (delta: string) => {
+            thinkingText += delta;
+            thinkingDirty = true;
+          } : undefined,
         }),
       );
 
-      // Send thinking as a separate message before the response
+      // Clean up thinking interval and send final thinking state
+      if (thinkingInterval) clearInterval(thinkingInterval);
       if (showThinking && thinkingText) {
-        const truncated = thinkingText.slice(0, 3000);
+        log.info({ thinkingLen: thinkingText.length }, 'Telegram thinking complete');
+        log.debug({ thinking: thinkingText.slice(0, 2000) }, 'Telegram thinking content');
+      }
+      if (showThinking && thinkingText && thinkingMsgId) {
+        // Final edit with complete thinking
+        const finalThinking = `_Thinking:_\n\n${thinkingText.slice(-3000)}`;
         try {
-          await sendWithRetry(ctx, `_Thinking..._\n\n${truncated}`, {
+          await ctx.api.editMessageText(ctx.chat!.id, thinkingMsgId, finalThinking, {
+            parse_mode: 'Markdown',
+          });
+        } catch { /* non-critical */ }
+      } else if (showThinking && thinkingText && !thinkingMsgId) {
+        // Thinking finished before first interval tick — send it now
+        try {
+          await sendWithRetry(ctx, `_Thinking:_\n\n${thinkingText.slice(0, 3000)}`, {
             parse_mode: 'Markdown',
             reply_parameters:
               chatType === 'group' && ctx.message

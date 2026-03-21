@@ -524,21 +524,60 @@ class WhatsAppChannel implements Channel {
     const sessionKey = `whatsapp:${jid}`;
 
     try {
-      let thinkingText = '';
       const showThinking = this.config.agent?.thinking?.showThinking?.whatsapp ?? false;
+
+      // Live-updating thinking message state
+      let thinkingText = '';
+      let thinkingKey: { remoteJid: string; id: string; fromMe: boolean } | null = null;
+      let thinkingDirty = false;
+      let thinkingInterval: ReturnType<typeof setInterval> | undefined;
+
+      if (showThinking) {
+        // Send or edit the thinking message every 2s to show progress
+        thinkingInterval = setInterval(async () => {
+          if (!thinkingDirty || !thinkingText || !this.sock) return;
+          thinkingDirty = false;
+          const display = `_Thinking..._\n\n${thinkingText.slice(-3000)}`;
+          try {
+            if (!thinkingKey) {
+              const sent = await this.sock.sendMessage(jid, { text: display });
+              if (sent?.key) {
+                thinkingKey = { remoteJid: jid, id: sent.key.id!, fromMe: true };
+              }
+            } else {
+              await this.sock.sendMessage(jid, { text: display, edit: thinkingKey });
+            }
+          } catch { /* rate limit or error — skip this update */ }
+        }, 2_000);
+      }
 
       const result = await this.queue.enqueue(sessionKey, () =>
         this.runner!(inbound, {
           onDelta: () => {},
-          onThinkingDelta: showThinking ? (delta: string) => { thinkingText += delta; } : undefined,
+          onThinkingDelta: showThinking ? (delta: string) => {
+            thinkingText += delta;
+            thinkingDirty = true;
+          } : undefined,
         }),
       );
 
-      // Send thinking as a separate message before the response
+      // Clean up thinking interval and send final thinking state
+      if (thinkingInterval) clearInterval(thinkingInterval);
       if (showThinking && thinkingText) {
-        const truncated = thinkingText.slice(0, 3000);
+        log.info({ thinkingLen: thinkingText.length }, 'WhatsApp thinking complete');
+        log.debug({ thinking: thinkingText.slice(0, 2000) }, 'WhatsApp thinking content');
+      }
+      if (showThinking && thinkingText && thinkingKey) {
+        const finalThinking = `_Thinking:_\n\n${thinkingText.slice(-3000)}`;
         try {
-          await this.sock?.sendMessage(jid, { text: `_Thinking..._\n\n${truncated}` });
+          await this.sock?.sendMessage(jid, { text: finalThinking, edit: thinkingKey });
+        } catch { /* non-critical */ }
+      } else if (showThinking && thinkingText && !thinkingKey) {
+        // Thinking finished before first interval tick — send it now
+        try {
+          await this.sock?.sendMessage(jid, {
+            text: `_Thinking:_\n\n${thinkingText.slice(0, 3000)}`,
+          });
         } catch { /* non-critical */ }
       }
 
