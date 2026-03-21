@@ -35,7 +35,8 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     if (publicPaths.some(p => request.url === p || request.url.startsWith(p + '?'))) return;
 
     // Media files need to be loadable by <img> tags (no auth header possible)
-    if (request.url.startsWith('/api/v1/media/')) return;
+    // Only bypass for actual file requests (uuid.ext pattern), not sub-routes
+    if (/^\/api\/v1\/media\/[a-f0-9\-]+\.[a-z0-9]+$/i.test(request.url.split('?')[0])) return;
 
     // Also skip non-API routes (static files, etc.)
     if (!request.url.startsWith('/api/')) return;
@@ -76,12 +77,12 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     };
     request.tenantId = user.tenant_id;
 
-    // Audit: auth.login
+    // Audit: authenticated API request
     try {
       auditService?.log({
         tenantId: user.tenant_id,
         userId: user.id,
-        action: 'auth.login',
+        action: 'auth.request',
         resource: request.url,
         details: { role: user.role, method: request.method },
         ipAddress: request.ip,

@@ -252,7 +252,6 @@
     .json-editor {
       font-size: 12px;
       padding: 12px;
-      rows: 18;
     }
     .btn-save {
       width: 100%;
