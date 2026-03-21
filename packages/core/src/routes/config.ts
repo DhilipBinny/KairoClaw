@@ -24,6 +24,13 @@ function setNestedPath(obj: Record<string, unknown>, dotPath: string, value: unk
   current[parts[parts.length - 1]] = value;
 }
 
+/** Get stateDir from config, throw if not set. */
+function getStateDir(config: GatewayConfig): string {
+  const stateDir = config._stateDir;
+  if (!stateDir) throw new Error('_stateDir not set on config');
+  return stateDir;
+}
+
 export const registerConfigRoutes: FastifyPluginAsync<{
   auditService?: AuditService;
   onConfigChange?: (path: string, value: unknown) => Promise<void>;
@@ -76,7 +83,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     }
 
     // Read raw config from disk to avoid saving resolved env vars / internal fields
-    const stateDir = config._stateDir || '';
+    const stateDir = getStateDir(config);
     const configPath = path.join(stateDir, 'config.json');
 
     let rawConfig: Record<string, unknown>;
@@ -185,7 +192,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
   // GET /api/v1/admin/plugins — read plugins.json
   app.get('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request) => {
     const config = (request as any).ctx.config as GatewayConfig;
-    const stateDir = config._stateDir || '';
+    const stateDir = getStateDir(config);
     const plugins = loadPlugins(stateDir);
     return { plugins };
   });
@@ -210,7 +217,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     }
 
     // Save to disk
-    const stateDir = config._stateDir || '';
+    const stateDir = getStateDir(config);
     try {
       savePlugins(stateDir, parseResult.data as any);
     } catch {
@@ -261,7 +268,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     ];
 
     // Read existing raw config to preserve secrets
-    const stateDir = config._stateDir || '';
+    const stateDir = getStateDir(config);
     const configPath = path.join(stateDir, 'config.json');
     let rawConfig: Record<string, unknown>;
     try {
@@ -288,8 +295,9 @@ export const registerConfigRoutes: FastifyPluginAsync<{
         else { newVal = undefined; break; }
       }
 
-      // Restore the original secret if the submitted value looks masked or empty
-      if (newVal === '***' || newVal === '' || newVal === undefined) {
+      // Always restore original secret — secrets cannot be set via bulk save
+      // (use the secrets/credentials endpoints instead)
+      {
         let target: Record<string, unknown> = merged;
         for (let i = 0; i < pathParts.length - 1; i++) {
           if (!target[pathParts[i]] || typeof target[pathParts[i]] !== 'object') target[pathParts[i]] = {};

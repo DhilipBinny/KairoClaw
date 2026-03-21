@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import type { MediaStore } from '../media/store.js';
+import { requireRole } from '../auth/middleware.js';
 
 const MIME_TYPES: Record<string, string> = {
   png: 'image/png',
@@ -40,18 +41,18 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
 
     const ext = path.extname(filename).slice(1).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-    const data = fs.readFileSync(filePath);
+    const stat = fs.statSync(filePath);
+    const stream = fs.createReadStream(filePath);
 
     return reply
       .header('Content-Type', contentType)
-      .header('Content-Length', data.length)
+      .header('Content-Length', stat.size)
       .header('Cache-Control', 'public, max-age=86400')
-      .send(data);
+      .send(stream);
   });
 
-  // GET /api/v1/media — list media files (admin only, for debugging)
-  app.get('/api/v1/media', async () => {
+  // GET /api/v1/media — media storage stats (admin only)
+  app.get('/api/v1/media', { preHandler: [requireRole('admin')] }, async () => {
     const stats = mediaStore.stats();
     return {
       count: stats.count,

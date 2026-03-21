@@ -38,9 +38,11 @@ export class ApiError extends Error {
 async function request<T = unknown>(path: string, opts: FetchOptions = {}): Promise<T> {
   const apiKey = getApiKey();
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...opts.headers,
   };
+  if (opts.body) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
@@ -62,8 +64,11 @@ async function request<T = unknown>(path: string, opts: FetchOptions = {}): Prom
     throw new ApiError(msg, res.status);
   }
 
+  // Handle empty responses (204 No Content, etc.)
+  const text = await res.text();
+  if (!text) return {} as T;
   try {
-    return await res.json() as T;
+    return JSON.parse(text) as T;
   } catch {
     throw new ApiError('Invalid JSON response from server', res.status);
   }
@@ -237,16 +242,7 @@ export async function installMCPServer(data: { id: string; transport?: string; c
 }
 
 export async function removeMCPServer(id: string): Promise<{ success: boolean }> {
-  const apiKey = getApiKey();
-  const headers: Record<string, string> = {};
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-  const res = await fetch(`${API_BASE}/mcp/servers/${id}`, { method: 'DELETE', headers });
-  if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try { const data = await res.json(); msg = data.error || msg; } catch {}
-    throw new ApiError(msg, res.status);
-  }
-  return res.json();
+  return request(`/mcp/servers/${id}`, { method: 'DELETE' });
 }
 
 export async function reconnectMCPServer(id: string): Promise<{ success: boolean }> {
