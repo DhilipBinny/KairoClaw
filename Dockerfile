@@ -25,15 +25,31 @@ RUN pnpm --filter @agw/types build && \
     cp packages/core/src/db/migrations/*.sql packages/core/dist/db/migrations/ && \
     pnpm --filter @agw/ui build
 
-# Stage 3: Production
-FROM node:22-bookworm-slim
+# Stage 3: Production deps (compile native modules, then discard build tools)
+FROM node:22-bookworm-slim AS proddeps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini curl python3 make g++ git ca-certificates \
-    jq bsdmainutils poppler-utils tesseract-ocr \
+    python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@10
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml .npmrc tsconfig.base.json ./
+COPY --from=build /app/packages/types/package.json packages/types/
+COPY --from=build /app/packages/types/dist packages/types/dist/
+COPY --from=build /app/packages/core/package.json packages/core/
+COPY --from=build /app/packages/core/dist packages/core/dist/
+RUN pnpm install --prod
+
+# Stage 4: Final production image (no build tools)
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tini curl git ca-certificates \
+    jq bsdmainutils poppler-utils tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy production node_modules (with compiled native modules)
+COPY --from=proddeps /app/node_modules node_modules/
 
 # Copy built output
 COPY --from=build /app/packages/types/dist packages/types/dist/
@@ -48,11 +64,8 @@ COPY workspace-defaults/ workspace-defaults/
 COPY scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Production deps only
-RUN pnpm install --prod
-
-# Data directory
-RUN mkdir -p /data && chown -R node:node /data /app
+# Data directory (use --chown to avoid extra layer)
+RUN mkdir -p /data && chown node:node /data
 
 ENV NODE_ENV=production \
     AGW_STATE_DIR=/data \
