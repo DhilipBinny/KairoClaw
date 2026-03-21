@@ -109,13 +109,14 @@ export interface CronJob {
   runCount: number;
 }
 
-export type JobExecutor = (job: CronJob) => Promise<{ text?: string }>;
+export type JobExecutor = (job: CronJob) => Promise<{ text?: string; media?: import('@agw/types').MediaAttachment[] }>;
 
 /** Callback that delivers a cron job result to a specific channel. */
 export type JobDeliverer = (
   text: string,
   channel: string,
   to?: string,
+  media?: import('@agw/types').MediaAttachment[],
 ) => Promise<void>;
 
 // ---------------------------------------------------------------------------
@@ -309,11 +310,12 @@ export class CronScheduler {
 
       const result = await this.executor(execJob);
       const responseText = (result.text || '').trim();
+      const responseMedia = result.media;
       job.lastResult = responseText.slice(0, 500);
       job.lastError = null;
 
       // Deliver result to configured channel(s)
-      if (delivery.mode === 'announce' && responseText && this.deliverer) {
+      if (delivery.mode === 'announce' && (responseText || responseMedia?.length) && this.deliverer) {
         // Build targets list: prefer targets[], fall back to legacy channel/to
         let targets: CronDeliveryTarget[] = [];
         if (delivery.targets && delivery.targets.length > 0) {
@@ -334,7 +336,7 @@ export class CronScheduler {
           const delivered: string[] = [];
           for (const target of targets) {
             try {
-              await this.deliverer(responseText, target.channel, target.to);
+              await this.deliverer(responseText, target.channel, target.to, responseMedia);
               delivered.push(target.channel);
             } catch (e) {
               this.log.error({ jobId: job.id, channel: target.channel, err: e instanceof Error ? e.message : String(e) }, 'Cron delivery to channel failed');

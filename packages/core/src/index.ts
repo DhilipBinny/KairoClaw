@@ -376,9 +376,9 @@ async function main(): Promise<void> {
         senderName: 'Cron',
       };
       const result = await createRunner(inbound);
-      return { text: result.text ?? undefined };
+      return { text: result.text ?? undefined, media: result.media };
     },
-    deliverer: async (text, channel, to) => {
+    deliverer: async (text, channel, to, media) => {
       // Outbound policy check for cron delivery
       if ((channel === 'whatsapp' || channel === 'telegram') && to) {
         const check = checkOutboundAllowed(channel, to, config, db);
@@ -394,14 +394,22 @@ async function main(): Promise<void> {
           cronLog.warn({ channel, to }, 'Cron delivery skipped: Telegram channel is disabled');
           return;
         }
-        await channelRegistry.telegram.sendToChat(text, to);
+        if (media && media.length > 0) {
+          await channelRegistry.telegram.sendMediaToChat(media, text, to);
+        } else {
+          await channelRegistry.telegram.sendToChat(text, to);
+        }
       } else if (channel === 'whatsapp') {
         if (!channelRegistry.whatsapp) {
           const cronLog = createModuleLogger('cron');
           cronLog.warn({ channel, to }, 'Cron delivery skipped: WhatsApp channel is disabled');
           return;
         }
-        await channelRegistry.whatsapp.sendToChat(text, to);
+        if (media && media.length > 0) {
+          await channelRegistry.whatsapp.sendMediaToChat(media, text, to);
+        } else {
+          await channelRegistry.whatsapp.sendToChat(text, to);
+        }
       } else if (channel === 'web') {
         broadcastToWeb({ type: 'cron.delivery', text, ts: Date.now() });
       } else {
