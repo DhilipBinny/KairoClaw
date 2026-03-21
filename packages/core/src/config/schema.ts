@@ -214,6 +214,8 @@ const httpPluginSchema = z.object({
 export const pluginsSchema = z.object({
   cli: z.array(cliPluginSchema).default([]),
   http: z.array(httpPluginSchema).default([]),
+  /** Tracks which default plugins have been offered (prevents re-adding removed ones). */
+  _seededDefaults: z.array(z.string()).optional(),
 });
 
 export const configSchema = z.object({

@@ -29,6 +29,7 @@ RUN pnpm --filter @agw/types build && \
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini curl python3 make g++ git ca-certificates \
+    jq bsdmainutils \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@10
 

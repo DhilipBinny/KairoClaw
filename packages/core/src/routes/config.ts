@@ -216,16 +216,21 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       return reply.code(400).send({ error: `Validation failed at "${errorPath}": ${errorMsg}` });
     }
 
-    // Save to disk
+    // Save to disk — preserve _seededDefaults from existing file
     const stateDir = getStateDir(config);
+    const existing = loadPlugins(stateDir);
+    const toSave = parseResult.data as any;
+    if ((existing as any)._seededDefaults && !toSave._seededDefaults) {
+      toSave._seededDefaults = (existing as any)._seededDefaults;
+    }
     try {
-      savePlugins(stateDir, parseResult.data as any);
+      savePlugins(stateDir, toSave);
     } catch {
       return reply.code(500).send({ error: 'Failed to write plugins.json' });
     }
 
     // Update runtime config
-    config.plugins = parseResult.data as any;
+    config.plugins = toSave;
 
     // Trigger plugin hot-reload
     if (onConfigChange) {
