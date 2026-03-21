@@ -1,0 +1,42 @@
+# Deploy KairoClaw to local server (192.168.88.110)
+# Triggered on push to deploy/localhosted branch
+# Runs on self-hosted runner (Docker container on the target machine)
+
+name: Deploy to Local Server
+
+on:
+  push:
+    branches: [deploy/localhosted]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: self-hosted
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t kairoclaw:latest .
+
+      - name: Deploy stack
+        working-directory: /home/binny/Binny/KAIROCLAW
+        run: |
+          set -a && source .env && set +a
+          envsubst < docker-compose.yml > docker-compose.resolved.yml
+          docker stack deploy -c docker-compose.resolved.yml kairoclaw
+
+      - name: Wait for healthy
+        run: |
+          echo "Waiting for container to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:18181/api/v1/health > /dev/null 2>&1; then
+              echo "KairoClaw is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Health check timed out (may still be starting)"
+          docker stack services kairoclaw
