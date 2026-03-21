@@ -174,38 +174,39 @@ export class ProviderRegistry {
         'Primary provider failed',
       );
 
-      // Try fallback
-      if (this.config.model.fallback) {
-        const { providerName: fbName, modelId: fbModel } = this.parseModelRef(
-          this.config.model.fallback,
-        );
-        const fallback = this.providers[fbName];
-        if (fallback && fbName !== providerName) {
-          log.info({ from: providerName, to: fbName }, 'Failing over to fallback provider');
-          this.failoverLog.push({
-            ts: new Date().toISOString(),
-            from: providerName,
-            to: fbName,
-            error: primaryError.message,
-          });
-          // Keep only last 50 failover events
-          if (this.failoverLog.length > 50) {
-            this.failoverLog = this.failoverLog.slice(-50);
-          }
+      // Build fallback chain: prefer explicit chain, fall back to single fallback
+      const chain = this.config.model.fallbackChain?.length
+        ? this.config.model.fallbackChain
+        : this.config.model.fallback ? [this.config.model.fallback] : [];
 
-          try {
-            return await this.callWithRetry(fallback, {
-              ...chatArgs,
-              model: fbModel || (fallback as ProviderInterface & { defaultModel?: string }).defaultModel || '',
-            });
-          } catch (fbErr: unknown) {
-            const fallbackError = fbErr as Error;
-            log.error(
-              { provider: fbName, err: fallbackError.message },
-              'Fallback provider also failed',
-            );
-            throw fbErr;
-          }
+      for (const fbRef of chain) {
+        if (!fbRef) continue;
+        const { providerName: fbName, modelId: fbModel } = this.parseModelRef(fbRef);
+        const fallback = this.providers[fbName];
+        if (!fallback || fbName === providerName) continue;
+
+        log.info({ from: providerName, to: fbName, attempt: chain.indexOf(fbRef) + 1 }, 'Failing over to next provider');
+        this.failoverLog.push({
+          ts: new Date().toISOString(),
+          from: providerName,
+          to: fbName,
+          error: primaryError.message,
+        });
+        if (this.failoverLog.length > 50) {
+          this.failoverLog = this.failoverLog.slice(-50);
+        }
+
+        try {
+          return await this.callWithRetry(fallback, {
+            ...chatArgs,
+            model: fbModel || (fallback as ProviderInterface & { defaultModel?: string }).defaultModel || '',
+          });
+        } catch (fbErr: unknown) {
+          log.warn(
+            { provider: fbName, err: (fbErr as Error).message },
+            'Fallback provider failed, trying next',
+          );
+          // Continue to next in chain
         }
       }
 

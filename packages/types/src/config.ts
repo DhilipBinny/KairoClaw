@@ -123,6 +123,8 @@ export interface ModelSelectionConfig {
   primary: string;
   /** Fallback model used when the primary fails. Empty string means no fallback. */
   fallback: string;
+  /** Ordered fallback chain. Tried in sequence when primary fails. */
+  fallbackChain?: string[];
 }
 
 /** Session expiry settings. */

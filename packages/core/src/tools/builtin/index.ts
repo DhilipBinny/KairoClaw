@@ -6,6 +6,7 @@ import { messagingTools } from './messaging.js';
 import { emailTools } from './email.js';
 import { pluginTools } from './plugins.js';
 import { pdfTools } from './pdf.js';
+import { subagentTools } from './subagent.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -17,6 +18,7 @@ export const builtinTools: ToolRegistration[] = [
   ...emailTools,
   ...pluginTools,
   ...pdfTools,
+  ...subagentTools,
 ];
 
 export { fileTools } from './files.js';
@@ -27,4 +29,5 @@ export { messagingTools } from './messaging.js';
 export { emailTools } from './email.js';
 export { pluginTools } from './plugins.js';
 export { pdfTools } from './pdf.js';
+export { subagentTools } from './subagent.js';
 export { safePath } from './files.js';

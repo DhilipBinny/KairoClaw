@@ -50,6 +50,7 @@ const gatewayNetworkSchema = z.object({
 const modelSelectionSchema = z.object({
   primary: z.string().default('anthropic/claude-sonnet-4-20250514'),
   fallback: z.string().default(''),
+  fallbackChain: z.array(z.string()).optional(),
 });
 
 const sessionSchema = z.object({

@@ -119,6 +119,14 @@ export const MEDIA_RETENTION_DAYS = 7;
 /** Cleanup interval (6 hours) */
 export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+// ── Agent Loop Guards ────────────────────────────────────────
+
+/** Max times the same tool+args can be called before loop detection triggers */
+export const TOOL_LOOP_THRESHOLD = 3;
+
+/** Max sub-agent nesting depth (1 = main can spawn workers, workers can't spawn) */
+export const SUBAGENT_MAX_DEPTH = 1;
+
 // ── PDF ─────────────────────────────────────────────────────
 
 /** Maximum pages to extract from a PDF */
