@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   config.plugins = loadPlugins(stateDir);
 
   const pluginLogger = createModuleLogger('plugins');
-  const pluginTools = registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+  const pluginTools = await registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
   if (pluginTools.length > 0) {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
@@ -350,7 +350,7 @@ async function main(): Promise<void> {
     // Plugin hot-reload
     if (dotPath.startsWith('plugins.') || dotPath === 'plugins') {
       try {
-        const reloaded = reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+        const reloaded = await reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
         server.log.info({ count: reloaded.length }, 'Plugins reloaded via Settings');
       } catch (e) {
         server.log.error(e, 'Failed to reload plugins');

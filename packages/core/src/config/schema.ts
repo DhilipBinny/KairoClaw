@@ -215,9 +215,20 @@ const httpPluginSchema = z.object({
   endpoints: z.array(httpEndpointSchema).default([]),
 });
 
+const openAPIServiceSchema = z.object({
+  name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
+  baseUrl: z.string().url(),
+  description: z.string().optional(),
+  enabled: z.boolean().default(true),
+  timeout: z.number().int().min(1).max(600).default(120),
+  skipPaths: z.array(z.string()).optional(),
+});
+
 export const pluginsSchema = z.object({
   cli: z.array(cliPluginSchema).default([]),
   http: z.array(httpPluginSchema).default([]),
+  /** OpenAPI services to auto-discover and import as HTTP plugins on startup. */
+  openapi: z.array(openAPIServiceSchema).default([]),
   /** Tracks which default plugins have been offered (prevents re-adding removed ones). */
   _seededDefaults: z.array(z.string()).optional(),
 });
