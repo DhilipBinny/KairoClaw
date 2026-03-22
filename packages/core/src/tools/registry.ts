@@ -85,7 +85,7 @@ export class ToolRegistry {
     let permission: ToolPermissionLevel = 'allow';
     const db = context.db as DatabaseAdapter | undefined;
     const tenantId = context.tenant || 'default';
-    const userRole = context.user?.id ? 'user' : 'user'; // least-privilege: default to 'user' when no user context
+    const userRole = (context.user as Record<string, unknown>)?.role as string || 'user';
 
     if (db) {
       permission = checkToolPermission(name, userRole, db, tenantId);
@@ -104,8 +104,22 @@ export class ToolRegistry {
       }
     }
 
-    // Execute with timing
+    // Confirmation check — must happen BEFORE execution
     const callId = crypto.randomUUID();
+    if (permission === 'confirm') {
+      try {
+        this.auditService?.log({
+          tenantId,
+          userId: context.user?.id,
+          action: 'tool.confirm_required',
+          resource: name,
+          details: { role: userRole, args: Object.keys(args), callId },
+        });
+      } catch { /* audit should not break execution */ }
+      return { _requiresConfirmation: true, _callId: callId, tool: name, args } as unknown as ToolResult;
+    }
+
+    // Execute with timing
     const start = performance.now();
     let result: ToolResult;
     let status = 'success';
@@ -155,12 +169,6 @@ export class ToolRegistry {
         details: { status, durationMs, callId },
       });
     } catch { /* audit should not break execution */ }
-
-    // Add confirmation flag for tools requiring approval
-    if (permission === 'confirm' && typeof result === 'object' && result !== null) {
-      (result as Record<string, unknown>)._requiresConfirmation = true;
-      (result as Record<string, unknown>)._callId = callId;
-    }
 
     return result;
   }

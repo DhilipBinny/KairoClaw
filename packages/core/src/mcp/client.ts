@@ -79,20 +79,16 @@ class StdioTransport {
 
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      const mergedEnv = { ...process.env, ...this.env };
-      // Strip ALL sensitive env vars from child process (matching exec tool)
-      const SENSITIVE_ENV_KEYS = [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_AUTH_TOKEN',
-        'OPENAI_API_KEY',
-        'TELEGRAM_BOT_TOKEN',
-        'AGW_TOKEN',
-        'BRAVE_API_KEY',
-        'AGW_ADMIN_KEY',
+      // Allowlist approach — only pass safe env vars + MCP-specific overrides
+      const SAFE_ENV_KEYS = [
+        'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
+        'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
       ];
-      for (const key of SENSITIVE_ENV_KEYS) {
-        delete mergedEnv[key];
+      const safeEnv: Record<string, string> = {};
+      for (const key of SAFE_ENV_KEYS) {
+        if (process.env[key]) safeEnv[key] = process.env[key]!;
       }
+      const mergedEnv = { ...safeEnv, ...this.env };
 
       const child = spawn(this.command, this.args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -490,7 +486,8 @@ export class MCPClient {
   }
 
   async refreshTools(): Promise<MCPToolDefinition[]> {
-    const result = await this.transport!.send('tools/list', {}) as { tools?: Array<{ name: string; description?: string; inputSchema?: { type: string; properties: Record<string, unknown>; required?: string[] } }> } | null;
+    if (!this.transport) throw new Error('MCP client not connected');
+    const result = await this.transport.send('tools/list', {}) as { tools?: Array<{ name: string; description?: string; inputSchema?: { type: string; properties: Record<string, unknown>; required?: string[] } }> } | null;
     this.tools = (result?.tools || []).map(tool => ({
       name: tool.name,
       description: tool.description || '',
@@ -501,7 +498,8 @@ export class MCPClient {
   }
 
   async callTool(toolName: string, args?: Record<string, unknown>): Promise<string | { error: string } | { content: MCPToolCallResult['content']; text: string }> {
-    const result = await this.transport!.send('tools/call', {
+    if (!this.transport) throw new Error('MCP client not connected');
+    const result = await this.transport.send('tools/call', {
       name: toolName,
       arguments: args || {},
     }, 120000) as MCPToolCallResult | null; // 2 min timeout for tool calls

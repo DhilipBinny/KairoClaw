@@ -92,7 +92,6 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = request.body as ChatRequest;
       const userId = request.user?.id || 'anonymous';
-      const tenantId = request.tenantId || 'default';
       const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
 
       // Per-user rate limiting
@@ -201,7 +200,6 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = request.body as ChatRequest;
       const userId = request.user?.id || 'anonymous';
-      const tenantId = request.tenantId || 'default';
       const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
 
       // Per-user rate limiting
@@ -251,7 +249,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
         log.error({ err: errMsg, requestId }, 'REST chat sync error');
-        return reply.code(500).send({ error: errMsg, statusCode: 500 });
+        return reply.code(500).send({ error: 'Internal server error', statusCode: 500 });
       }
     },
   );

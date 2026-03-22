@@ -263,7 +263,8 @@ export class CronScheduler {
           get('minute'),
           get('second'),
         );
-      } catch {
+      } catch (e) {
+        this.log.warn({ jobId: job.id, tz, err: e instanceof Error ? e.message : String(e) }, 'Timezone parsing failed, falling back to system time');
         now = new Date();
       }
 
@@ -442,7 +443,15 @@ export class CronScheduler {
   update(id: string, updates: Partial<CronJob>): CronJob | null {
     const job = this.jobs.get(id);
     if (!job) return null;
-    Object.assign(job, updates, { id }); // don't overwrite id
+    // Only allow updating safe fields — reject internal/tracking fields
+    const safeFields = new Set(['schedule', 'prompt', 'channel', 'chatId', 'enabled', 'timezone', 'name', 'delivery']);
+    const safeUpdates: Partial<CronJob> = {};
+    for (const key of Object.keys(updates) as Array<keyof CronJob>) {
+      if (safeFields.has(key)) {
+        (safeUpdates as any)[key] = updates[key];
+      }
+    }
+    Object.assign(job, safeUpdates, { id }); // don't overwrite id
     this._save();
     if (job.enabled) {
       this._scheduleJob(job);

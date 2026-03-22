@@ -31,8 +31,21 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, markdownToWhatsApp } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
 const log = createModuleLogger('channel.whatsapp');
+
+/** Shared silent logger for Baileys (suppresses all library log output). */
+const silentLogger = {
+  level: 'silent' as const,
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+  trace: () => {},
+  fatal: () => {},
+  child: () => silentLogger,
+} as any;
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -90,16 +103,7 @@ class WhatsAppChannel implements Channel {
       version: [2, 3000, 1033893291],
       browser: ['Kairo', 'Chrome', '145.0.0'],
       // Reduce log noise
-      logger: {
-        level: 'silent',
-        info: () => {},
-        warn: () => {},
-        error: () => {},
-        debug: () => {},
-        trace: () => {},
-        fatal: () => {},
-        child: () => ({ level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any),
-      } as any,
+      logger: silentLogger,
     });
 
     // Save credentials on update
@@ -169,6 +173,7 @@ class WhatsAppChannel implements Channel {
           this.lidToPhone.set(phoneFromJid(contact.lid), phoneFromJid(contact.id));
         }
       }
+      if (this.lidToPhone.size > 10000) this.lidToPhone.clear();
       if (this.lidToPhone.size > 0) {
         log.info({ mappings: this.lidToPhone.size }, 'WhatsApp: LID→phone mappings loaded from history');
       }
@@ -180,6 +185,7 @@ class WhatsAppChannel implements Channel {
           this.lidToPhone.set(phoneFromJid(update.lid), phoneFromJid(update.id));
         }
       }
+      if (this.lidToPhone.size > 10000) this.lidToPhone.clear();
     });
 
     // Handle incoming messages
@@ -470,7 +476,7 @@ class WhatsAppChannel implements Channel {
           const buffer = await downloadMediaMessage(
             { ...msg, message: { imageMessage: imgMsg } } as any,
             'buffer', {},
-            { logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any, reuploadRequest: this.sock!.updateMediaMessage },
+            { logger: silentLogger, reuploadRequest: this.sock!.updateMediaMessage },
           );
           const base64 = Buffer.from(buffer).toString('base64');
           images = [{ data: base64, mimeType: imgMsg.mimetype || 'image/jpeg' }];
@@ -481,7 +487,7 @@ class WhatsAppChannel implements Channel {
       const caption = imgMsg.caption || '';
       try {
         const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-          logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+          logger: silentLogger,
           reuploadRequest: this.sock.updateMediaMessage,
         });
         const base64 = Buffer.from(buffer).toString('base64');
@@ -510,7 +516,7 @@ class WhatsAppChannel implements Channel {
       if (isImage) {
         try {
           const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-            logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+            logger: silentLogger,
             reuploadRequest: this.sock.updateMediaMessage,
           });
           const base64 = Buffer.from(buffer).toString('base64');
@@ -532,7 +538,7 @@ class WhatsAppChannel implements Channel {
       }
     } else if (contentType === 'audioMessage') {
       const audioMsg = msg.message.audioMessage!;
-      const ext = audioMsg.ptt ? 'ogg' : 'ogg';
+      const ext = 'ogg';
       const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`);
       const workspace = this.config.agent.workspace;
       msgText = localPath
@@ -552,6 +558,13 @@ class WhatsAppChannel implements Channel {
     }
 
     if (!msgText && !images) return;
+
+    // Input sanitization & prompt injection detection
+    msgText = sanitizeInput(msgText);
+    const injection = detectPromptInjection(msgText);
+    if (injection.suspicious) {
+      log.warn({ patterns: injection.patterns, senderPhone }, 'Prompt injection patterns detected (whatsapp)');
+    }
 
     // Get sender name from push name or phone
     const senderName = msg.pushName || senderPhone || 'Unknown';
@@ -734,7 +747,7 @@ class WhatsAppChannel implements Channel {
       fs.mkdirSync(mediaDir, { recursive: true });
 
       const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
-        logger: { level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+        logger: silentLogger,
         reuploadRequest: this.sock.updateMediaMessage,
       });
 

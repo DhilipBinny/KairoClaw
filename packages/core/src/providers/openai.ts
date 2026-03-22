@@ -28,7 +28,7 @@ export class OpenAIProvider implements ProviderInterface {
       ...(baseUrl ? { baseURL: baseUrl } : {}),
     });
     this.defaultModel = defaultModel || 'gpt-4o';
-    this.name = baseUrl ? 'ollama' : 'openai';
+    this.name = options.name || (baseUrl ? 'ollama' : 'openai');
   }
 
   async chat(args: ChatArgs): Promise<ProviderResponse> {

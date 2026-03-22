@@ -101,6 +101,7 @@ export async function handleSlashCommand(
         db,
         config,
         context.callLLM,
+        context.tenantId,
       );
       if (result.compacted) {
         return {
@@ -119,14 +120,25 @@ export async function handleSlashCommand(
   if (action === 'model') {
     const newModel = text.trim();
     if (!newModel) {
+      const metadata = JSON.parse(session.metadata || '{}');
+      const sessionOverride = metadata.model_override || null;
       return {
-        text: `Current model: \`${config.model.primary}\`\nUsage: \`/model provider/model-name\``,
+        text: `Current model: \`${sessionOverride || config.model.primary}\`${sessionOverride ? ' (session override)' : ''}\nUsage: \`/model provider/model-name\``,
       };
     }
-    const oldModel = config.model.primary;
-    config.model.primary = newModel;
+    // Validate against known models from fallback chain + primary
+    const knownModels = [config.model.primary, ...(config.model.fallbackChain || [])];
+    if (!knownModels.includes(newModel)) {
+      return {
+        text: `Unknown model: \`${newModel}\`\nAvailable: ${knownModels.map(m => `\`${m}\``).join(', ')}`,
+      };
+    }
+    // Store per-session override in metadata instead of mutating global config
+    const meta = JSON.parse(session.metadata || '{}');
+    meta.model_override = newModel;
+    sessionRepo.update(session.id, { metadata: JSON.stringify(meta) });
     return {
-      text: `Model switched: \`${oldModel}\` -> \`${newModel}\``,
+      text: `Model switched for this session: \`${newModel}\``,
     };
   }
 

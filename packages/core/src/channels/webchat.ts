@@ -8,6 +8,7 @@
  */
 
 import crypto from 'node:crypto';
+import path from 'node:path';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import type { InboundMessage, GatewayConfig } from '@agw/types';
@@ -89,6 +90,7 @@ export interface WebchatPluginOptions {
  */
 export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (app, opts) => {
   const { db, config, runner } = opts;
+  const tenantId = (config as unknown as Record<string, unknown>).tenantId as string || 'default';
   const queue = new AgentQueue();
   const sessionRepo = new SessionRepository(db);
   const messageRepo = new MessageRepository(db);
@@ -247,7 +249,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const rawFiles = Array.isArray(msg.files) ? msg.files as Array<{ path?: string; name?: string }> : [];
             if (rawFiles.length > 0) {
               const fileRefs = rawFiles
-                .filter((f) => typeof f.path === 'string')
+                .filter((f) => typeof f.path === 'string' && !f.path.includes('..') && !path.isAbsolute(f.path!))
                 .map((f) => `[Document "${f.name || 'file'}" at ${f.path}]`)
                 .join('\n');
               if (fileRefs) {
@@ -345,7 +347,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
             // Look up session by ID first, then by chatId pattern
-            const allSessions = sessionRepo.listByTenant('default', 500);
+            const allSessions = sessionRepo.listByTenant(tenantId, 500);
             let session = sessionId
               ? allSessions.find((s) => s.id === sessionId)
               : allSessions.find((s) => s.chat_id === `web:${sessionKey}`);
@@ -369,7 +371,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
 
           // ── Session list ─────────────────────
           case 'sessions.list': {
-            const sessions = sessionRepo.listByTenant('default', 100);
+            const sessions = sessionRepo.listByTenant(tenantId, 100);
             // Filter to sessions with actual messages, sorted by most recent
             const list = sessions
               .filter((s) => s.turns > 0)

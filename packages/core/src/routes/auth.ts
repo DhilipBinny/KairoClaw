@@ -32,12 +32,17 @@ function checkLoginRateLimit(ip: string): boolean {
 }
 
 // Periodic cleanup of expired entries (every 5 minutes)
-setInterval(() => {
+const _authCleanupInterval = setInterval(() => {
   const now = Date.now();
   for (const [ip, entry] of loginAttempts) {
     if (now > entry.resetAt) loginAttempts.delete(ip);
   }
 }, 5 * 60_000);
+
+/** Stop the periodic login-attempt cleanup timer (for graceful shutdown). */
+export function cleanupAuthTimers(): void {
+  clearInterval(_authCleanupInterval);
+}
 
 export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/auth/login — validate API key and return user info

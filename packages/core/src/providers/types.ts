@@ -8,4 +8,5 @@ export interface ProviderOptions {
   authToken?: string;
   defaultModel: string;
   timeoutMs?: number;
+  name?: string;
 }

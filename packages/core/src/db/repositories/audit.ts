@@ -29,35 +29,36 @@ export class AuditRepository {
     const now = new Date().toISOString();
     const detailsJson = JSON.stringify(entry.details ?? {});
 
-    // Get the last entry's hash for this tenant
-    const lastEntry = this.db.get<{ entry_hash: string }>(
-      'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY rowid DESC LIMIT 1',
-      [entry.tenantId],
-    );
-    const prevHash = lastEntry?.entry_hash ?? '';
+    // Wrap read-last-hash + insert in a transaction to prevent race conditions
+    this.db.transaction(() => {
+      const lastEntry = this.db.get<{ entry_hash: string }>(
+        'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY rowid DESC LIMIT 1',
+        [entry.tenantId],
+      );
+      const prevHash = lastEntry?.entry_hash ?? '';
 
-    // Compute entry hash: SHA-256(prevHash + action + details + createdAt)
-    const entryHash = crypto
-      .createHash('sha256')
-      .update(prevHash + entry.action + detailsJson + now)
-      .digest('hex');
+      const entryHash = crypto
+        .createHash('sha256')
+        .update(prevHash + entry.action + detailsJson + now)
+        .digest('hex');
 
-    this.db.run(
-      `INSERT INTO audit_log (id, tenant_id, user_id, action, resource, details, ip_address, prev_hash, entry_hash, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        entry.tenantId,
-        entry.userId ?? null,
-        entry.action,
-        entry.resource ?? null,
-        detailsJson,
-        entry.ipAddress ?? null,
-        prevHash,
-        entryHash,
-        now,
-      ],
-    );
+      this.db.run(
+        `INSERT INTO audit_log (id, tenant_id, user_id, action, resource, details, ip_address, prev_hash, entry_hash, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          entry.tenantId,
+          entry.userId ?? null,
+          entry.action,
+          entry.resource ?? null,
+          detailsJson,
+          entry.ipAddress ?? null,
+          prevHash,
+          entryHash,
+          now,
+        ],
+      );
+    });
 
     return this.db.get<AuditRow>('SELECT * FROM audit_log WHERE id = ?', [id])!;
   }

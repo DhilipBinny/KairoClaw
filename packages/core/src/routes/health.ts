@@ -1,5 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as { version: string };
+const APP_VERSION = pkg.version;
 
 export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
   // GET /health — simple health check
@@ -24,7 +31,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
 
     return {
       status: 'ok',
-      version: '0.2.0',
+      version: APP_VERSION,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       memory: {
@@ -40,7 +47,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/v2/health', async (_request, reply) => {
     return reply.send({
       status: 'ok',
-      version: '2.0.0',
+      version: APP_VERSION,
       timestamp: new Date().toISOString(),
     });
   });

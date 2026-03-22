@@ -15,6 +15,7 @@ import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { safePath } from './files.js';
+import { getWorkspace } from './utils.js';
 import {
   MAX_TOOL_RESULT_CHARS,
   PDF_MAX_PAGES,
@@ -23,12 +24,6 @@ import {
 } from '../../constants.js';
 
 const execFile = promisify(execFileCb);
-
-// ── Workspace helper (same as files.ts) ─────────────────────
-
-function getWorkspace(context: Record<string, unknown>): string {
-  return (context.workspace as string) || process.cwd();
-}
 
 // ── Text cleaner (ported from TK03 TextCleaner) ─────────────
 

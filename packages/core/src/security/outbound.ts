@@ -32,7 +32,7 @@ export function checkOutboundAllowed(
 ): OutboundCheckResult {
   const channelConfig = config.channels?.[channel];
   if (!channelConfig) {
-    return { allowed: true }; // channel not configured, skip validation
+    return { allowed: false, reason: `Channel "${channel}" is not configured — defaulting to deny` };
   }
 
   const policy = (channelConfig as any).outboundPolicy as string || 'session-only';
@@ -66,10 +66,11 @@ export function checkOutboundAllowed(
     return { allowed: true };
   }
 
-  // Also try matching without the channel prefix (in case of format mismatch)
+  // Also try matching without channel prefix — escape LIKE metacharacters
+  const escapedRecipient = recipient.replace(/[%_]/g, '\\$&');
   const sessionAlt = db.get<{ id: string }>(
-    'SELECT id FROM sessions WHERE chat_id LIKE ? LIMIT 1',
-    [`%${recipient}%`],
+    "SELECT id FROM sessions WHERE chat_id LIKE ? ESCAPE '\\' LIMIT 1",
+    [`%${escapedRecipient}%`],
   );
   if (sessionAlt) {
     return { allowed: true };

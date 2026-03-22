@@ -3,6 +3,7 @@ import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { safePath } from './files.js';
+import { getWorkspace } from './utils.js';
 
 const execFileAsync = promisify(execFileCb);
 
@@ -17,13 +18,6 @@ export const SAFE_ENV_KEYS = [
   'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
   'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
 ];
-
-/**
- * Get the workspace directory from context.
- */
-function getWorkspace(context: Record<string, unknown>): string {
-  return (context.workspace as string) || process.cwd();
-}
 
 export const execTools: ToolRegistration[] = [
   {
@@ -80,11 +74,11 @@ export const execTools: ToolRegistration[] = [
           exitCode: 0,
         };
       } catch (e: unknown) {
-        const err = e as { stdout?: string; stderr?: string; message?: string; code?: number };
+        const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown; status?: number };
         return {
           stdout: (err.stdout || '').slice(0, MAX_STDOUT),
           stderr: (err.stderr || err.message || '').slice(0, MAX_STDERR),
-          exitCode: err.code || 1,
+          exitCode: err.status || (typeof err.code === 'number' ? err.code : 1),
         };
       }
     },

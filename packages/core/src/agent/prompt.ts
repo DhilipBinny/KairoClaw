@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+
 import type { GatewayConfig } from '@agw/types';
 import type { ToolDefinition } from '@agw/types';
 import {
@@ -66,7 +66,6 @@ Use this as the root for all file operations unless instructed otherwise.`);
   // Time
   sections.push(`## Current Date & Time
 ${new Date().toISOString()}
-Host: ${os.hostname()} | OS: ${os.platform()} ${os.arch()} | Runtime: Node.js ${process.version}
 Model: ${config.model.primary}`);
 
   // Silent replies

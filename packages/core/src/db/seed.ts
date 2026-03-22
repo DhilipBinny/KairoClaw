@@ -1,5 +1,6 @@
 import type { DatabaseAdapter } from './index.js';
 import crypto from 'node:crypto';
+import { hashApiKey } from '../auth/keys.js';
 
 /**
  * Seed the database with default tenant and admin user.
@@ -23,7 +24,7 @@ export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun
   // Create admin user — use AGW_ADMIN_KEY env var if set, otherwise generate one
   const userId = crypto.randomUUID();
   const apiKey = process.env.AGW_ADMIN_KEY || ('agw_sk_' + crypto.randomBytes(32).toString('hex'));
-  const apiKeyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
+  const apiKeyHash = hashApiKey(apiKey);
 
   db.run(
     'INSERT INTO users (id, tenant_id, name, role, api_key_hash) VALUES (?, ?, ?, ?, ?)',
@@ -39,7 +40,7 @@ export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun
     { role: 'user', pattern: 'list_directory', permission: 'allow' },
     { role: 'user', pattern: 'web_fetch', permission: 'allow' },
     { role: 'user', pattern: 'web_search', permission: 'allow' },
-    { role: 'user', pattern: 'analyze_image', permission: 'allow' },
+    { role: 'user', pattern: 'inspect_image', permission: 'allow' },
     { role: 'user', pattern: 'memory_*', permission: 'allow' },
     { role: 'user', pattern: 'mcp__*', permission: 'allow' },
     // Users need confirmation for write ops

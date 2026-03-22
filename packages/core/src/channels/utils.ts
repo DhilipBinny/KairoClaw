@@ -62,6 +62,7 @@ export function splitMessage(text: string, maxLen: number): string[] {
     }
     let splitIdx = remaining.lastIndexOf('\n', maxLen);
     if (splitIdx < maxLen * 0.3) splitIdx = maxLen;
+    if (splitIdx <= 0) splitIdx = maxLen;
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx);
   }
