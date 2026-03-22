@@ -317,12 +317,30 @@ export interface HttpPluginConfig {
   endpoints: HttpEndpointConfig[];
 }
 
+/** OpenAPI auto-import service configuration. */
+export interface OpenAPIServiceConfig {
+  /** Unique service name (lowercase alphanumeric + underscores). */
+  name: string;
+  /** Base URL of the service (e.g. http://10.0.2.20:5006). */
+  baseUrl: string;
+  /** Override description. */
+  description?: string;
+  /** Whether auto-import is enabled. */
+  enabled: boolean;
+  /** Request timeout in seconds. */
+  timeout: number;
+  /** Paths to skip during import. */
+  skipPaths?: string[];
+}
+
 /** Plugin configuration section. */
 export interface PluginsConfig {
   /** CLI plugins. */
   cli: CliPluginConfig[];
   /** HTTP plugins. */
   http: HttpPluginConfig[];
+  /** OpenAPI services to auto-discover on startup. */
+  openapi?: OpenAPIServiceConfig[];
 }
 
 // ──────────────────────────────────────────────
