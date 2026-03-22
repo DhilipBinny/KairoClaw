@@ -236,11 +236,24 @@ class TelegramChannel implements Channel {
       const voice = ctx.message.voice;
       if (!voice) return;
       const localPath = await this.downloadFile(voice.file_id, 'voice.ogg');
+      if (!localPath) {
+        await this.handleMessage(ctx, '[Voice message received but download failed]');
+        return;
+      }
+
+      // Try transcription first, fall back to file path
+      const txConfig = this.config.tools?.transcription;
+      if (txConfig?.enabled && txConfig?.baseUrl) {
+        const { transcribeAudio } = await import('../media/transcribe.js');
+        const transcribed = await transcribeAudio(localPath, txConfig);
+        if (transcribed) {
+          await this.handleMessage(ctx, `[Voice message] ${transcribed}`);
+          return;
+        }
+      }
+
       const workspace = this.config.agent.workspace;
-      const text = localPath
-        ? `[Voice message saved to ${path.relative(workspace, localPath)}]`
-        : '[Voice message received but download failed]';
-      await this.handleMessage(ctx, text);
+      await this.handleMessage(ctx, `[Voice message saved to ${path.relative(workspace, localPath)}]`);
     });
 
     // ── Error handler ────────────────────────────

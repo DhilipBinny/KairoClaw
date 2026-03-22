@@ -185,12 +185,25 @@ export interface EmailToolConfig {
   };
 }
 
+/** Audio transcription tool settings. */
+export interface TranscriptionToolConfig {
+  /** Whether voice transcription is enabled. */
+  enabled: boolean;
+  /** Base URL of the OpenAI-compatible STT endpoint (e.g. http://10.0.2.20:5007). */
+  baseUrl: string;
+  /** Model name to send in requests. */
+  model: string;
+  /** Language hint (ISO 639-1). Empty = auto-detect. */
+  language: string;
+}
+
 /** Built-in tool configuration. */
 export interface ToolsConfig {
   exec: ExecToolConfig;
   webSearch: WebSearchToolConfig;
   webFetch: WebFetchToolConfig;
   email: EmailToolConfig;
+  transcription: TranscriptionToolConfig;
 }
 
 
