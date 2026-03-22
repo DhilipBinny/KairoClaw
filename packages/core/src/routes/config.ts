@@ -172,6 +172,17 @@ export const registerConfigRoutes: FastifyPluginAsync<{
             { key: 'maxRecipientsPerMessage', type: 'number', label: 'Max Recipients', hint: 'Max to+cc+bcc per email', showWhen: 'enabled', min: 1 },
           ],
         },
+        {
+          key: 'transcription',
+          label: 'Voice Transcription',
+          hint: 'Transcribe voice messages to text using an OpenAI-compatible STT endpoint (e.g. self-hosted Whisper)',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
+            { key: 'baseUrl', type: 'text', label: 'STT Endpoint URL', hint: 'e.g. http://10.0.2.20:5007', showWhen: 'enabled' },
+            { key: 'model', type: 'text', label: 'Model', hint: 'Model name sent in requests (e.g. whisper-small)', showWhen: 'enabled' },
+            { key: 'language', type: 'text', label: 'Language', hint: 'ISO 639-1 code (e.g. en). Leave empty for auto-detect.', showWhen: 'enabled' },
+          ],
+        },
       ],
     };
   });
