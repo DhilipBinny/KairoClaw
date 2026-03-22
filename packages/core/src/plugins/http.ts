@@ -241,29 +241,39 @@ export function registerHttpPlugins(
             if (contentType.includes('application/json')) {
               body = await res.json();
 
-              // Scan JSON fields for base64 images and replace with URLs
-              if (mediaStore && body && typeof body === 'object' && !Array.isArray(body)) {
-                const obj = body as Record<string, unknown>;
-                for (const [key, val] of Object.entries(obj)) {
-                  if (typeof val !== 'string') continue;
-                  const detected = detectBase64Image(val);
-                  if (detected) {
-                    const filename = mediaStore.saveBase64(val, detected.ext);
-                    const mediaUrl = mediaStore.getUrl(filename);
-                    const filePath = path.join(mediaStore.dir, filename);
-                    obj[key] = mediaUrl;
-                    // Add metadata so LLM knows this is an image URL
-                    obj[`${key}_type`] = detected.mime;
-                    obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
-                    b64Media.push({
-                      type: 'image',
-                      filePath,
-                      fileName: filename,
-                      mimeType: detected.mime,
-                      url: mediaUrl,
-                    });
+              // Scan JSON fields for base64 images (including nested objects/arrays)
+              if (mediaStore && body && typeof body === 'object') {
+                const scanObj = (obj: Record<string, unknown>) => {
+                  for (const [key, val] of Object.entries(obj)) {
+                    if (typeof val === 'string') {
+                      const detected = detectBase64Image(val);
+                      if (detected) {
+                        const filename = mediaStore!.saveBase64(val, detected.ext);
+                        const mediaUrl = mediaStore!.getUrl(filename);
+                        const filePath = path.join(mediaStore!.dir, filename);
+                        obj[key] = mediaUrl;
+                        obj[`${key}_type`] = detected.mime;
+                        obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
+                        b64Media.push({
+                          type: 'image',
+                          filePath,
+                          fileName: filename,
+                          mimeType: detected.mime,
+                          url: mediaUrl,
+                        });
+                      }
+                    } else if (Array.isArray(val)) {
+                      for (const item of val) {
+                        if (item && typeof item === 'object' && !Array.isArray(item)) {
+                          scanObj(item as Record<string, unknown>);
+                        }
+                      }
+                    } else if (val && typeof val === 'object') {
+                      scanObj(val as Record<string, unknown>);
+                    }
                   }
-                }
+                };
+                scanObj(body as Record<string, unknown>);
               }
             } else {
               body = await res.text();
