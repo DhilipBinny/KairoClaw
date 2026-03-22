@@ -241,7 +241,7 @@ class TelegramChannel implements Channel {
         return;
       }
 
-      // Try transcription first, fall back to file path
+      // Try transcription first, fall back to file path with explanation
       const txConfig = this.config.tools?.transcription;
       if (txConfig?.enabled && txConfig?.baseUrl) {
         const { transcribeAudio } = await import('../media/transcribe.js');
@@ -250,6 +250,10 @@ class TelegramChannel implements Channel {
           await this.handleMessage(ctx, `[Voice message] ${transcribed}`);
           return;
         }
+        // Transcription configured but failed — tell the agent
+        const workspace = this.config.agent.workspace;
+        await this.handleMessage(ctx, `[Voice message — transcription failed, audio saved to ${path.relative(workspace, localPath)}. Tell the user you couldn't process their voice message and ask them to type instead.]`);
+        return;
       }
 
       const workspace = this.config.agent.workspace;
