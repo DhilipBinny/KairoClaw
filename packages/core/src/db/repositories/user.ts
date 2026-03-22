@@ -44,7 +44,10 @@ export class UserRepository {
     return this.getById(id)!;
   }
 
-  getById(id: string): UserRow | undefined {
+  getById(id: string, tenantId?: string): UserRow | undefined {
+    if (tenantId) {
+      return this.db.get<UserRow>('SELECT * FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    }
     return this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   }
 
@@ -86,7 +89,11 @@ export class UserRepository {
     this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
   }
 
-  delete(id: string): void {
-    this.db.run('DELETE FROM users WHERE id = ?', [id]);
+  delete(id: string, tenantId?: string): void {
+    if (tenantId) {
+      this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    } else {
+      this.db.run('DELETE FROM users WHERE id = ?', [id]);
+    }
   }
 }

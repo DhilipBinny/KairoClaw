@@ -148,9 +148,16 @@ export function registerCliPlugins(
         const timeoutMs = Math.min(plugin.timeout, 120) * 1000;
 
         try {
+          // Split args safely — no shell interpolation
+          const cmdArgs = argsStr.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
+          // Strip surrounding quotes from each arg
+          const cleanArgs = cmdArgs.map(a =>
+            (a.startsWith('"') && a.endsWith('"')) || (a.startsWith("'") && a.endsWith("'"))
+              ? a.slice(1, -1) : a
+          );
           const { stdout, stderr } = await execFileAsync(
-            '/bin/sh',
-            ['-c', `${plugin.command} ${argsStr}`],
+            plugin.command,
+            cleanArgs,
             {
               cwd: workspace,
               timeout: timeoutMs,
@@ -168,7 +175,7 @@ export function registerCliPlugins(
           return {
             stdout: (err.stdout || '').slice(0, EXEC_MAX_STDOUT),
             stderr: (err.stderr || err.message || '').slice(0, EXEC_MAX_STDERR),
-            exitCode: err.code || 1,
+            exitCode: (err as any).status || (typeof err.code === 'number' ? err.code : 1),
           };
         }
       },

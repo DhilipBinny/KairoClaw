@@ -20,6 +20,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
 const log = createModuleLogger('channel.telegram');
 
@@ -392,7 +393,12 @@ class TelegramChannel implements Channel {
       }
     }
 
-    const msgText = overrideText || ctx.message.text || '';
+    const rawText = overrideText || ctx.message.text || '';
+    const msgText = sanitizeInput(rawText);
+    const injection = detectPromptInjection(msgText);
+    if (injection.suspicious) {
+      log.warn({ patterns: injection.patterns, senderId }, 'Prompt injection patterns detected (telegram)');
+    }
 
     const inbound: InboundMessage = {
       text: msgText,

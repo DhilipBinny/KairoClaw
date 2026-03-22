@@ -38,7 +38,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.db.close();
   }
 
-  backup(path: string): void {
-    this.db.backup(path);
+  async backup(path: string): Promise<void> {
+    await this.db.backup(path);
   }
 }

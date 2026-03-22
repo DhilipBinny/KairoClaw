@@ -18,7 +18,7 @@ const WORKSPACE_FILES = ['IDENTITY.md', 'SOUL.md', 'USER.md', 'RULES.md', 'MEMOR
 
 export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/workspace/files — list workspace files
-  app.get('/api/v1/workspace/files', async (request) => {
+  app.get('/api/v1/workspace/files', { preHandler: [requireRole('admin', 'user')] }, async (request) => {
     const config = (request as any).ctx.config as GatewayConfig;
     const workspace = config.agent.workspace;
 
@@ -39,7 +39,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // GET /api/v1/workspace/files/:name — read a workspace file
-  app.get('/api/v1/workspace/files/:name', async (request, reply) => {
+  app.get('/api/v1/workspace/files/:name', { preHandler: [requireRole('admin', 'user')] }, async (request, reply) => {
     const config = (request as any).ctx.config as GatewayConfig;
     const { name } = request.params as { name: string };
 

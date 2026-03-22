@@ -88,7 +88,7 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
-  const requestId = `req-${Date.now().toString(36)}`;
+  const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
 
   const maxToolRounds = config.agent?.maxToolRounds || 25;
   const model = context.model || config.model.primary;
@@ -197,8 +197,6 @@ export async function runAgent(
       ...(inbound.images && inbound.images.length > 0 ? { imageCount: inbound.images.length } : {}),
     }),
   });
-  let userMsgPersisted = true;
-
   // ── Build thinking config if enabled + model supports it ──
   const thinkingCfg = config.agent?.thinking;
   const thinkingConfig = (thinkingCfg?.enabled && caps.supportsThinking)
@@ -223,7 +221,6 @@ export async function runAgent(
     // Log detailed request info for debugging
     const contentLen = (c: string | MessageContentPart[]) =>
       typeof c === 'string' ? c.length : JSON.stringify(c).length;
-    const msgSummary = messages.map((m) => `${m.role}(${contentLen(m.content)}c)`).join(', ');
     const totalContentSize = messages.reduce((sum, m) => sum + contentLen(m.content), 0);
     reqLog.info({
       round, maxRounds: maxToolRounds,
@@ -264,17 +261,17 @@ export async function runAgent(
         } catch (retryErr: unknown) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           reqLog.error({ err: retryMsg }, 'LLM call failed after compaction');
-          if (userMsgPersisted && userMsgResult?.id) {
+          if (userMsgResult?.id) {
             try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
           }
-          return { text: `LLM error (after compaction): ${retryMsg}`, error: true };
+          return { text: 'Something went wrong processing your request. Please try again.', error: true };
         }
       } else {
         reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
-        if (userMsgPersisted && userMsgResult?.id) {
+        if (userMsgResult?.id) {
           try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
         }
-        return { text: `LLM error: ${msg}`, error: true };
+        return { text: 'Something went wrong processing your request. Please try again.', error: true };
       }
     }
 
@@ -500,14 +497,6 @@ export async function runAgent(
   // Drain all sub-agent promises (including killed ones) to prevent floating promises
   if (subagentRegistry.size > 0) {
     await subagentRegistry.drainAll();
-  }
-
-  // Strip thinking blocks from older turns to save memory
-  // (Anthropic only needs them on the immediately preceding assistant turn)
-  for (let i = 0; i < messages.length - 1; i++) {
-    if (messages[i].thinking_blocks) {
-      delete messages[i].thinking_blocks;
-    }
   }
 
   if (round >= maxToolRounds) {

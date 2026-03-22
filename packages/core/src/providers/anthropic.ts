@@ -198,11 +198,7 @@ export class AnthropicProvider implements ProviderInterface {
 
     // ── Extended thinking ────────────────────────────────
     if (args.thinkingConfig?.enabled) {
-      if (args.thinkingConfig.mode === 'adaptive') {
-        (params as any).thinking = { type: 'enabled', budget_tokens: args.thinkingConfig.budgetTokens || 10000 };
-      } else {
-        (params as any).thinking = { type: 'enabled', budget_tokens: args.thinkingConfig.budgetTokens || 10000 };
-      }
+      (params as any).thinking = { type: 'enabled', budget_tokens: args.thinkingConfig.budgetTokens || 10000 };
       // max_tokens must cover both thinking + output
       params.max_tokens = Math.max(params.max_tokens, (args.thinkingConfig.budgetTokens || 10000) + caps.maxOutputTokens);
       // Thinking + tools requires tool_choice "auto"

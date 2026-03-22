@@ -751,15 +751,27 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         return reply.code(400).send({ error: 'Invalid archive. Must be a .tar.gz file.' });
       }
 
+      // Extract to a temporary staging directory first to avoid overwriting the live DB
+      const stagingDir = path.join(os.tmpdir(), `kairo-staging-${Date.now()}`);
+      fs.mkdirSync(stagingDir, { recursive: true });
+
+      try {
+        await execFileAsync('tar', ['-xzf', tmpFile, '--no-same-owner', '-C', stagingDir], { timeout: 30_000 });
+      } catch (extractErr) {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+        fs.unlinkSync(tmpFile);
+        return reply.code(400).send({ error: 'Failed to extract archive to staging directory' });
+      }
+
       // Backup current state before overwriting
       const backupFile = path.join(os.tmpdir(), `kairo-backup-${Date.now()}.tar.gz`);
       try {
         await execFileAsync('tar', ['-czf', backupFile, '-C', stateDir, '.'], { timeout: 30_000 });
       } catch { /* backup is best-effort */ }
 
-      // Extract with --no-same-owner to avoid permission issues across environments
+      // Copy staged files into stateDir (DB file is overwritten only after staging succeeds)
       fs.mkdirSync(stateDir, { recursive: true });
-      await execFileAsync('tar', ['-xzf', tmpFile, '--no-same-owner', '-C', stateDir], { timeout: 30_000 });
+      await execFileAsync('cp', ['-a', `${stagingDir}/.`, stateDir], { timeout: 30_000 });
 
       // Set safe permissions on sensitive files
       const secretsPath = path.join(stateDir, 'secrets.json');
@@ -767,6 +779,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         fs.chmodSync(secretsPath, 0o600);
       }
 
+      // Cleanup
+      fs.rmSync(stagingDir, { recursive: true, force: true });
       fs.unlinkSync(tmpFile);
 
       return {

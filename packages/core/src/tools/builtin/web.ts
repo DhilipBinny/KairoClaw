@@ -4,6 +4,35 @@ import type { ToolRegistration } from '../types.js';
  * Validate a URL for web_fetch to prevent SSRF attacks.
  * Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
  */
+/** Check if an IP address (v4 or v6) is private/reserved. */
+function isPrivateIP(ip: string): boolean {
+  // IPv4
+  const v4Match = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4Match) {
+    const [, aStr, bStr] = v4Match;
+    const a = Number(aStr);
+    const b = Number(bStr);
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    return false;
+  }
+
+  // IPv6 — normalize and check known private ranges
+  const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  if (lower === '::1' || lower === '::') return true;
+  if (lower.startsWith('fe80:')) return true;  // link-local
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true;  // unique local
+  // IPv4-mapped IPv6 (::ffff:A.B.C.D)
+  const v4Mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4Mapped) return isPrivateIP(v4Mapped[1]);
+
+  return false;
+}
+
 export function validateFetchUrl(urlStr: string): URL {
   let parsed: URL;
   try {
@@ -23,17 +52,9 @@ export function validateFetchUrl(urlStr: string): URL {
     throw new Error('Blocked: localhost/loopback URLs not allowed');
   }
 
-  // Block private and reserved IP ranges
-  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (ipMatch) {
-    const [, aStr, bStr] = ipMatch;
-    const a = Number(aStr);
-    const b = Number(bStr);
-    if (a === 10) throw new Error('Blocked: private IP range (10.x.x.x)');
-    if (a === 172 && b >= 16 && b <= 31) throw new Error('Blocked: private IP range (172.16-31.x.x)');
-    if (a === 192 && b === 168) throw new Error('Blocked: private IP range (192.168.x.x)');
-    if (a === 169 && b === 254) throw new Error('Blocked: link-local/cloud metadata (169.254.x.x)');
-    if (a === 0) throw new Error('Blocked: invalid IP range (0.x.x.x)');
+  // Block private/reserved IPs (v4 and v6)
+  if (isPrivateIP(hostname)) {
+    throw new Error('Blocked: private/reserved IP address');
   }
 
   // Block cloud metadata endpoints
@@ -78,13 +99,46 @@ export const webTools: ToolRegistration[] = [
       const maxChars = (args.maxChars as number) || defaultMaxChars;
 
       try {
-        const res = await fetch(url, {
-          headers: { 'User-Agent': 'AgenticGateway/2.0' },
-          signal: AbortSignal.timeout(30000),
-          redirect: 'follow',
-        });
+        // Use manual redirect handling to validate each hop against SSRF
+        let currentUrl = url;
+        let res: Response;
+        const maxRedirects = 5;
+        for (let i = 0; ; i++) {
+          res = await fetch(currentUrl, {
+            headers: { 'User-Agent': 'AgenticGateway/2.0' },
+            signal: AbortSignal.timeout(30000),
+            redirect: 'manual',
+          });
+          if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+            if (i >= maxRedirects) return { error: 'Too many redirects' };
+            const next = new URL(res.headers.get('location')!, currentUrl).href;
+            try { validateFetchUrl(next); } catch (e: unknown) {
+              return { error: `SSRF protection on redirect: ${e instanceof Error ? e.message : String(e)}` };
+            }
+            currentUrl = next;
+            continue;
+          }
+          break;
+        }
 
-        let text = await res.text();
+        // Stream response to avoid OOM on huge pages
+        const reader = res.body?.getReader();
+        let text = '';
+        if (reader) {
+          const decoder = new TextDecoder();
+          const byteLimit = maxChars * 4; // generous byte limit
+          let bytesRead = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            bytesRead += value.byteLength;
+            text += decoder.decode(value, { stream: true });
+            if (bytesRead >= byteLimit) break;
+          }
+          reader.cancel().catch(() => {});
+        } else {
+          text = await res.text();
+        }
 
         // Strip scripts, styles, and HTML tags for readable content
         text = text
@@ -133,7 +187,12 @@ export const webTools: ToolRegistration[] = [
         const res = await fetch(url, {
           headers: { 'X-Subscription-Token': apiKey, Accept: 'application/json' },
           signal: AbortSignal.timeout(15000),
+          redirect: 'error',
         });
+
+        if (!res.ok) {
+          return { error: `Brave Search API returned ${res.status}: ${res.statusText}` };
+        }
 
         const data = await res.json() as { web?: { results?: Array<{ title: string; url: string; description: string }> } };
         const results = (data.web?.results || []).map((r) => ({

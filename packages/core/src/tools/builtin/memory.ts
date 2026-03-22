@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
 import { safePath } from './files.js';
+import { getWorkspace } from './utils.js';
 import type { MemorySystem } from '../../memory/index.js';
 
 /**
@@ -11,13 +12,6 @@ let memorySystem: MemorySystem | null = null;
 
 export function setMemorySystem(ms: MemorySystem): void {
   memorySystem = ms;
-}
-
-/**
- * Get the workspace directory from context.
- */
-function getWorkspace(context: Record<string, unknown>): string {
-  return (context.workspace as string) || process.cwd();
 }
 
 export const memoryTools: ToolRegistration[] = [
@@ -93,8 +87,8 @@ export const memoryTools: ToolRegistration[] = [
   },
   {
     definition: {
-      name: 'analyze_image',
-      description: 'Analyze an image file. Provide a file path to an image and a question/prompt about it. Delegates to vision model if available.',
+      name: 'inspect_image',
+      description: 'Inspect an image file metadata (size, format). Does NOT perform visual analysis — for that, attach the image to a message.',
       parameters: {
         type: 'object',
         properties: {

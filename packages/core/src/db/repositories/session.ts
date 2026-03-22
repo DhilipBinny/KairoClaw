@@ -48,7 +48,10 @@ export class SessionRepository {
     return this.getById(session.id)!;
   }
 
-  getById(id: string): SessionRow | undefined {
+  getById(id: string, tenantId?: string): SessionRow | undefined {
+    if (tenantId) {
+      return this.db.get<SessionRow>('SELECT * FROM sessions WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    }
     return this.db.get<SessionRow>('SELECT * FROM sessions WHERE id = ?', [id]);
   }
 
@@ -93,7 +96,11 @@ export class SessionRepository {
     );
   }
 
-  delete(id: string): void {
-    this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
+  delete(id: string, tenantId?: string): void {
+    if (tenantId) {
+      this.db.run('DELETE FROM sessions WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    } else {
+      this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
+    }
   }
 }

@@ -85,8 +85,13 @@ export class MemorySystem {
     if (queryTerms.length === 0) return [];
 
     try {
+      // Pre-filter with SQL LIKE to avoid loading all chunks into memory
+      const likeConditions = queryTerms.map(() => 'content LIKE ?');
+      const likeParams = queryTerms.map((t) => `%${t}%`);
+      const whereClause = likeConditions.length > 0 ? `WHERE ${likeConditions.join(' OR ')}` : '';
       const allChunks = this.db.query<ChunkRow>(
-        'SELECT * FROM memory_chunks ORDER BY updated_at DESC',
+        `SELECT * FROM memory_chunks ${whereClause} ORDER BY updated_at DESC`,
+        likeParams,
       );
 
       const queryLower = query.toLowerCase();
@@ -291,13 +296,12 @@ export class MemorySystem {
       const relativePath = path.relative(this.workspace, filePath);
       const now = new Date().toISOString();
 
-      // Delete old chunks for this file
-      this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
-
       // Chunk and insert
       const chunks = this.chunkFile(filePath);
 
       this.db.transaction(() => {
+        // Delete old chunks for this file (inside transaction)
+        this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
         for (const chunk of chunks) {
           this.db.run(
             'INSERT INTO memory_chunks (file_path, line_start, line_end, content, updated_at) VALUES (?, ?, ?, ?, ?)',
@@ -351,6 +355,11 @@ export class MemorySystem {
               const fullPath = isDir ? path.join(watchPath, filename) : watchPath;
               if (fs.existsSync(fullPath)) {
                 this.indexFile(fullPath);
+              } else {
+                // File was deleted — remove its chunks from the DB
+                const relativePath = path.relative(this.workspace, fullPath);
+                this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
+                log.debug({ file: relativePath }, 'Deleted memory file chunks');
               }
             } else if (!filename) {
               // MEMORY.md itself changed

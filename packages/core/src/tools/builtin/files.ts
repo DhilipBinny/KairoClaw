@@ -2,6 +2,7 @@ import { FILE_MAX_WRITE_SIZE } from '../../constants.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
+import { getWorkspace } from './utils.js';
 
 const MAX_WRITE_SIZE = FILE_MAX_WRITE_SIZE;
 
@@ -37,20 +38,10 @@ export function safePath(p: string | undefined, baseDir: string): string {
       }
     }
   } catch (e: unknown) {
-    if (e instanceof Error && e.message.includes('Path traversal blocked')) throw e;
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
   }
 
   return resolved;
-}
-
-/**
- * Get the workspace directory from context or fall back to cwd.
- */
-function getWorkspace(context: { session?: { key?: string }; db?: unknown }): string {
-  // In the v2 system, workspace comes from config injected via context.
-  // For now, use process.cwd() as the fallback.
-  const ctx = context as Record<string, unknown>;
-  return (ctx.workspace as string) || process.cwd();
 }
 
 export const fileTools: ToolRegistration[] = [
@@ -69,7 +60,7 @@ export const fileTools: ToolRegistration[] = [
       },
     },
     executor: async (args, context) => {
-      const workspace = getWorkspace(context);
+      const workspace = getWorkspace(context as Record<string, unknown>);
       const filePath = safePath(args.path as string, workspace);
       if (!fs.existsSync(filePath)) return { error: `File not found: ${args.path}` };
       const content = fs.readFileSync(filePath, 'utf8');
@@ -96,7 +87,7 @@ export const fileTools: ToolRegistration[] = [
       },
     },
     executor: async (args, context) => {
-      const workspace = getWorkspace(context);
+      const workspace = getWorkspace(context as Record<string, unknown>);
       const filePath = safePath(args.path as string, workspace);
       const fileContent = (args.content as string) || '';
       const contentSize = Buffer.byteLength(fileContent);
@@ -125,7 +116,7 @@ export const fileTools: ToolRegistration[] = [
       },
     },
     executor: async (args, context) => {
-      const workspace = getWorkspace(context);
+      const workspace = getWorkspace(context as Record<string, unknown>);
       const filePath = safePath(args.path as string, workspace);
       if (!fs.existsSync(filePath)) return { error: `File not found: ${args.path}` };
       let content = fs.readFileSync(filePath, 'utf8');
@@ -154,7 +145,7 @@ export const fileTools: ToolRegistration[] = [
       },
     },
     executor: async (args, context) => {
-      const workspace = getWorkspace(context);
+      const workspace = getWorkspace(context as Record<string, unknown>);
       const dirPath = safePath(args.path as string | undefined, workspace);
       if (!fs.existsSync(dirPath)) return { error: `Directory not found: ${args.path || '.'}` };
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });

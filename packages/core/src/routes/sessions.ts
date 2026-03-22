@@ -82,6 +82,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const session = sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
+    // Ownership check
+    if (request.user?.id && request.user.role !== 'admin' && session.user_id !== request.user.id) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
+
     if (title !== undefined) {
       // Store title in metadata JSON
       const metadata = JSON.parse(session.metadata || '{}');
@@ -100,6 +105,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
     const session = sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
+
+    // Ownership check
+    if (request.user?.id && request.user.role !== 'admin' && session.user_id !== request.user.id) {
+      return reply.code(403).send({ error: 'Forbidden' });
+    }
 
     // Delete the message and any subsequent messages (to keep context clean)
     const msgId = parseInt(messageId);

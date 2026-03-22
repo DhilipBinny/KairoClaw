@@ -14,6 +14,7 @@ import type { GatewayConfig } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
 import type { DatabaseAdapter } from '../db/index.js';
 import { requireRole } from '../auth/middleware.js';
+import { setNestedPath } from './utils.js';
 
 export interface ChannelRoutesOptions {
   channelRegistry: {
@@ -22,22 +23,6 @@ export interface ChannelRoutesOptions {
   };
   config: GatewayConfig;
   secretsStore?: SecretsStore;
-}
-
-/**
- * Set a nested property on an object by dot-separated path.
- */
-function setNestedPath(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
-  const parts = dotPath.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
-      current[key] = {};
-    }
-    current = current[key] as Record<string, unknown>;
-  }
-  current[parts[parts.length - 1]] = value;
 }
 
 export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = async (app, opts) => {

@@ -4,25 +4,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
 import type { AuditService } from '../security/audit.js';
+import { setNestedPath } from './utils.js';
 import { configSchema, pluginsSchema } from '../config/schema.js';
 import { loadPlugins, savePlugins } from '../plugins/store.js';
-
-/**
- * Set a nested property on an object by dot-separated path.
- * e.g. setNestedPath(obj, "model.primary", "claude-sonnet-4-6")
- */
-function setNestedPath(obj: Record<string, unknown>, dotPath: string, value: unknown): void {
-  const parts = dotPath.split('.');
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const key = parts[i];
-    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
-      current[key] = {};
-    }
-    current = current[key] as Record<string, unknown>;
-  }
-  current[parts[parts.length - 1]] = value;
-}
 
 /** Get stateDir from config, throw if not set. */
 function getStateDir(config: GatewayConfig): string {
@@ -44,8 +28,11 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     const sanitized = JSON.parse(JSON.stringify(config));
     // Mask API keys
     if (sanitized.providers?.anthropic?.apiKey) sanitized.providers.anthropic.apiKey = '***';
+    if (sanitized.providers?.anthropic?.authToken) sanitized.providers.anthropic.authToken = '***';
     if (sanitized.providers?.openai?.apiKey) sanitized.providers.openai.apiKey = '***';
-    if (sanitized.channels?.telegram?.token) sanitized.channels.telegram.token = '***';
+    if (sanitized.channels?.telegram?.botToken) sanitized.channels.telegram.botToken = '***';
+    if (sanitized.gateway?.token) sanitized.gateway.token = '***';
+    if (sanitized.tools?.webSearch?.apiKey) sanitized.tools.webSearch.apiKey = '***';
     return { config: sanitized };
   });
 

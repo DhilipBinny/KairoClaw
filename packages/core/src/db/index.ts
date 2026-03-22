@@ -5,7 +5,7 @@ export interface DatabaseAdapter {
   transaction<T>(fn: () => T): T;
   pragma(statement: string): unknown;
   close(): void;
-  backup(path: string): void;
+  backup(path: string): void | Promise<void>;
 }
 
 export { SQLiteAdapter } from './sqlite.js';

@@ -63,7 +63,7 @@ export class SecretsStore {
   /** Get a single secret value. */
   get(namespace: string, key: string): string | undefined {
     const data = this._load();
-    return data[namespace]?.[key] || undefined;
+    return data[namespace]?.[key] ?? undefined;
   }
 
   /** Get all secrets for a namespace. */
@@ -109,7 +109,7 @@ export class SecretsStore {
   /** Check if a key exists (without revealing the value). */
   hasKey(namespace: string, key: string): boolean {
     const data = this._load();
-    return !!data[namespace]?.[key];
+    return data[namespace]?.[key] !== undefined;
   }
 
   /** List key names for a namespace (no values). */
