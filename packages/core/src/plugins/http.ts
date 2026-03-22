@@ -20,6 +20,35 @@ import type { Logger } from 'pino';
 const MAX_RESPONSE_SIZE = 10 * 1024;
 
 /**
+ * Resolve a JSON path like "data[0].b64_json" against an object.
+ * Supports dot notation and array indexing.
+ */
+function resolveJsonPath(obj: unknown, jsonPath: string): unknown {
+  const parts = jsonPath.replace(/\[(\d+)\]/g, '.$1').split('.');
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+/**
+ * Set a value at a JSON path like "data[0].b64_json".
+ */
+function setJsonPath(obj: unknown, jsonPath: string, value: unknown): void {
+  const parts = jsonPath.replace(/\[(\d+)\]/g, '.$1').split('.');
+  let current: unknown = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (current == null || typeof current !== 'object') return;
+    current = (current as Record<string, unknown>)[parts[i]];
+  }
+  if (current != null && typeof current === 'object') {
+    (current as Record<string, unknown>)[parts[parts.length - 1]] = value;
+  }
+}
+
+/**
  * Validate a URL for HTTP plugins.
  * Admin explicitly configured these URLs, so private IPs are allowed.
  * Only block metadata endpoints and loopback.
@@ -235,45 +264,86 @@ export function registerHttpPlugins(
               };
             }
 
-            // ── JSON response — check for embedded base64 images ──
+            // ── JSON response — extract media using explicit mapping or auto-detect ──
             let body: unknown;
             const b64Media: MediaAttachment[] = [];
             if (contentType.includes('application/json')) {
               body = await res.json();
 
-              // Scan JSON fields for base64 images (including nested objects/arrays)
               if (mediaStore && body && typeof body === 'object') {
-                const scanObj = (obj: Record<string, unknown>) => {
-                  for (const [key, val] of Object.entries(obj)) {
-                    if (typeof val === 'string') {
-                      const detected = detectBase64Image(val);
-                      if (detected) {
-                        const filename = mediaStore!.saveBase64(val, detected.ext);
-                        const mediaUrl = mediaStore!.getUrl(filename);
-                        const filePath = path.join(mediaStore!.dir, filename);
-                        obj[key] = mediaUrl;
-                        obj[`${key}_type`] = detected.mime;
-                        obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
+                // Strategy 1: Use explicit responseMedia mappings (from OpenAPI spec or manual config)
+                if (endpoint.responseMedia && endpoint.responseMedia.length > 0) {
+                  for (const mapping of endpoint.responseMedia) {
+                    const value = resolveJsonPath(body, mapping.path);
+                    if (typeof value !== 'string' || !value) continue;
+
+                    if (mapping.encoding === 'base64') {
+                      const ext = mapping.mimeType.split('/')[1] || 'png';
+                      const filename = mediaStore.saveBase64(value, ext);
+                      const mediaUrl = mediaStore.getUrl(filename);
+                      const filePath = path.join(mediaStore.dir, filename);
+                      // Replace the base64 in the response with the URL
+                      setJsonPath(body, mapping.path, mediaUrl);
+                      b64Media.push({
+                        type: 'image',
+                        filePath,
+                        fileName: filename,
+                        mimeType: mapping.mimeType,
+                        url: mediaUrl,
+                      });
+                    } else if (mapping.encoding === 'url') {
+                      // URL-based: download and save
+                      try {
+                        const imgRes = await fetch(value, { signal: AbortSignal.timeout(30000) });
+                        const buf = Buffer.from(await imgRes.arrayBuffer());
+                        const ext = mapping.mimeType.split('/')[1] || 'png';
+                        const filename = mediaStore.save(buf, ext);
+                        const mediaUrl = mediaStore.getUrl(filename);
+                        const filePath = path.join(mediaStore.dir, filename);
                         b64Media.push({
                           type: 'image',
                           filePath,
                           fileName: filename,
-                          mimeType: detected.mime,
+                          mimeType: mapping.mimeType,
                           url: mediaUrl,
                         });
-                      }
-                    } else if (Array.isArray(val)) {
-                      for (const item of val) {
-                        if (item && typeof item === 'object' && !Array.isArray(item)) {
-                          scanObj(item as Record<string, unknown>);
-                        }
-                      }
-                    } else if (val && typeof val === 'object') {
-                      scanObj(val as Record<string, unknown>);
+                      } catch { /* URL download failed, skip */ }
                     }
                   }
-                };
-                scanObj(body as Record<string, unknown>);
+                } else {
+                  // Strategy 2: Fallback — auto-detect base64 images by scanning all string fields
+                  const scanObj = (obj: Record<string, unknown>) => {
+                    for (const [key, val] of Object.entries(obj)) {
+                      if (typeof val === 'string') {
+                        const detected = detectBase64Image(val);
+                        if (detected) {
+                          const filename = mediaStore!.saveBase64(val, detected.ext);
+                          const mediaUrl = mediaStore!.getUrl(filename);
+                          const filePath = path.join(mediaStore!.dir, filename);
+                          obj[key] = mediaUrl;
+                          obj[`${key}_type`] = detected.mime;
+                          obj[`${key}_note`] = `Image saved. Use markdown: ![image](${mediaUrl})`;
+                          b64Media.push({
+                            type: 'image',
+                            filePath,
+                            fileName: filename,
+                            mimeType: detected.mime,
+                            url: mediaUrl,
+                          });
+                        }
+                      } else if (Array.isArray(val)) {
+                        for (const item of val) {
+                          if (item && typeof item === 'object' && !Array.isArray(item)) {
+                            scanObj(item as Record<string, unknown>);
+                          }
+                        }
+                      } else if (val && typeof val === 'object') {
+                        scanObj(val as Record<string, unknown>);
+                      }
+                    }
+                  };
+                  scanObj(body as Record<string, unknown>);
+                }
               }
             } else {
               body = await res.text();

@@ -268,6 +268,16 @@ export interface CliPluginConfig {
   env?: string[];
 }
 
+/** Describes where media data lives in an HTTP response. */
+export interface ResponseMediaMapping {
+  /** JSON path to the media field (e.g. "data[0].b64_json", "image", "result.url"). */
+  path: string;
+  /** How the data is encoded. */
+  encoding: 'base64' | 'url';
+  /** MIME type of the media (e.g. "image/png"). */
+  mimeType: string;
+}
+
 /** HTTP plugin endpoint configuration. */
 export interface HttpEndpointConfig {
   /** Endpoint name (used in tool name). */
@@ -285,6 +295,8 @@ export interface HttpEndpointConfig {
     required?: boolean;
     default?: unknown;
   }>;
+  /** Explicit mapping of media fields in the response. Auto-populated from OpenAPI specs. */
+  responseMedia?: ResponseMediaMapping[];
 }
 
 /** HTTP plugin auth configuration. */
