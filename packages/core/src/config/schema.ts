@@ -190,12 +190,19 @@ const httpEndpointParameterSchema = z.object({
   default: z.unknown().optional(),
 });
 
+const responseMediaMappingSchema = z.object({
+  path: z.string().min(1),
+  encoding: z.enum(['base64', 'url']),
+  mimeType: z.string().default('image/png'),
+});
+
 const httpEndpointSchema = z.object({
   name: z.string().regex(/^[a-z0-9_]+$/, 'Must be lowercase alphanumeric + underscores'),
   method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
   path: z.string().min(1),
   description: z.string().default(''),
   parameters: z.record(z.string(), httpEndpointParameterSchema).default({}),
+  responseMedia: z.array(responseMediaMappingSchema).optional(),
 });
 
 const httpPluginAuthSchema = z.object({

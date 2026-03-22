@@ -13,7 +13,7 @@
  * by default (configurable via `skipPaths`).
  */
 
-import type { HttpPluginConfig, HttpEndpointConfig } from '@agw/types';
+import type { HttpPluginConfig, HttpEndpointConfig, ResponseMediaMapping } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('plugins');
@@ -46,6 +46,9 @@ interface OpenAPIOperation {
   requestBody?: {
     content?: Record<string, { schema?: OpenAPISchema }>;
   };
+  responses?: Record<string, {
+    content?: Record<string, { schema?: OpenAPISchema }>;
+  }>;
   parameters?: Array<{
     name: string;
     in: string;
@@ -58,18 +61,90 @@ interface OpenAPIOperation {
 interface OpenAPISchema {
   type?: string;
   required?: string[];
-  properties?: Record<string, {
-    type?: string;
-    description?: string;
-    default?: unknown;
-    enum?: unknown[];
-    minimum?: number;
-    maximum?: number;
-    format?: string;
-  }>;
+  properties?: Record<string, OpenAPISchemaProperty>;
+  items?: OpenAPISchemaProperty;
+}
+
+interface OpenAPISchemaProperty {
+  type?: string;
+  description?: string;
+  default?: unknown;
+  enum?: unknown[];
+  minimum?: number;
+  maximum?: number;
+  format?: string;
+  properties?: Record<string, OpenAPISchemaProperty>;
+  items?: OpenAPISchemaProperty;
 }
 
 const DEFAULT_SKIP_PATHS = ['/health', '/v1/models', '/openapi.json'];
+
+/** Known field names/patterns that indicate base64 image data. */
+const BASE64_IMAGE_FIELD_NAMES = ['b64_json', 'b64', 'image', 'image_data', 'image_base64'];
+const IMAGE_DESCRIPTION_PATTERNS = [/base64.*image/i, /image.*base64/i, /encoded.*png/i, /encoded.*image/i];
+
+/**
+ * Walk an OpenAPI response schema and detect fields that contain media.
+ * Builds JSON path expressions (e.g. "data[0].b64_json") for each media field found.
+ */
+function detectResponseMedia(operation: OpenAPIOperation): ResponseMediaMapping[] {
+  const mappings: ResponseMediaMapping[] = [];
+
+  const resp200 = operation.responses?.['200'];
+  if (!resp200?.content) return mappings;
+
+  const jsonSchema = resp200.content['application/json']?.schema;
+  if (!jsonSchema) return mappings;
+
+  // Recursively scan properties for media fields
+  function scanSchema(schema: OpenAPISchemaProperty, pathPrefix: string): void {
+    if (!schema.properties) return;
+
+    for (const [name, prop] of Object.entries(schema.properties)) {
+      const currentPath = pathPrefix ? `${pathPrefix}.${name}` : name;
+
+      // Check if this field is a media field
+      if (prop.type === 'string') {
+        const isMediaByName = BASE64_IMAGE_FIELD_NAMES.includes(name.toLowerCase());
+        const isMediaByDesc = prop.description
+          ? IMAGE_DESCRIPTION_PATTERNS.some(p => p.test(prop.description!))
+          : false;
+
+        if (isMediaByName || isMediaByDesc) {
+          mappings.push({
+            path: currentPath,
+            encoding: 'base64',
+            mimeType: 'image/png',
+          });
+          continue;
+        }
+
+        // URL-based media: field named "url" with description mentioning image
+        if ((name === 'url' || name === 'image_url') && prop.description && /image/i.test(prop.description)) {
+          mappings.push({
+            path: currentPath,
+            encoding: 'url',
+            mimeType: 'image/png',
+          });
+          continue;
+        }
+      }
+
+      // Recurse into nested objects
+      if (prop.properties) {
+        scanSchema(prop, currentPath);
+      }
+
+      // Recurse into array items
+      if (prop.type === 'array' && prop.items?.properties) {
+        scanSchema(prop.items, `${currentPath}[0]`);
+      }
+    }
+  }
+
+  scanSchema(jsonSchema as OpenAPISchemaProperty, '');
+  return mappings;
+}
 
 /**
  * Fetch an OpenAPI spec from a service and convert it to an HttpPluginConfig.
@@ -168,12 +243,16 @@ export async function importOpenAPIService(
         }
       }
 
+      // Detect media fields in response schema
+      const responseMedia = detectResponseMedia(operation);
+
       endpoints.push({
         name: endpointName,
         method: httpMethod as HttpEndpointConfig['method'],
         path: pathStr,
         description: operation.summary || operation.description || `${httpMethod} ${pathStr}`,
         parameters,
+        ...(responseMedia.length > 0 ? { responseMedia } : {}),
       });
     }
   }
