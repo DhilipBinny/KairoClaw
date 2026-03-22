@@ -91,11 +91,19 @@ const emailToolSchema = z.object({
   })),
 });
 
+const transcriptionToolSchema = z.object({
+  enabled: z.boolean().default(false),
+  baseUrl: z.string().default(''),
+  model: z.string().default('whisper-small'),
+  language: z.string().default(''),
+});
+
 const toolsSchema = z.object({
   exec: withObjectDefault(execToolSchema),
   webSearch: withObjectDefault(webSearchToolSchema),
   webFetch: withObjectDefault(webFetchToolSchema),
   email: withObjectDefault(emailToolSchema),
+  transcription: withObjectDefault(transcriptionToolSchema),
 });
 
 const telegramChannelSchema = z.object({
@@ -324,6 +332,12 @@ export const configDefaults: GatewayConfig = {
       allowedRecipients: [],
       maxRecipientsPerMessage: 5,
       rateLimit: { perMinute: 5, perHour: 20, perDay: 50, perRecipientPerHour: 3 },
+    },
+    transcription: {
+      enabled: false,
+      baseUrl: '',
+      model: 'whisper-small',
+      language: '',
     },
   },
   agent: {

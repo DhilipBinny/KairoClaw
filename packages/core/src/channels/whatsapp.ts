@@ -540,10 +540,25 @@ class WhatsAppChannel implements Channel {
       const audioMsg = msg.message.audioMessage!;
       const ext = 'ogg';
       const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`);
-      const workspace = this.config.agent.workspace;
-      msgText = localPath
-        ? `[Voice message saved to ${path.relative(workspace, localPath)}]`
-        : '[Voice message received but download failed]';
+      if (!localPath) {
+        msgText = '[Voice message received but download failed]';
+      } else {
+        // Try transcription first, fall back to file path
+        const txConfig = this.config.tools?.transcription;
+        if (txConfig?.enabled && txConfig?.baseUrl) {
+          const { transcribeAudio } = await import('../media/transcribe.js');
+          const transcribed = await transcribeAudio(localPath, txConfig);
+          if (transcribed) {
+            msgText = `[Voice message] ${transcribed}`;
+          } else {
+            const workspace = this.config.agent.workspace;
+            msgText = `[Voice message saved to ${path.relative(workspace, localPath)}]`;
+          }
+        } else {
+          const workspace = this.config.agent.workspace;
+          msgText = `[Voice message saved to ${path.relative(workspace, localPath)}]`;
+        }
+      }
     } else if (contentType === 'videoMessage') {
       const videoMsg = msg.message.videoMessage!;
       const localPath = await this.downloadMediaToDisk(msg, 'video.mp4');
