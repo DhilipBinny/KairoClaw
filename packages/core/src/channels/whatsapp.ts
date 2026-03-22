@@ -551,8 +551,9 @@ class WhatsAppChannel implements Channel {
           if (transcribed) {
             msgText = `[Voice message] ${transcribed}`;
           } else {
+            // Transcription configured but failed
             const workspace = this.config.agent.workspace;
-            msgText = `[Voice message saved to ${path.relative(workspace, localPath)}]`;
+            msgText = `[Voice message — transcription failed, audio saved to ${path.relative(workspace, localPath)}. Tell the user you couldn't process their voice message and ask them to type instead.]`;
           }
         } else {
           const workspace = this.config.agent.workspace;

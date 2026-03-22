@@ -187,6 +187,34 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     };
   });
 
+  // POST /api/v1/admin/tools/transcription/test — test STT endpoint connectivity
+  app.post('/api/v1/admin/tools/transcription/test', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const txConfig = config.tools?.transcription;
+    if (!txConfig?.baseUrl) {
+      return { success: false, error: 'No endpoint URL configured' };
+    }
+    try {
+      const res = await fetch(`${txConfig.baseUrl.replace(/\/$/, '')}/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) {
+        return { success: false, error: `Endpoint returned ${res.status}` };
+      }
+      const data = await res.json() as Record<string, unknown>;
+      return {
+        success: true,
+        gpu: data.gpu,
+        gpuName: data.gpu_name,
+        modelLoaded: data.model_loaded,
+        modelSize: data.model_size,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: `Cannot reach endpoint: ${msg}` };
+    }
+  });
+
   // GET /api/v1/admin/plugins — read plugins.json
   app.get('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request) => {
     const config = (request as any).ctx.config as GatewayConfig;
