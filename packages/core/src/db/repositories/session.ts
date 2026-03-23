@@ -102,4 +102,36 @@ export class SessionRepository {
       this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
     }
   }
+
+  /** Delete a session and all child records (tool_calls, usage_records, messages). */
+  deleteWithCascade(id: string): void {
+    this.db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
+    this.db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
+    this.db.run('DELETE FROM messages WHERE session_id = ?', [id]);
+    this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
+  }
+
+  /** Clean up orphaned internal sessions (sub-agents that didn't clean up). Returns count cleaned. */
+  cleanupOrphans(): number {
+    const orphaned = this.db.query<{ id: string }>('SELECT id FROM sessions WHERE channel = ?', ['internal']);
+    for (const { id } of orphaned) {
+      this.deleteWithCascade(id);
+    }
+    return orphaned.length;
+  }
+
+  /** Count sessions. */
+  count(): number {
+    const row = this.db.get<{ c: number }>('SELECT COUNT(*) as c FROM sessions');
+    return row?.c ?? 0;
+  }
+
+  /** Count user turns for a session. */
+  countUserTurns(sessionId: string): number {
+    const row = this.db.get<{ c: number }>(
+      'SELECT COUNT(*) as c FROM messages WHERE session_id = ? AND role = ?',
+      [sessionId, 'user'],
+    );
+    return row?.c ?? 0;
+  }
 }

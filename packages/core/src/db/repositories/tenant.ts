@@ -65,8 +65,9 @@ export class TenantRepository {
   ensureDefault(): TenantRow {
     const id = 'default';
     this.db.run(
-      `INSERT OR IGNORE INTO tenants (id, name, slug, plan, settings, created_at, updated_at)
-       VALUES (?, 'Default', 'default', 'free', '{}', ?, ?)`,
+      `INSERT INTO tenants (id, name, slug, plan, settings, created_at, updated_at)
+       VALUES (?, 'Default', 'default', 'free', '{}', ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
       [id, new Date().toISOString(), new Date().toISOString()],
     );
     return this.db.get<TenantRow>('SELECT * FROM tenants WHERE id = ?', [id])!;
