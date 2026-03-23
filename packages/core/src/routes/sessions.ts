@@ -122,7 +122,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
     // Update session turn count
     const turns = sessionRepo.countUserTurns(id);
-    db.run('UPDATE sessions SET turns = ?, updated_at = ? WHERE id = ?', [turns, new Date().toISOString(), id]);
+    sessionRepo.setTurns(id, turns);
 
     return { success: true };
   });

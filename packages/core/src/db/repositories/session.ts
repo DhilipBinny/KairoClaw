@@ -126,6 +126,11 @@ export class SessionRepository {
     return row?.c ?? 0;
   }
 
+  /** Set the turns count for a session. */
+  setTurns(id: string, turns: number): void {
+    this.db.run('UPDATE sessions SET turns = ?, updated_at = ? WHERE id = ?', [turns, new Date().toISOString(), id]);
+  }
+
   /** Count user turns for a session. */
   countUserTurns(sessionId: string): number {
     const row = this.db.get<{ c: number }>(
