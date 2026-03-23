@@ -29,7 +29,7 @@ export class AuditRepository {
     const detailsJson = JSON.stringify(entry.details ?? {});
 
     // Wrap read-last-hash + insert in a transaction to prevent race conditions
-    let insertedId: number | bigint = 0;
+    let entryHash = '';
     this.db.transaction(() => {
       const lastEntry = this.db.get<{ entry_hash: string }>(
         'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1',
@@ -37,12 +37,12 @@ export class AuditRepository {
       );
       const prevHash = lastEntry?.entry_hash ?? '';
 
-      const entryHash = crypto
+      entryHash = crypto
         .createHash('sha256')
         .update(prevHash + entry.action + detailsJson + now)
         .digest('hex');
 
-      const result = this.db.run(
+      this.db.run(
         `INSERT INTO audit_log (tenant_id, user_id, action, resource, details, ip_address, prev_hash, entry_hash, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -57,10 +57,10 @@ export class AuditRepository {
           now,
         ],
       );
-      insertedId = result.lastInsertRowid;
     });
 
-    return this.db.get<AuditRow>('SELECT * FROM audit_log WHERE id = ?', [insertedId])!;
+    // Look up by unique entry_hash (avoids lastInsertRowid dependency)
+    return this.db.get<AuditRow>('SELECT * FROM audit_log WHERE entry_hash = ?', [entryHash])!;
   }
 
   listByTenant(tenantId: string, limit = 100, offset = 0): AuditRow[] {
