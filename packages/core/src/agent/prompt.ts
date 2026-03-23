@@ -1,7 +1,7 @@
 /**
  * System prompt builder.
  *
- * Reads workspace files (IDENTITY.md, SOUL.md, USER.md, RULES.md, MEMORY.md)
+ * Reads workspace files (IDENTITY.md, SOUL.md, RULES.md, USER.md)
  * and injects them into the system prompt alongside tool descriptions and
  * runtime context.
  */
@@ -61,7 +61,13 @@ export function buildSystemPrompt(
   // Workspace
   sections.push(`## Workspace
 Your working directory is: ${workspace}
-Use this as the root for all file operations unless instructed otherwise.`);
+
+File organization rules:
+- **documents/** — save any generated documents, research, reports, plans, or exports here
+- **media/** — images and media files (managed by the system)
+- **scopes/** — per-user memory (managed by the system, do not write here directly)
+- Do NOT create .md files in the workspace root — the root is reserved for system persona files
+- When the user asks you to create a file, save it to documents/ unless they specify a different path`);
 
   // Time
   sections.push(`## Current Date & Time
@@ -79,9 +85,8 @@ It must be your ENTIRE message — nothing else.`);
     : 'memory';
   sections.push(`## Memory
 You wake up fresh each session. Your memory files are your continuity:
-- **${memoryBasePath}/PROFILE.md** — your long-term memory (user profile, preferences, key facts)
-- **${memoryBasePath}/sessions/YYYY-MM-DD.md** — recent session notes (last 7 days)
-- **MEMORY.md** — additional curated notes
+- **${memoryBasePath}/PROFILE.md** — long-term memory (preferences, key facts, consolidated from sessions)
+- **${memoryBasePath}/sessions/YYYY-MM-DD.md** — recent session notes (last 7 days, auto-extracted)
 If someone says "remember this", write it to ${memoryBasePath}/PROFILE.md.`);
 
   // Inject layered memory: profile + recent sessions (scoped per user)
@@ -113,7 +118,7 @@ If someone says "remember this", write it to ${memoryBasePath}/PROFILE.md.`);
     }
   }
 
-  // Inject workspace files (with scope cascading for SOUL.md, USER.md, MEMORY.md)
+  // Inject workspace files (IDENTITY, SOUL, RULES are global; USER.md cascades per scope)
   sections.push('\n## Project Context (Workspace Files)');
   for (const filename of PROMPT_BOOTSTRAP_FILES) {
     const filePath = resolveScopedFile(workspace, filename, scopeKey ?? null);

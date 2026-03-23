@@ -532,9 +532,19 @@ class WhatsAppChannel implements Channel {
       } else {
         const localPath = await this.downloadMediaToDisk(msg, fileName);
         const workspace = this.config.agent.workspace;
-        msgText = localPath
-          ? `[Document "${fileName}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
-          : caption || '[Document received but download failed]';
+
+        if (!localPath) {
+          msgText = caption || '[Document received but download failed]';
+        } else {
+          // Generate smart file preview — small files inline, large files get metadata + sample
+          try {
+            const { generateFilePreview } = await import('../media/file-preview.js');
+            const preview = await generateFilePreview(localPath, fileName);
+            msgText = caption ? `${preview}\n\nUser message: ${caption}` : preview;
+          } catch {
+            msgText = `[Document "${fileName}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim();
+          }
+        }
       }
     } else if (contentType === 'audioMessage') {
       const audioMsg = msg.message.audioMessage!;

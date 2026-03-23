@@ -90,6 +90,20 @@ async function main(): Promise<void> {
   const migrationsDir = path.join(__dirname, 'db', 'migrations');
   runMigrations(db, migrationsDir);
 
+  // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
+  try {
+    const orphaned = db.query<{ id: string }>('SELECT id FROM sessions WHERE channel = ?', ['internal']);
+    if (orphaned.length > 0) {
+      for (const { id } of orphaned) {
+        db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
+        db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
+        db.run('DELETE FROM messages WHERE session_id = ?', [id]);
+        db.run('DELETE FROM sessions WHERE id = ?', [id]);
+      }
+      console.log(`  Cleaned ${orphaned.length} orphaned internal sessions`);
+    }
+  } catch { /* non-critical */ }
+
   // 4. Seed database (first run)
   const { apiKey, isFirstRun } = seedDatabase(db);
   if (isFirstRun && apiKey) {
@@ -552,7 +566,46 @@ async function main(): Promise<void> {
   console.log(`  Tools: ${toolRegistry.size} registered`);
   console.log(`  MCP servers: connecting in background`);
 
-  // 18. Graceful shutdown
+  // 19. Daily memory consolidation — runs every 24h, consolidates session notes → PROFILE.md
+  const CONSOLIDATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const consolidationTimer = setInterval(async () => {
+    try {
+      const { consolidateMemory } = await import('./agent/auto-memory.js');
+      const scopesDir = path.join(config.agent.workspace, 'scopes');
+      if (!fs.existsSync(scopesDir)) return;
+
+      const scopes = fs.readdirSync(scopesDir, { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => d.name);
+
+      for (const scopeKey of scopes) {
+        try {
+          await consolidateMemory({
+            config,
+            callLLM: (args: any) => providerRegistry.callWithFailover(args),
+            scopeKey,
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error(`Memory consolidation failed for ${scopeKey}: ${msg}`);
+        }
+      }
+
+      // Also consolidate global memory (web/API users without scope)
+      try {
+        await consolidateMemory({
+          config,
+          callLLM: (args: any) => providerRegistry.callWithFailover(args),
+          scopeKey: null,
+        });
+      } catch { /* non-critical */ }
+    } catch (e) {
+      console.error('Memory consolidation error:', e);
+    }
+  }, CONSOLIDATION_INTERVAL_MS);
+  consolidationTimer.unref(); // Don't keep process alive just for this
+
+  // 20. Graceful shutdown
   const shutdown = async (): Promise<void> => {
     console.log('Shutting down...');
 
@@ -574,6 +627,9 @@ async function main(): Promise<void> {
 
     // Stop webchat cleanup interval
     stopWebchatCleanup();
+
+    // Stop memory consolidation timer
+    clearInterval(consolidationTimer);
 
     // Stop scheduler
     scheduler.stop();

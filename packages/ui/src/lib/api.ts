@@ -473,6 +473,31 @@ export async function saveWorkspaceFile(name: string, content: string): Promise<
   return request(`/workspace/files/${name}`, { method: 'PUT', body: { content } });
 }
 
+// ── Scoped Users ─────────────────────────────────
+
+export interface ScopeEntry {
+  scopeKey: string;
+  channel: string;
+  userId: string;
+  hasUserMd: boolean;
+  hasProfile: boolean;
+  sessionCount: number;
+  lastSession: string | null;
+}
+
+export async function getScopes(): Promise<{ scopes: ScopeEntry[] }> {
+  return request('/workspace/scopes');
+}
+
+export async function getScopeDetail(key: string): Promise<{
+  scopeKey: string;
+  userMd: string;
+  profile: string;
+  sessions: Array<{ date: string; content: string }>;
+}> {
+  return request(`/workspace/scopes/${encodeURIComponent(key)}`);
+}
+
 // ── Plugins ──────────────────────────────────────
 
 export async function getPlugins(): Promise<{ plugins: Record<string, unknown> }> {

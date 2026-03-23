@@ -7,6 +7,7 @@
  * Compatible with the original webchat.js message format.
  */
 
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -109,7 +110,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
     if (!config.gateway.token) {
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
-    const clientId = `web-${Date.now()}`;
+    let clientId = `web-${Date.now()}`;
     let authAttempts = 0;
     let lastActivity = Date.now();
     let boundSessionKey: string | null = null; // set on first chat.send, immutable after
@@ -185,6 +186,8 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             );
             if (user) {
               authValid = true;
+              // Use stable user ID for scoped memory (not ephemeral clientId)
+              clientId = (user as Record<string, unknown>).id as string || clientId;
             }
           }
           if (authValid) {
@@ -244,16 +247,28 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               .filter((img) => typeof img.data === 'string' && typeof img.mimeType === 'string')
               .map((img) => ({ data: img.data!, mimeType: img.mimeType!, filename: img.filename }));
 
-            // Prepend uploaded file references to the text
+            // Generate smart previews for uploaded files
             let fullText = text;
             const rawFiles = Array.isArray(msg.files) ? msg.files as Array<{ path?: string; name?: string }> : [];
             if (rawFiles.length > 0) {
-              const fileRefs = rawFiles
-                .filter((f) => typeof f.path === 'string' && !f.path.includes('..') && !path.isAbsolute(f.path!))
-                .map((f) => `[Document "${f.name || 'file'}" at ${f.path}]`)
-                .join('\n');
-              if (fileRefs) {
-                fullText = `${fileRefs}\n\n${text}`;
+              const workspace = config.agent.workspace;
+              const previews: string[] = [];
+              for (const f of rawFiles) {
+                if (typeof f.path !== 'string' || f.path.includes('..') || path.isAbsolute(f.path)) continue;
+                const resolved = path.join(workspace, f.path);
+                if (!fs.existsSync(resolved)) {
+                  previews.push(`[Document "${f.name || 'file'}" — file not found]`);
+                  continue;
+                }
+                try {
+                  const { generateFilePreview } = await import('../media/file-preview.js');
+                  previews.push(await generateFilePreview(resolved, f.name || path.basename(f.path)));
+                } catch {
+                  previews.push(`[Document "${f.name || 'file'}" at ${f.path}]`);
+                }
+              }
+              if (previews.length > 0) {
+                fullText = `${previews.join('\n\n')}\n\n${text}`;
               }
             }
 
@@ -372,9 +387,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // ── Session list ─────────────────────
           case 'sessions.list': {
             const sessions = sessionRepo.listByTenant(tenantId, 100);
-            // Filter to sessions with actual messages, sorted by most recent
+            // Filter out internal/cron sessions, keep only sessions with actual messages
             const list = sessions
-              .filter((s) => s.turns > 0)
+              .filter((s) => s.turns > 0 && s.channel !== 'internal' && s.channel !== 'cron')
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
                 // Extract session key from chat_id (e.g., "web:main" → "main")

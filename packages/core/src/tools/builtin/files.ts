@@ -1,8 +1,37 @@
-import { FILE_MAX_WRITE_SIZE } from '../../constants.js';
+import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR } from '../../constants.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
 import { getWorkspace } from './utils.js';
+
+/**
+ * Enforce workspace file organization.
+ * - Persona files in root (IDENTITY.md, SOUL.md, etc.) are protected from agent writes
+ * - Files written to workspace root are redirected to documents/
+ * - Subdirectory writes (documents/x.md, media/x.png) pass through unchanged
+ */
+function enforceFileOrganization(filePath: string, workspace: string): { path: string; redirected: boolean } {
+  const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(workspace, filePath);
+  const relative = path.relative(workspace, resolved);
+
+  // If writing to a subdirectory, allow as-is
+  if (relative.includes(path.sep)) {
+    // Scoped directories — agent can read and write freely
+    // (USER.md, memory/PROFILE.md, memory/sessions/ are all agent-managed per user)
+    return { path: resolved, redirected: false };
+  }
+
+  // Writing to workspace root — check if it's a protected persona file
+  const fileName = path.basename(resolved);
+  if (PERSONA_FILES.includes(fileName)) {
+    throw new Error(`Cannot overwrite "${fileName}" — this is a protected persona file. Edit it from the admin UI.`);
+  }
+
+  // Redirect other root-level files to documents/
+  const docsDir = path.join(workspace, DOCUMENTS_DIR);
+  const redirected = path.join(docsDir, fileName);
+  return { path: redirected, redirected: true };
+}
 
 const MAX_WRITE_SIZE = FILE_MAX_WRITE_SIZE;
 
@@ -88,15 +117,30 @@ export const fileTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const filePath = safePath(args.path as string, workspace);
+      const rawPath = safePath(args.path as string, workspace);
       const fileContent = (args.content as string) || '';
       const contentSize = Buffer.byteLength(fileContent);
       if (contentSize > MAX_WRITE_SIZE) {
         return { error: `Content too large: ${(contentSize / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_WRITE_SIZE / 1024 / 1024}MB limit` };
       }
+
+      // Enforce file organization — redirect root files to documents/, protect persona files
+      let filePath = rawPath;
+      let note: string | undefined;
+      try {
+        const result = enforceFileOrganization(rawPath, workspace);
+        filePath = result.path;
+        if (result.redirected) {
+          note = `File saved to documents/ (workspace root is reserved for system files)`;
+        }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, fileContent);
-      return { success: true, path: args.path, bytes: contentSize };
+      const savedPath = path.relative(workspace, filePath);
+      return { success: true, path: savedPath, bytes: contentSize, ...(note ? { note } : {}) };
     },
     source: 'builtin',
     category: 'write',
@@ -118,6 +162,13 @@ export const fileTools: ToolRegistration[] = [
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
       const filePath = safePath(args.path as string, workspace);
+
+      // Protect persona files from agent edits
+      const relative = path.relative(workspace, filePath);
+      if (!relative.includes(path.sep) && PERSONA_FILES.includes(path.basename(filePath))) {
+        return { error: `Cannot edit "${path.basename(filePath)}" — this is a protected persona file. Edit it from the admin UI.` };
+      }
+
       if (!fs.existsSync(filePath)) return { error: `File not found: ${args.path}` };
       let content = fs.readFileSync(filePath, 'utf8');
       const oldStr = args.old_string as string;
