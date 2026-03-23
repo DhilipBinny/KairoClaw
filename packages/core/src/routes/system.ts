@@ -138,7 +138,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // 3. Check Ollama connectivity
     try {
-      const ollamaUrl = config.providers.ollama?.baseUrl || 'http://localhost:11434';
+      const ollamaUrl = secretsStore?.get('providers.ollama', 'baseUrl') || config.providers.ollama?.baseUrl || 'http://localhost:11434';
       const resp = await fetch(ollamaUrl + '/api/tags', {
         signal: AbortSignal.timeout(5000),
       });
