@@ -1,0 +1,47 @@
+# CI — type-check and build on every push and pull request
+# Catches type errors, missing imports, and build failures before deploy
+
+name: CI
+
+on:
+  push:
+    branches: [main, deploy/railway]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check (types package)
+        run: pnpm --filter @agw/types typecheck
+
+      - name: Type-check (core package)
+        run: pnpm --filter @agw/core typecheck
+
+      - name: Build (types)
+        run: pnpm --filter @agw/types build
+
+      - name: Build (core)
+        run: pnpm --filter @agw/core build
+
+      - name: Build (UI)
+        run: pnpm --filter @agw/ui build
