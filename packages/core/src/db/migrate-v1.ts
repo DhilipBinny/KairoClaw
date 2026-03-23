@@ -242,8 +242,9 @@ export async function migrateDbMcpToConfig(
     return 0;
   }
 
-  // If config already has MCP servers, skip (already migrated)
-  if (rawConfig.mcp?.servers && Object.keys(rawConfig.mcp.servers).length > 0) {
+  // If config already has mcp.servers key (even if empty), skip — already migrated
+  // An empty {} means servers were explicitly removed by the user
+  if (rawConfig.mcp?.servers !== undefined) {
     return 0;
   }
 
