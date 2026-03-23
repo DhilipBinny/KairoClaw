@@ -68,12 +68,20 @@ export class PendingSenderRepository {
 
   /** Evict entries over a cap for a given channel and status. */
   async evictOverCap(channel: string, status: string, cap: number): Promise<void> {
+    const count = await this.countByStatus(channel, status);
+    const toEvict = count - (cap - 1);
+    if (toEvict <= 0) return;
+    // Fetch IDs to evict (compatible with both SQLite and PostgreSQL)
+    const rows = await this.db.query<{ id: number }>(
+      'SELECT id FROM pending_senders WHERE channel = ? AND status = ? ORDER BY last_seen ASC LIMIT ?',
+      [channel, status, toEvict],
+    );
+    if (rows.length === 0) return;
+    const ids = rows.map(r => r.id);
+    const placeholders = ids.map(() => '?').join(',');
     await this.db.run(
-      `DELETE FROM pending_senders WHERE id IN (
-        SELECT id FROM pending_senders WHERE channel = ? AND status = ?
-        ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = ? AND status = ?) - ?)
-      )`,
-      [channel, status, channel, status, cap - 1],
+      `DELETE FROM pending_senders WHERE id IN (${placeholders})`,
+      ids,
     );
   }
 

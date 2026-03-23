@@ -3,24 +3,43 @@
  *
  * Uses node-postgres (pg) with connection pooling.
  * Converts ? placeholders to $1, $2, ... for PostgreSQL compatibility.
+ * Transaction isolation via AsyncLocalStorage (thread-safe for concurrent requests).
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import pg from 'pg';
 import type { PoolConfig, PoolClient } from 'pg';
 import type { DatabaseAdapter } from './index.js';
 
 const { Pool } = pg;
 
-/** Convert ? placeholders to $1, $2, ... for PostgreSQL. */
+/**
+ * Convert ? placeholders to $1, $2, ... for PostgreSQL.
+ * Only converts unquoted ? (skips inside single-quoted strings).
+ */
 function convertPlaceholders(sql: string): string {
   let index = 0;
-  return sql.replace(/\?/g, () => `$${++index}`);
+  let inString = false;
+  let result = '';
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'" && sql[i - 1] !== '\\') {
+      inString = !inString;
+      result += ch;
+    } else if (ch === '?' && !inString) {
+      result += `$${++index}`;
+    } else {
+      result += ch;
+    }
+  }
+  return result;
 }
+
+/** AsyncLocalStorage to hold transaction client per async context. */
+const txStorage = new AsyncLocalStorage<PoolClient>();
 
 export class PostgresAdapter implements DatabaseAdapter {
   private pool: pg.Pool;
-  /** When inside a transaction, queries go through this client instead of the pool. */
-  private txClient: PoolClient | null = null;
 
   constructor(connectionString: string, poolConfig?: Partial<PoolConfig>) {
     this.pool = new Pool({
@@ -34,7 +53,7 @@ export class PostgresAdapter implements DatabaseAdapter {
   }
 
   private get queryable(): pg.Pool | PoolClient {
-    return this.txClient ?? this.pool;
+    return txStorage.getStore() ?? this.pool;
   }
 
   async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -51,36 +70,31 @@ export class PostgresAdapter implements DatabaseAdapter {
     const result = await this.queryable.query(convertPlaceholders(sql), params);
     return {
       changes: result.rowCount ?? 0,
-      // PostgreSQL doesn't have lastInsertRowid — return 0
-      // Use RETURNING clause in queries that need the inserted ID
       lastInsertRowid: 0,
     };
   }
 
   async transaction<T>(fn: () => T | Promise<T>): Promise<T> {
-    if (this.txClient) {
-      // Already in a transaction (nested) — just run the function
+    // If already in a transaction (nested), just run the function
+    if (txStorage.getStore()) {
       return await fn();
     }
 
     const client = await this.pool.connect();
-    this.txClient = client;
     try {
       await client.query('BEGIN');
-      const result = await fn();
+      const result = await txStorage.run(client, fn);
       await client.query('COMMIT');
       return result;
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
     } finally {
-      this.txClient = null;
       client.release();
     }
   }
 
   pragma(_statement: string): unknown {
-    // PostgreSQL doesn't use PRAGMAs — no-op
     return undefined;
   }
 
@@ -89,6 +103,6 @@ export class PostgresAdapter implements DatabaseAdapter {
   }
 
   async backup(_path: string): Promise<void> {
-    console.warn('[db] PostgreSQL backup via pg_dump is not yet implemented. Use pg_dump manually.');
+    console.warn('[db] PostgreSQL backup not implemented. Use pg_dump manually.');
   }
 }
