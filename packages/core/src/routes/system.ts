@@ -11,6 +11,7 @@ import { requireRole } from '../auth/middleware.js';
 import { getModelCapabilities } from '../models/registry.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
+import { resolveMasterKey, readEncryptedStore, decryptStore, encryptStore, writeEncryptedStore } from '../secrets/crypto.js';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -256,13 +257,13 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       const apiKey =
         reqApiKey ||
-        (useExisting && provider === 'anthropic' ? config.providers.anthropic?.apiKey : null) ||
-        (useExisting && provider === 'openai' ? config.providers.openai?.apiKey : null) ||
+        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'apiKey') || config.providers.anthropic?.apiKey) : null) ||
+        (useExisting && provider === 'openai' ? (secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey) : null) ||
         reqApiKey;
 
       const authToken =
         reqAuthToken ||
-        (useExisting && provider === 'anthropic' ? config.providers.anthropic?.authToken : null) ||
+        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || config.providers.anthropic?.authToken) : null) ||
         reqAuthToken;
 
       if (provider === 'anthropic') {
@@ -774,9 +775,62 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       await execFileAsync('cp', ['-a', `${stagingDir}/.`, stateDir], { timeout: 30_000 });
 
       // Set safe permissions on sensitive files
-      const secretsPath = path.join(stateDir, 'secrets.json');
-      if (fs.existsSync(secretsPath)) {
-        fs.chmodSync(secretsPath, 0o600);
+      for (const secFile of ['secrets.json', 'secrets.enc', 'master.key']) {
+        const secPath = path.join(stateDir, secFile);
+        if (fs.existsSync(secPath)) {
+          fs.chmodSync(secPath, 0o600);
+        }
+      }
+
+      // Re-encrypt imported secrets with this deployment's master key
+      // This makes exports portable across deployments automatically
+      const importedEncPath = path.join(stateDir, 'secrets.enc');
+      const importedKeyPath = path.join(stateDir, 'master.key');
+      let reEncrypted = false;
+
+      if (fs.existsSync(importedEncPath)) {
+        // Resolve THIS deployment's master key (env var first, then existing keyfile)
+        const localKey = resolveMasterKey(stateDir);
+
+        if (localKey) {
+          // Try to decrypt with local key first (same deployment restore)
+          const encStore = readEncryptedStore(importedEncPath);
+          if (encStore) {
+            let needsReEncrypt = false;
+            try {
+              decryptStore(encStore, localKey);
+              // Local key works — no re-encryption needed (same-deployment restore)
+            } catch {
+              // Local key doesn't work — archive used a different key
+              needsReEncrypt = true;
+            }
+
+            if (needsReEncrypt && fs.existsSync(importedKeyPath)) {
+              // Decrypt with archive's key, re-encrypt with local key
+              try {
+                const archiveKey = fs.readFileSync(importedKeyPath);
+                if (archiveKey.length === 32) {
+                  const plainSecrets = decryptStore(encStore, archiveKey);
+                  const reEncStore = encryptStore(plainSecrets, localKey);
+                  writeEncryptedStore(importedEncPath, reEncStore);
+                  reEncrypted = true;
+                }
+              } catch (reEncErr) {
+                const msg = reEncErr instanceof Error ? reEncErr.message : String(reEncErr);
+                console.error(`[import] Failed to re-encrypt secrets: ${msg}`);
+              }
+            }
+
+            // Replace archive's master.key with this deployment's key
+            if (reEncrypted && fs.existsSync(importedKeyPath)) {
+              const archiveKeyBuf = fs.readFileSync(importedKeyPath);
+              if (!localKey.every((b, i) => b === archiveKeyBuf[i]) || localKey.length !== archiveKeyBuf.length) {
+                fs.unlinkSync(importedKeyPath);
+                fs.writeFileSync(importedKeyPath, new Uint8Array(localKey.buffer, localKey.byteOffset, localKey.byteLength), { mode: 0o600 });
+              }
+            }
+          }
+        }
       }
 
       // Cleanup
@@ -785,7 +839,9 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       return {
         success: true,
-        message: 'Import complete. Restart the server to apply changes.',
+        message: reEncrypted
+          ? 'Import complete. Secrets re-encrypted with this deployment\'s key. Restart to apply.'
+          : 'Import complete. Restart the server to apply changes.',
         backup: backupFile,
       };
     } catch (e: unknown) {
