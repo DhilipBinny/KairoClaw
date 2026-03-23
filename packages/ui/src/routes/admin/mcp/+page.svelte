@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getMCPServers, getMCPCatalog, searchMCPMarketplace, installMCPServer, removeMCPServer, reconnectMCPServer, disableMCPServer, enableMCPServer, updateMCPServer } from '$lib/api';
+  import { getMCPServers, searchMCPMarketplace, installMCPServer, removeMCPServer, reconnectMCPServer, disableMCPServer, enableMCPServer, updateMCPServer } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface EnvVarSpec {
@@ -22,17 +22,6 @@
     config?: { enabled?: boolean };
   }
 
-  interface CatalogEntry {
-    id: string;
-    name: string;
-    description: string;
-    transport: string;
-    installed: boolean;
-    enabled: boolean;
-    envVars?: EnvVarSpec[];
-    envVarsResolved?: Record<string, boolean>;
-  }
-
   interface MarketplaceEntry {
     id: string;
     name: string;
@@ -41,8 +30,8 @@
   }
 
   let servers: MCPServer[] = $state([]);
-  let catalog: CatalogEntry[] = $state([]);
   let marketplaceResults: MarketplaceEntry[] = $state([]);
+  let featuredServers: MarketplaceEntry[] = $state([]);
   let searchQuery = $state('');
   let loading = $state(true);
   let searching = $state(false);
@@ -51,10 +40,6 @@
   // Env var editor state
   let envEditorOpen = $state<string | null>(null);
   let envEditorValues = $state<Record<string, string>>({});
-
-  // Catalog install form state
-  let installFormOpen = $state<string | null>(null);
-  let installFormValues = $state<Record<string, string>>({});
 
   // Polling
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -101,9 +86,9 @@
   async function loadData() {
     loading = true;
     try {
-      const [serversData, catalogData] = await Promise.all([
+      const [serversData, featuredData] = await Promise.all([
         getMCPServers().catch(() => ({ servers: [] })),
-        getMCPCatalog().catch(() => ({ catalog: [] })),
+        searchMCPMarketplace('').catch(() => ({ servers: [] })),
       ]);
       const rawServers = (serversData as any).servers;
       if (Array.isArray(rawServers)) {
@@ -113,7 +98,7 @@
       } else {
         servers = [];
       }
-      catalog = catalogData.catalog || [];
+      featuredServers = featuredData.servers || [];
     } catch (e) {
       console.error('Failed to load MCP data:', e);
     } finally {
@@ -138,47 +123,12 @@
     }
   }
 
-  function openInstallForm(entry: CatalogEntry) {
-    // Only show form if there are required env vars that aren't already resolved
-    const hasUnresolved = entry.envVars && entry.envVars.some(v =>
-      v.required && !(entry.envVarsResolved?.[v.key])
-    );
-    if (hasUnresolved) {
-      installFormOpen = entry.id;
-      installFormValues = {};
-      for (const v of entry.envVars!) {
-        installFormValues[v.key] = '';
-      }
-    } else {
-      handleInstallCatalog(entry);
-    }
+  /** The list to display: search results if searching, otherwise featured */
+  function displayServers(): MarketplaceEntry[] {
+    return searchQuery.trim() ? marketplaceResults : featuredServers;
   }
 
-  async function handleInstallWithEnv(entry: CatalogEntry) {
-    actionInProgress = entry.id;
-    try {
-      await installMCPServer({ id: entry.id, env: installFormValues });
-      installFormOpen = null;
-      installFormValues = {};
-      await loadData();
-    } catch (e) {
-      console.error('Install failed:', e);
-    } finally {
-      actionInProgress = '';
-    }
-  }
-
-  async function handleInstallCatalog(entry: CatalogEntry) {
-    actionInProgress = entry.id;
-    try {
-      await installMCPServer({ id: entry.id });
-      await loadData();
-    } catch (e) {
-      console.error('Install failed:', e);
-    } finally {
-      actionInProgress = '';
-    }
-  }
+  // Catalog install functions removed — install via MCP Servers UI manually
 
   async function handleRemove(id: string) {
     actionInProgress = id;
@@ -438,80 +388,9 @@
       {/if}
     </div>
 
-    <!-- Catalog -->
+    <!-- MCP Registry -->
     <div class="section">
-      <h2 class="section-title">Curated Catalog</h2>
-      <div class="catalog-grid">
-        {#each catalog as entry}
-          <div class="card catalog-card">
-            <div class="catalog-header">
-              <h3 class="catalog-name">{entry.name || entry.id}</h3>
-              {#if entry.installed}
-                <Badge variant="green">Installed</Badge>
-              {/if}
-            </div>
-            <p class="catalog-desc">{entry.description || 'No description'}</p>
-
-            <!-- Install form with env vars -->
-            {#if installFormOpen === entry.id && entry.envVars}
-              <div class="install-form">
-                {#each entry.envVars as spec}
-                  <div class="env-field">
-                    <label class="env-label">
-                      {spec.label}
-                      {#if spec.required}<span class="required">*</span>{/if}
-                    </label>
-                    <input
-                      class="input input-sm"
-                      type={spec.sensitive ? 'password' : 'text'}
-                      placeholder={spec.placeholder || spec.key}
-                      bind:value={installFormValues[spec.key]}
-                    />
-                  </div>
-                {/each}
-                <div class="install-form-actions">
-                  <button
-                    class="btn btn-sm btn-primary"
-                    aria-label="Install MCP server {entry.name || entry.id}"
-                    onclick={() => handleInstallWithEnv(entry)}
-                    disabled={actionInProgress === entry.id}
-                  >
-                    {actionInProgress === entry.id ? 'Installing...' : 'Install'}
-                  </button>
-                  <button
-                    class="btn btn-sm"
-                    aria-label="Cancel installation"
-                    onclick={() => { installFormOpen = null; installFormValues = {}; }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            {:else}
-              <div class="catalog-footer">
-                <Badge>{entry.transport}</Badge>
-                {#if !entry.installed}
-                  <button
-                    class="btn btn-sm btn-primary"
-                    aria-label="Install {entry.name || entry.id}"
-                    onclick={() => openInstallForm(entry)}
-                    disabled={actionInProgress === entry.id}
-                  >
-                    {actionInProgress === entry.id ? 'Installing...' : 'Install'}
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </div>
-        {:else}
-          <div class="empty-state">No catalog entries.</div>
-        {/each}
-      </div>
-    </div>
-
-    <!-- Marketplace search -->
-    <div class="section">
-      <h2 class="section-title">Marketplace Search</h2>
+      <h2 class="section-title">MCP Registry</h2>
       <div class="search-bar">
         <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="11" cy="11" r="8"></circle>
@@ -529,9 +408,13 @@
         {/if}
       </div>
 
-      {#if marketplaceResults.length > 0}
+      {#if !searchQuery.trim() && featuredServers.length > 0}
+        <p class="section-subtitle">Popular servers</p>
+      {/if}
+
+      {#if displayServers().length > 0}
         <div class="marketplace-list">
-          {#each marketplaceResults as entry}
+          {#each displayServers() as entry}
             <div class="card marketplace-card">
               <div class="marketplace-header">
                 <h3 class="marketplace-name">{entry.name || entry.qualifiedName}</h3>
@@ -543,6 +426,8 @@
             </div>
           {/each}
         </div>
+      {:else if searchQuery.trim() && !searching}
+        <div class="empty-state">No servers found for &ldquo;{searchQuery}&rdquo;</div>
       {/if}
     </div>
   {/if}
