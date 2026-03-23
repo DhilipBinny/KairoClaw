@@ -146,14 +146,19 @@ export class SecretsStore {
     return this.data;
   }
 
+  private decryptFailed = false;
+
   private _loadEncrypted(): Record<string, Record<string, string>> {
     try {
       const store = readEncryptedStore(this.encryptedPath);
       if (!store) return {};
-      return decryptStore(store, this.kek!);
+      const data = decryptStore(store, this.kek!);
+      this.decryptFailed = false;
+      return data;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`[secrets] Failed to decrypt secrets: ${msg}`);
+      this.decryptFailed = true;
       return {};
     }
   }
@@ -168,6 +173,10 @@ export class SecretsStore {
   }
 
   private _save(): void {
+    if (this.decryptFailed) {
+      console.error('[secrets] Refusing to save — previous decrypt failed. Fix the master key first.');
+      return;
+    }
     if (this.encrypted && this.kek) {
       this._saveEncrypted();
     } else {
