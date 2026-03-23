@@ -80,19 +80,27 @@ export const subagentTools: ToolRegistration[] = [
       log.info({ parentSession: parentSessionId, childId, taskLen: task.length }, 'Spawning sub-agent (async)');
 
       // Register the child — fires runAgent in the background
+      // Uses ephemeral mode: no DB session, no persistence, zero orphan risk
       registry.register(childId, task, async (_signal) => {
         // Lazy import to avoid circular dependency
         const { runAgent } = await import('../../agent/loop.js');
-        const { SessionRepository } = await import('../../db/repositories/session.js');
 
-        const sessionRepo = new SessionRepository(db);
-        const subSession = sessionRepo.create({
+        // Create a virtual session object (not persisted to DB)
+        const virtualSession = {
           id: childId,
-          tenantId,
+          tenant_id: tenantId,
+          user_id: null,
           channel: 'internal',
-          chatId: `subagent:${childId}`,
+          chat_id: `subagent:${childId}`,
           model: modelOverride || config.model.primary,
-        });
+          input_tokens: 0,
+          output_tokens: 0,
+          turns: 0,
+          metadata: '{}',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          expires_at: null,
+        };
 
         const inbound: InboundMessage = {
           text: task,
@@ -103,31 +111,23 @@ export const subagentTools: ToolRegistration[] = [
           senderName: 'Parent Agent',
         };
 
-        try {
-          return await runAgent(
-            inbound,
-            { onDelta: () => {}, onRoundStart: () => {}, onRoundEnd: () => {} },
-            {
-              db,
-              config,
-              session: subSession,
-              tenantId,
-              callLLM: callLLM as any,
-              tools: childTools,
-              executeTool: executeTool as any,
-              model: modelOverride,
-              subagentDepth: 1, // flat — children are always depth 1
-              scopeKey: (ctx.scopeKey as string | null) ?? null, // inherit parent's scope
-            },
-          );
-        } finally {
-          // Clean up ephemeral sub-agent session + messages from DB
-          // Runs on both success and failure
-          try {
-            db.run('DELETE FROM messages WHERE session_id = ?', [childId]);
-            db.run('DELETE FROM sessions WHERE id = ?', [childId]);
-          } catch { /* best effort cleanup */ }
-        }
+        return await runAgent(
+          inbound,
+          { onDelta: () => {}, onRoundStart: () => {}, onRoundEnd: () => {} },
+          {
+            db,
+            config,
+            session: virtualSession,
+            tenantId,
+            callLLM: callLLM as any,
+            tools: childTools,
+            executeTool: executeTool as any,
+            model: modelOverride,
+            subagentDepth: 1,
+            scopeKey: (ctx.scopeKey as string | null) ?? null,
+            ephemeral: true, // no DB persistence — in-memory only
+          },
+        );
       });
 
       // Return immediately — the agent loop will detect the pending marker
