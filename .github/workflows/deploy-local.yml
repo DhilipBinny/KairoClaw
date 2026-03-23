@@ -28,17 +28,24 @@ jobs:
 
       - name: Build Docker image
         run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
           docker tag kairoclaw:latest kairoclaw:prev 2>/dev/null || true
-          docker build -t kairoclaw:latest .
+          docker build -t kairoclaw:latest -t kairoclaw:$SHORT_SHA .
+          echo "Built kairoclaw:$SHORT_SHA"
 
       - name: Deploy stack
-        run: docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
-
-      - name: Force service update
-        run: docker service update --force kairoclaw_kairoclaw
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          # Update compose to use SHA-tagged image so Swarm detects the change
+          sed -i "s|image: kairoclaw:.*|image: kairoclaw:$SHORT_SHA|" /home/binny/Binny/KAIROCLAW/docker-compose.yml
+          docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
+          echo "Deployed kairoclaw:$SHORT_SHA"
 
       - name: Cleanup previous image
-        run: docker rmi kairoclaw:prev 2>/dev/null || true
+        run: |
+          docker rmi kairoclaw:prev 2>/dev/null || true
+          # Keep last 3 tagged images, remove older ones
+          docker images kairoclaw --format '{{.Tag}} {{.ID}}' | grep -v latest | grep -v prev | tail -n +4 | awk '{print $2}' | xargs -r docker rmi 2>/dev/null || true
 
       - name: Wait for healthy
         run: |
