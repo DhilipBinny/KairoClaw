@@ -256,13 +256,13 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       const apiKey =
         reqApiKey ||
-        (useExisting && provider === 'anthropic' ? config.providers.anthropic?.apiKey : null) ||
-        (useExisting && provider === 'openai' ? config.providers.openai?.apiKey : null) ||
+        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'apiKey') || config.providers.anthropic?.apiKey) : null) ||
+        (useExisting && provider === 'openai' ? (secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey) : null) ||
         reqApiKey;
 
       const authToken =
         reqAuthToken ||
-        (useExisting && provider === 'anthropic' ? config.providers.anthropic?.authToken : null) ||
+        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || config.providers.anthropic?.authToken) : null) ||
         reqAuthToken;
 
       if (provider === 'anthropic') {
