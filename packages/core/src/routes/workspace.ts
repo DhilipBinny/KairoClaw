@@ -1,7 +1,7 @@
 /**
  * Workspace file routes — view and edit persona/identity files.
  *
- * Whitelisted files: IDENTITY.md, SOUL.md, USER.md, RULES.md, MEMORY.md
+ * Whitelisted files: IDENTITY.md, SOUL.md, RULES.md (global persona files)
  */
 
 import fs from 'node:fs';
@@ -10,11 +10,12 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
 import { WORKSPACE_MAX_FILE_SIZE } from '../constants.js';
+import { SCOPE_DIR_NAME } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('system');
 
-const WORKSPACE_FILES = ['IDENTITY.md', 'SOUL.md', 'USER.md', 'RULES.md', 'MEMORY.md'];
+const WORKSPACE_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md'];
 
 export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/workspace/files — list workspace files
@@ -85,4 +86,103 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
       return { success: true, name, size: content.length };
     },
   );
+
+  // ── Scoped Users API ────────────────────────────
+
+  // GET /api/v1/workspace/scopes — list all scoped users
+  app.get('/api/v1/workspace/scopes', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const scopesDir = path.join(config.agent.workspace, SCOPE_DIR_NAME);
+
+    if (!fs.existsSync(scopesDir)) {
+      return { scopes: [] };
+    }
+
+    const entries = fs.readdirSync(scopesDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => {
+        const scopeKey = d.name;
+        const scopePath = path.join(scopesDir, scopeKey);
+        const parts = scopeKey.split(':');
+        const channel = parts[0] || 'unknown';
+        const userId = parts.slice(1).join(':') || 'unknown';
+
+        // Read USER.md if exists
+        const userMdPath = path.join(scopePath, 'USER.md');
+        const hasUserMd = fs.existsSync(userMdPath);
+
+        // Read PROFILE.md if exists
+        const profilePath = path.join(scopePath, 'memory', 'PROFILE.md');
+        const hasProfile = fs.existsSync(profilePath);
+
+        // Count session files
+        const sessionsDir = path.join(scopePath, 'memory', 'sessions');
+        let sessionCount = 0;
+        let lastSession: string | null = null;
+        if (fs.existsSync(sessionsDir)) {
+          const sessions = fs.readdirSync(sessionsDir).filter(f => f.endsWith('.md')).sort();
+          sessionCount = sessions.length;
+          lastSession = sessions.length > 0 ? sessions[sessions.length - 1].replace('.md', '') : null;
+        }
+
+        return {
+          scopeKey,
+          channel,
+          userId,
+          hasUserMd,
+          hasProfile,
+          sessionCount,
+          lastSession,
+        };
+      })
+      .sort((a, b) => (b.lastSession || '').localeCompare(a.lastSession || ''));
+
+    return { scopes: entries };
+  });
+
+  // GET /api/v1/workspace/scopes/:key — read a specific scope's files
+  app.get('/api/v1/workspace/scopes/:key', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const config = (request as any).ctx.config as GatewayConfig;
+    const { key } = request.params as { key: string };
+
+    // Validate scope key — no path traversal
+    if (/[\/\\]|\.\./.test(key)) {
+      return reply.code(400).send({ error: 'Invalid scope key' });
+    }
+
+    const scopePath = path.join(config.agent.workspace, SCOPE_DIR_NAME, key);
+    if (!fs.existsSync(scopePath)) {
+      return reply.code(404).send({ error: 'Scope not found' });
+    }
+
+    // Read USER.md
+    const userMdPath = path.join(scopePath, 'USER.md');
+    const userMd = fs.existsSync(userMdPath) ? fs.readFileSync(userMdPath, 'utf8') : '';
+
+    // Read PROFILE.md
+    const profilePath = path.join(scopePath, 'memory', 'PROFILE.md');
+    const profile = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, 'utf8') : '';
+
+    // Read recent sessions
+    const sessionsDir = path.join(scopePath, 'memory', 'sessions');
+    const sessions: Array<{ date: string; content: string }> = [];
+    if (fs.existsSync(sessionsDir)) {
+      const files = fs.readdirSync(sessionsDir)
+        .filter(f => f.endsWith('.md'))
+        .sort()
+        .reverse()
+        .slice(0, 7); // Last 7 days
+      for (const file of files) {
+        const content = fs.readFileSync(path.join(sessionsDir, file), 'utf8');
+        sessions.push({ date: file.replace('.md', ''), content });
+      }
+    }
+
+    return {
+      scopeKey: key,
+      userMd,
+      profile,
+      sessions,
+    };
+  });
 };

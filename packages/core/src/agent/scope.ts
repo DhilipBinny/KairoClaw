@@ -2,14 +2,14 @@
  * Scope — per-user memory isolation.
  *
  * Each user gets their own directory under workspace/scopes/{channel:userId}/
- * with isolated memory (PROFILE.md, sessions/) and optional personality
- * overrides (SOUL.md, USER.md).
+ * with isolated memory (PROFILE.md, sessions/) and optional
+ * overrides (USER.md).
  *
  * Resolution order:
  *   1. scopes/{scopeKey}/{file} — if exists, use it
  *   2. workspace/{file} — global fallback
  *
- * Global-only files (RULES.md, IDENTITY.md, TOOLS.md) always resolve to
+ * Global-only files (RULES.md, IDENTITY.md, SOUL.md) always resolve to
  * the workspace root, never scoped.
  */
 

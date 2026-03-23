@@ -87,12 +87,10 @@ export const PROMPT_MAX_FILE_CHARS = 20_000;
 
 /** Workspace files loaded into every system prompt */
 export const PROMPT_BOOTSTRAP_FILES = [
-  'RULES.md',
-  'SOUL.md',
   'IDENTITY.md',
+  'SOUL.md',
+  'RULES.md',
   'USER.md',
-  'TOOLS.md',
-  'MEMORY.md',
 ];
 
 // ── Logging ─────────────────────────────────────────────────
@@ -141,13 +139,19 @@ export const PENDING_PENDING_CAP = 20;
 export const SCOPE_DIR_NAME = 'scopes';
 
 /** Files that are ALWAYS global (never overridden per scope) */
-export const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'TOOLS.md'];
+export const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'SOUL.md'];
 
 /** Files that cascade: scope override → global fallback */
-export const CASCADING_FILES = ['SOUL.md', 'USER.md', 'MEMORY.md'];
+export const CASCADING_FILES = ['USER.md'];
 
 /** Channels that get scoped memory */
-export const SCOPED_CHANNELS = ['telegram', 'whatsapp'];
+export const SCOPED_CHANNELS = ['telegram', 'whatsapp', 'web'];
+
+/** Persona files in workspace root — protected from agent overwrites */
+export const PERSONA_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md'];
+
+/** Default subdirectory for agent-generated documents */
+export const DOCUMENTS_DIR = 'documents';
 
 // ── PDF ─────────────────────────────────────────────────────
 

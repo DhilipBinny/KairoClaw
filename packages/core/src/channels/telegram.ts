@@ -67,6 +67,7 @@ class TelegramChannel implements Channel {
   private readonly db: DatabaseAdapter;
   private readonly tenantId: string;
   private readonly secretsStore?: SecretsStore;
+  private resolvedBotToken: string = '';
 
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string, secretsStore?: SecretsStore) {
     this.config = config;
@@ -84,6 +85,7 @@ class TelegramChannel implements Channel {
     }
 
     this.runner = runner;
+    this.resolvedBotToken = botToken;
     this.bot = new Bot(botToken);
 
     // ── Middleware: record senders for discovery ──
@@ -225,10 +227,22 @@ class TelegramChannel implements Channel {
       const localPath = await this.downloadFile(doc.file_id, doc.file_name || 'document');
       const caption = ctx.message.caption || '';
       const workspace = this.config.agent.workspace;
-      const text = localPath
-        ? `[Document "${doc.file_name}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
-        : caption || '[Document received but download failed]';
-      await this.handleMessage(ctx, text);
+
+      if (!localPath) {
+        await this.handleMessage(ctx, caption || '[Document received but download failed]');
+        return;
+      }
+
+      // Generate smart file preview — small files inline, large files get metadata + sample
+      try {
+        const { generateFilePreview } = await import('../media/file-preview.js');
+        const preview = await generateFilePreview(localPath, doc.file_name || 'document');
+        const text = caption ? `${preview}\n\nUser message: ${caption}` : preview;
+        await this.handleMessage(ctx, text);
+      } catch {
+        const text = `[Document "${doc.file_name}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim();
+        await this.handleMessage(ctx, text);
+      }
     });
 
     // ── Voice messages ───────────────────────────
@@ -609,7 +623,7 @@ class TelegramChannel implements Channel {
       const filePath = file.file_path;
       if (!filePath) return null;
 
-      const token = this.config.channels.telegram.botToken;
+      const token = this.resolvedBotToken;
       const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) return null;
@@ -641,7 +655,7 @@ class TelegramChannel implements Channel {
       const filePath = file.file_path;
       if (!filePath) return null;
 
-      const token = this.config.channels.telegram.botToken;
+      const token = this.resolvedBotToken;
       const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
       const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
       if (!res.ok) return null;
