@@ -34,6 +34,9 @@ jobs:
       - name: Deploy stack
         run: docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
 
+      - name: Force service update
+        run: docker service update --force kairoclaw_kairoclaw
+
       - name: Cleanup previous image
         run: docker rmi kairoclaw:prev 2>/dev/null || true
 
