@@ -90,6 +90,20 @@ async function main(): Promise<void> {
   const migrationsDir = path.join(__dirname, 'db', 'migrations');
   runMigrations(db, migrationsDir);
 
+  // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
+  try {
+    const orphaned = db.query<{ id: string }>('SELECT id FROM sessions WHERE channel = ?', ['internal']);
+    if (orphaned.length > 0) {
+      for (const { id } of orphaned) {
+        db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
+        db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
+        db.run('DELETE FROM messages WHERE session_id = ?', [id]);
+        db.run('DELETE FROM sessions WHERE id = ?', [id]);
+      }
+      console.log(`  Cleaned ${orphaned.length} orphaned internal sessions`);
+    }
+  } catch { /* non-critical */ }
+
   // 4. Seed database (first run)
   const { apiKey, isFirstRun } = seedDatabase(db);
   if (isFirstRun && apiKey) {
