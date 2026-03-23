@@ -110,7 +110,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
     if (!config.gateway.token) {
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
-    const clientId = `web-${Date.now()}`;
+    let clientId = `web-${Date.now()}`;
     let authAttempts = 0;
     let lastActivity = Date.now();
     let boundSessionKey: string | null = null; // set on first chat.send, immutable after
@@ -186,6 +186,8 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             );
             if (user) {
               authValid = true;
+              // Use stable user ID for scoped memory (not ephemeral clientId)
+              clientId = (user as Record<string, unknown>).id as string || clientId;
             }
           }
           if (authValid) {

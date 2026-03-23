@@ -18,7 +18,7 @@ export const memoryTools: ToolRegistration[] = [
   {
     definition: {
       name: 'memory_search',
-      description: 'Search through memory files (MEMORY.md and memory/*.md) using semantic keyword search. Returns top-N matching snippets with file path, line range, and relevance score.',
+      description: 'Search through memory files (memory/PROFILE.md and memory/sessions/*.md) using semantic keyword search. Returns top-N matching snippets with file path, line range, and relevance score.',
       parameters: {
         type: 'object',
         properties: {
@@ -58,11 +58,11 @@ export const memoryTools: ToolRegistration[] = [
   {
     definition: {
       name: 'memory_read',
-      description: 'Read a memory file from the workspace (MEMORY.md or memory/*.md files).',
+      description: 'Read a memory file from the workspace (memory/PROFILE.md or memory/sessions/*.md).',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Relative path within workspace (e.g., "memory/2026-03-07.md" or "MEMORY.md")' },
+          path: { type: 'string', description: 'Relative path within workspace (e.g., "memory/PROFILE.md" or "memory/sessions/2026-03-23.md")' },
           from: { type: 'number', description: 'Start line (1-indexed)' },
           lines: { type: 'number', description: 'Number of lines to read' },
         },
