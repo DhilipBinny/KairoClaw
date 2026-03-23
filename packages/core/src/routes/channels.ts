@@ -13,6 +13,7 @@ import type { WhatsAppChannelInstance } from '../channels/whatsapp.js';
 import type { GatewayConfig } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
 import type { DatabaseAdapter } from '../db/index.js';
+import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import { requireRole } from '../auth/middleware.js';
 import { setNestedPath } from './utils.js';
 
@@ -101,20 +102,15 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
   app.get('/api/v1/admin/channels/pending-senders', { preHandler: [requireRole('admin')] }, async (request) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
     try {
-      // Pending (rejected) first, then seen (discovered), capped at 50 each
-      const pending = db.query(
-        'SELECT * FROM pending_senders WHERE status = ? ORDER BY last_seen DESC LIMIT 50',
-        ['pending'],
-      );
-      const seen = db.query(
-        'SELECT * FROM pending_senders WHERE status = ? ORDER BY last_seen DESC LIMIT 50',
-        ['seen'],
-      );
-      const totalPending = db.get<{ c: number }>("SELECT COUNT(*) as c FROM pending_senders WHERE status = 'pending'");
-      const totalSeen = db.get<{ c: number }>("SELECT COUNT(*) as c FROM pending_senders WHERE status = 'seen'");
+      const repo = new PendingSenderRepository(db);
+      const pending = repo.listByStatus('pending', 50);
+      const seen = repo.listByStatus('seen', 50);
       return {
-        senders: [...(pending || []), ...(seen || [])],
-        counts: { pending: totalPending?.c ?? 0, seen: totalSeen?.c ?? 0 },
+        senders: [...pending, ...seen],
+        counts: {
+          pending: repo.countAllByStatus('pending'),
+          seen: repo.countAllByStatus('seen'),
+        },
       };
     } catch {
       return { senders: [], counts: { pending: 0, seen: 0 } };
@@ -127,10 +123,8 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
     const { id } = request.params as { id: string };
 
-    const sender = db.get<{ id: number; channel: string; sender_id: string; sender_name: string }>(
-      'SELECT * FROM pending_senders WHERE id = ?',
-      [id],
-    );
+    const repo = new PendingSenderRepository(db);
+    const sender = repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -176,7 +170,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(500).send({ error: 'Failed to update config' });
     }
 
-    db.run('UPDATE pending_senders SET status = ? WHERE id = ?', ['approved', id]);
+    repo.updateStatus(Number(id), 'approved');
     return { success: true };
   });
 
@@ -185,12 +179,13 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
     const { id } = request.params as { id: string };
 
-    const sender = db.get<{ id: number }>('SELECT id FROM pending_senders WHERE id = ?', [id]);
+    const repo = new PendingSenderRepository(db);
+    const sender = repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    db.run('UPDATE pending_senders SET status = ? WHERE id = ?', ['rejected', id]);
+    repo.updateStatus(Number(id), 'rejected');
     return { success: true };
   });
 };
