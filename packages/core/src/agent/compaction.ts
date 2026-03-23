@@ -67,18 +67,18 @@ export interface CompactionCheck {
 }
 
 /** Check whether a session's context is large enough to warrant compaction. */
-export function needsCompaction(
+export async function needsCompaction(
   sessionId: string,
   modelId: string,
   db: DatabaseAdapter,
   config: GatewayConfig,
-): CompactionCheck {
+): Promise<CompactionCheck> {
   const caps = getModelCapabilities(modelId, config);
   const contextWindow = caps.contextWindow;
   const compactionThreshold = config.agent?.compactionThreshold ?? 0.75;
 
   const messageRepo = new MessageRepository(db);
-  const messages = messageRepo.listBySession(sessionId);
+  const messages = await messageRepo.listBySession(sessionId);
   const tokens = estimateMessageTokens(messages);
   const threshold = contextWindow * compactionThreshold;
 
@@ -255,7 +255,7 @@ async function compactSession(
 ): Promise<CompactionResult> {
   const keepRecentMessages = config.agent?.keepRecentMessages ?? 10;
   const messageRepo = new MessageRepository(db);
-  const messages = messageRepo.listBySession(sessionId);
+  const messages = await messageRepo.listBySession(sessionId);
 
   if (messages.length <= keepRecentMessages + 2) {
     return { compacted: false, reason: 'Not enough messages to compact' };
@@ -290,11 +290,11 @@ async function compactSession(
 
   // Delete all messages and re-insert compacted set WITHIN A TRANSACTION
   // to prevent data loss if re-insert fails partway through
-  db.transaction(() => {
-    messageRepo.deleteBySession(sessionId);
+  await db.transaction(async () => {
+    await messageRepo.deleteBySession(sessionId);
 
     // Insert compacted summary as a system message
-    messageRepo.create({
+    await messageRepo.create({
       sessionId,
       tenantId,
       role: 'system',
@@ -308,7 +308,7 @@ async function compactSession(
 
     // Re-insert recent messages
     for (const msg of recentMessages) {
-      messageRepo.create({
+      await messageRepo.create({
         sessionId,
         tenantId,
         role: msg.role,
@@ -320,7 +320,7 @@ async function compactSession(
     }
   });
 
-  const newMessages = messageRepo.listBySession(sessionId);
+  const newMessages = await messageRepo.listBySession(sessionId);
   const newTokens = estimateMessageTokens(newMessages);
   const tokensSaved = oldTokens - newTokens;
 
@@ -365,13 +365,13 @@ export async function checkAndCompact(
   callLLM?: CallLLMFn,
   tenantId?: string,
 ): Promise<CompactionResult> {
-  const check = needsCompaction(sessionId, modelId, db, config);
+  const check = await needsCompaction(sessionId, modelId, db, config);
   if (check.needed) {
     // Use provided tenantId, or fall back to inferring from first message
     let resolvedTenantId = tenantId;
     if (!resolvedTenantId) {
       const messageRepo = new MessageRepository(db);
-      const firstMsg = messageRepo.listBySession(sessionId, 1);
+      const firstMsg = await messageRepo.listBySession(sessionId, 1);
       resolvedTenantId = firstMsg[0]?.tenant_id ?? 'default';
     }
 

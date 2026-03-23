@@ -10,19 +10,19 @@ import { ToolPermissionRepository } from '../db/repositories/tool-permission.js'
  * exist for the tenant/role, the default is 'allow' (open by default
  * for single-user setups).
  */
-export function checkToolPermission(
+export async function checkToolPermission(
   toolName: string,
   userRole: string,
   db: DatabaseAdapter,
   tenantId: string,
-): ToolPermissionLevel {
+): Promise<ToolPermissionLevel> {
   const repo = new ToolPermissionRepository(db);
-  const permissions = repo.listByTenantAndRole(tenantId, userRole);
+  const permissions = await repo.listByTenantAndRole(tenantId, userRole);
 
   // If no permission rules are configured, default to allow
   if (permissions.length === 0) {
     return 'allow';
   }
 
-  return repo.checkPermission(tenantId, userRole, toolName);
+  return await repo.checkPermission(tenantId, userRole, toolName);
 }

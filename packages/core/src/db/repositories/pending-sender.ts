@@ -15,25 +15,25 @@ export class PendingSenderRepository {
   constructor(private db: DatabaseAdapter) {}
 
   /** Find a sender by channel + sender_id with specific statuses. */
-  findBySenderId(channel: string, senderId: string, statuses: string[]): PendingSenderRow | undefined {
+  async findBySenderId(channel: string, senderId: string, statuses: string[]): Promise<PendingSenderRow | undefined> {
     const placeholders = statuses.map(() => '?').join(',');
-    return this.db.get<PendingSenderRow>(
+    return await this.db.get<PendingSenderRow>(
       `SELECT * FROM pending_senders WHERE channel = ? AND sender_id = ? AND status IN (${placeholders})`,
       [channel, senderId, ...statuses],
     );
   }
 
   /** Update last_seen, message_count, and optionally sender_name for matching rows. */
-  updateActivity(channel: string, senderId: string, senderName: string | null, statuses: string[]): void {
+  async updateActivity(channel: string, senderId: string, senderName: string | null, statuses: string[]): Promise<void> {
     const now = new Date().toISOString();
     const placeholders = statuses.map(() => '?').join(',');
     if (senderName !== null) {
-      this.db.run(
+      await this.db.run(
         `UPDATE pending_senders SET sender_name = ?, last_seen = ?, message_count = message_count + 1 WHERE channel = ? AND sender_id = ? AND status IN (${placeholders})`,
         [senderName, now, channel, senderId, ...statuses],
       );
     } else {
-      this.db.run(
+      await this.db.run(
         `UPDATE pending_senders SET last_seen = ?, message_count = message_count + 1 WHERE channel = ? AND sender_id = ? AND status IN (${placeholders})`,
         [now, channel, senderId, ...statuses],
       );
@@ -41,8 +41,8 @@ export class PendingSenderRepository {
   }
 
   /** Count senders by channel and status. */
-  countByStatus(channel: string, status: string): number {
-    const row = this.db.get<{ c: number }>(
+  async countByStatus(channel: string, status: string): Promise<number> {
+    const row = await this.db.get<{ c: number }>(
       'SELECT COUNT(*) as c FROM pending_senders WHERE channel = ? AND status = ?',
       [channel, status],
     );
@@ -50,8 +50,8 @@ export class PendingSenderRepository {
   }
 
   /** Count all senders with a given status (across all channels). */
-  countAllByStatus(status: string): number {
-    const row = this.db.get<{ c: number }>(
+  async countAllByStatus(status: string): Promise<number> {
+    const row = await this.db.get<{ c: number }>(
       'SELECT COUNT(*) as c FROM pending_senders WHERE status = ?',
       [status],
     );
@@ -59,16 +59,16 @@ export class PendingSenderRepository {
   }
 
   /** Delete the oldest entry by last_seen for a given channel and status. */
-  evictOldest(channel: string, status: string): void {
-    this.db.run(
+  async evictOldest(channel: string, status: string): Promise<void> {
+    await this.db.run(
       'DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = ? AND status = ? ORDER BY last_seen ASC LIMIT 1)',
       [channel, status],
     );
   }
 
   /** Evict entries over a cap for a given channel and status. */
-  evictOverCap(channel: string, status: string, cap: number): void {
-    this.db.run(
+  async evictOverCap(channel: string, status: string, cap: number): Promise<void> {
+    await this.db.run(
       `DELETE FROM pending_senders WHERE id IN (
         SELECT id FROM pending_senders WHERE channel = ? AND status = ?
         ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = ? AND status = ?) - ?)
@@ -78,18 +78,18 @@ export class PendingSenderRepository {
   }
 
   /** Insert a new pending sender. */
-  insert(channel: string, senderId: string, senderName: string, status: string): void {
+  async insert(channel: string, senderId: string, senderName: string, status: string): Promise<void> {
     const now = new Date().toISOString();
-    this.db.run(
+    await this.db.run(
       'INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, ?, ?, 1, ?)',
       [channel, senderId, senderName, now, now, status],
     );
   }
 
   /** Upsert: insert or update if exists (for pending/rejection tracking). */
-  upsert(channel: string, senderId: string, senderName: string, status: string): void {
+  async upsert(channel: string, senderId: string, senderName: string, status: string): Promise<void> {
     const now = new Date().toISOString();
-    this.db.run(
+    await this.db.run(
       `INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
        VALUES (?, ?, ?, ?, ?, 1, ?)
        ON CONFLICT(channel, sender_id) DO UPDATE SET
@@ -102,24 +102,24 @@ export class PendingSenderRepository {
   }
 
   /** List senders by status, ordered by last_seen DESC. */
-  listByStatus(status: string, limit = 50): PendingSenderRow[] {
-    return this.db.query<PendingSenderRow>(
+  async listByStatus(status: string, limit = 50): Promise<PendingSenderRow[]> {
+    return await this.db.query<PendingSenderRow>(
       'SELECT * FROM pending_senders WHERE status = ? ORDER BY last_seen DESC LIMIT ?',
       [status, limit],
     );
   }
 
   /** Get a sender by id. */
-  getById(id: number | string): PendingSenderRow | undefined {
-    return this.db.get<PendingSenderRow>(
+  async getById(id: number | string): Promise<PendingSenderRow | undefined> {
+    return await this.db.get<PendingSenderRow>(
       'SELECT * FROM pending_senders WHERE id = ?',
       [id],
     );
   }
 
   /** Update status (approve/reject). */
-  updateStatus(id: number | string, status: string): void {
-    this.db.run('UPDATE pending_senders SET status = ? WHERE id = ?', [status, id]);
+  async updateStatus(id: number | string, status: string): Promise<void> {
+    await this.db.run('UPDATE pending_senders SET status = ? WHERE id = ?', [status, id]);
   }
 
   /**
@@ -128,16 +128,16 @@ export class PendingSenderRepository {
    * - If sender exists with matching status, update activity
    * - If not, check cap, evict oldest if needed, insert new
    */
-  recordSighting(channel: string, senderId: string, senderName: string, status: string, cap: number): void {
-    const existing = this.findBySenderId(channel, senderId, [status]);
+  async recordSighting(channel: string, senderId: string, senderName: string, status: string, cap: number): Promise<void> {
+    const existing = await this.findBySenderId(channel, senderId, [status]);
     if (existing) {
-      this.updateActivity(channel, senderId, senderName, [status]);
+      await this.updateActivity(channel, senderId, senderName, [status]);
     } else {
-      const count = this.countByStatus(channel, status);
+      const count = await this.countByStatus(channel, status);
       if (count >= cap) {
-        this.evictOldest(channel, status);
+        await this.evictOldest(channel, status);
       }
-      this.insert(channel, senderId, senderName, status);
+      await this.insert(channel, senderId, senderName, status);
     }
   }
 
@@ -146,22 +146,22 @@ export class PendingSenderRepository {
    * Checks resolved (approved/rejected) first, skips if found.
    * Then checks existing seen/pending, updates or inserts with cap.
    */
-  recordWithResolutionCheck(
+  async recordWithResolutionCheck(
     channel: string, senderId: string, senderName: string, status: 'seen' | 'pending', cap: number,
-  ): void {
+  ): Promise<void> {
     // Skip if already resolved
-    const resolved = this.findBySenderId(channel, senderId, ['approved', 'rejected']);
+    const resolved = await this.findBySenderId(channel, senderId, ['approved', 'rejected']);
     if (resolved) return;
 
-    const existing = this.findBySenderId(channel, senderId, ['seen', 'pending']);
+    const existing = await this.findBySenderId(channel, senderId, ['seen', 'pending']);
     if (existing) {
-      this.updateActivity(channel, senderId, senderName, ['seen', 'pending']);
+      await this.updateActivity(channel, senderId, senderName, ['seen', 'pending']);
     } else {
-      const count = this.countByStatus(channel, status);
+      const count = await this.countByStatus(channel, status);
       if (count >= cap) {
-        this.evictOldest(channel, status);
+        await this.evictOldest(channel, status);
       }
-      this.insert(channel, senderId, senderName, status);
+      await this.insert(channel, senderId, senderName, status);
     }
   }
 }

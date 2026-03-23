@@ -22,8 +22,8 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
     // First-run detection: only 1 user (the seeded admin) and no active sessions
     let firstRun = false;
     try {
-      const userCount = db.get<{ count: number }>('SELECT COUNT(*) as count FROM users');
-      const sessionCount = db.get<{ count: number }>('SELECT COUNT(*) as count FROM sessions');
+      const userCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM users');
+      const sessionCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM sessions');
       firstRun = (userCount?.count ?? 0) <= 1 && (sessionCount?.count ?? 0) === 0;
     } catch { /* non-critical */ }
 

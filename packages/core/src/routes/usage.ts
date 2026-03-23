@@ -10,6 +10,6 @@ export const registerUsageRoutes: FastifyPluginAsync = async (app) => {
     const tenantId = request.tenantId || 'default';
     const days = parseInt((request.query as any)?.days || '30');
     const repo = new UsageRepository(db);
-    return repo.summarizeByTenant(tenantId, days);
+    return await repo.summarizeByTenant(tenantId, days);
   });
 };

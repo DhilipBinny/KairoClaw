@@ -66,7 +66,7 @@ export async function autoSummarizeToMemory(opts: {
   }
 
   try {
-    const messages = messageRepo.listBySession(sessionId);
+    const messages = await messageRepo.listBySession(sessionId);
     const userMessages = messages.filter(m => m.role === 'user');
 
     if (userMessages.length < minTurns) return;

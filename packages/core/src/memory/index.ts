@@ -57,9 +57,9 @@ export class MemorySystem {
    * Initialize the memory system: index existing files and start watchers.
    * The memory_chunks table is created via migration 002_memory_chunks.sql.
    */
-  init(): void {
+  async init(): Promise<void> {
     try {
-      this.indexAllFiles();
+      await this.indexAllFiles();
       this.startWatcher();
       this.initialized = true;
       log.info('Memory system initialized');
@@ -74,7 +74,7 @@ export class MemorySystem {
    * Returns top-N results ranked by term frequency with bonuses for
    * heading matches and exact phrase matches.
    */
-  search(query: string, topN = 5): MemoryChunk[] {
+  async search(query: string, topN = 5): Promise<MemoryChunk[]> {
     if (!this.initialized) return [];
 
     const queryTerms = query
@@ -89,7 +89,7 @@ export class MemorySystem {
       const likeConditions = queryTerms.map(() => 'content LIKE ?');
       const likeParams = queryTerms.map((t) => `%${t}%`);
       const whereClause = likeConditions.length > 0 ? `WHERE ${likeConditions.join(' OR ')}` : '';
-      const allChunks = this.db.query<ChunkRow>(
+      const allChunks = await this.db.query<ChunkRow>(
         `SELECT * FROM memory_chunks ${whereClause} ORDER BY updated_at DESC`,
         likeParams,
       );
@@ -144,16 +144,16 @@ export class MemorySystem {
   /**
    * Get memory system statistics.
    */
-  getStats(): MemoryStats {
+  async getStats(): Promise<MemoryStats> {
     if (!this.initialized) {
       return { initialized: false, totalChunks: 0, indexedFiles: 0, files: [] };
     }
 
     try {
-      const chunkCount = this.db.get<{ count: number }>(
+      const chunkCount = await this.db.get<{ count: number }>(
         'SELECT COUNT(*) as count FROM memory_chunks',
       );
-      const fileRows = this.db.query<{ file_path: string }>(
+      const fileRows = await this.db.query<{ file_path: string }>(
         'SELECT DISTINCT file_path FROM memory_chunks',
       );
       return {
@@ -171,8 +171,8 @@ export class MemorySystem {
   /**
    * Re-index all memory files from scratch.
    */
-  reindex(): void {
-    this.indexAllFiles();
+  async reindex(): Promise<void> {
+    await this.indexAllFiles();
     log.info('Memory re-indexed');
   }
 
@@ -287,7 +287,7 @@ export class MemorySystem {
   /**
    * Index a single file: delete old chunks and insert new ones.
    */
-  private indexFile(filePath: string): void {
+  private async indexFile(filePath: string): Promise<void> {
     try {
       const relativePath = path.relative(this.workspace, filePath);
       const now = new Date().toISOString();
@@ -295,11 +295,11 @@ export class MemorySystem {
       // Chunk and insert
       const chunks = this.chunkFile(filePath);
 
-      this.db.transaction(() => {
+      await this.db.transaction(async () => {
         // Delete old chunks for this file (inside transaction)
-        this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
+        await this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
         for (const chunk of chunks) {
-          this.db.run(
+          await this.db.run(
             'INSERT INTO memory_chunks (file_path, line_start, line_end, content, updated_at) VALUES (?, ?, ?, ?, ?)',
             [relativePath, chunk.lineStart, chunk.lineEnd, chunk.content, now],
           );
@@ -315,10 +315,10 @@ export class MemorySystem {
   /**
    * Index all discovered memory files.
    */
-  private indexAllFiles(): void {
+  private async indexAllFiles(): Promise<void> {
     const files = this.getMemoryFiles();
     for (const file of files) {
-      this.indexFile(file);
+      await this.indexFile(file);
     }
     log.info({ files: files.length }, 'Memory files indexed');
   }
@@ -343,23 +343,23 @@ export class MemorySystem {
           const debounceKey = filename ? path.join(watchPath, filename) : watchPath;
           const existing = this._debounceTimers.get(debounceKey);
           if (existing) clearTimeout(existing);
-          this._debounceTimers.set(debounceKey, setTimeout(() => {
+          this._debounceTimers.set(debounceKey, setTimeout(async () => {
             this._debounceTimers.delete(debounceKey);
             if (filename && filename.endsWith('.md')) {
               const isDir = fs.statSync(watchPath, { throwIfNoEntry: false })?.isDirectory();
               const fullPath = isDir ? path.join(watchPath, filename) : watchPath;
               if (fs.existsSync(fullPath)) {
-                this.indexFile(fullPath);
+                await this.indexFile(fullPath);
               } else {
                 // File was deleted — remove its chunks from the DB
                 const relativePath = path.relative(this.workspace, fullPath);
-                this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
+                await this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [relativePath]);
                 log.debug({ file: relativePath }, 'Deleted memory file chunks');
               }
             } else if (!filename) {
               // Directory-level change with no filename — re-index if the watched path is a file
               if (fs.existsSync(watchPath) && watchPath.endsWith('.md')) {
-                this.indexFile(watchPath);
+                await this.indexFile(watchPath);
               }
             }
           }, 500));

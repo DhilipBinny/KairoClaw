@@ -268,15 +268,15 @@ class WhatsAppChannel implements Channel {
       if (!cfg.allowFrom.includes(senderPhone)) {
         log.warn({ senderPhone }, 'WhatsApp: sender not in allowFrom list — rejected');
         try {
-          this.pendingSenders.evictOverCap('whatsapp', 'pending', PENDING_PENDING_CAP);
-          this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
+          await this.pendingSenders.evictOverCap('whatsapp', 'pending', PENDING_PENDING_CAP);
+          await this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
         } catch { /* non-critical */ }
         return;
       }
     } else if (!isGroup) {
       // No allowlist — record sender as 'seen' for onboarding (capped budget)
       try {
-        this.pendingSenders.recordSighting('whatsapp', senderPhone, waSenderName, 'seen', PENDING_SEEN_CAP);
+        await this.pendingSenders.recordSighting('whatsapp', senderPhone, waSenderName, 'seen', PENDING_SEEN_CAP);
       } catch { /* non-critical */ }
     }
 
@@ -292,7 +292,7 @@ class WhatsAppChannel implements Channel {
       try {
         const status = hasGroupAllowlist ? 'pending' : 'seen';
         const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
-        this.pendingSenders.recordWithResolutionCheck('whatsapp', jid, jid, status, cap);
+        await this.pendingSenders.recordWithResolutionCheck('whatsapp', jid, jid, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist
@@ -359,9 +359,9 @@ class WhatsAppChannel implements Channel {
           log.debug({ senderPhone, jid }, 'WhatsApp: group sender not in allowFrom — ignored');
           // Record as pending for admin approval
           try {
-            const resolved = this.pendingSenders.findBySenderId('whatsapp', senderPhone, ['approved', 'rejected']);
+            const resolved = await this.pendingSenders.findBySenderId('whatsapp', senderPhone, ['approved', 'rejected']);
             if (!resolved) {
-              this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
+              await this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
             }
           } catch { /* non-critical */ }
           return;

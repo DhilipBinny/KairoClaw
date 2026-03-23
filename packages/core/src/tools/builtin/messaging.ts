@@ -351,11 +351,11 @@ IMPORTANT delivery rules:
             }
 
             // Outbound policy check — validate targets are reachable
-            const checkOutbound = ctx.checkOutboundAllowed as ((channel: 'whatsapp' | 'telegram', recipient: string) => { allowed: boolean; reason?: string }) | undefined;
+            const checkOutbound = ctx.checkOutboundAllowed as ((channel: 'whatsapp' | 'telegram', recipient: string) => Promise<{ allowed: boolean; reason?: string }>) | undefined;
             if (checkOutbound) {
               for (const target of targets) {
                 if ((target.channel === 'whatsapp' || target.channel === 'telegram') && target.to) {
-                  const check = checkOutbound(target.channel, target.to);
+                  const check = await checkOutbound(target.channel, target.to);
                   if (!check.allowed) {
                     return { error: `Cannot deliver to ${target.channel} target "${target.to}": ${check.reason}` };
                   }
