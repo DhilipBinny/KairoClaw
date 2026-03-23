@@ -5,9 +5,7 @@ name: CI
 
 on:
   push:
-    branches: [main, deploy/railway]
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
