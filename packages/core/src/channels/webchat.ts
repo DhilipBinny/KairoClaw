@@ -387,9 +387,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // ── Session list ─────────────────────
           case 'sessions.list': {
             const sessions = sessionRepo.listByTenant(tenantId, 100);
-            // Filter to sessions with actual messages, sorted by most recent
+            // Filter out internal/cron sessions, keep only sessions with actual messages
             const list = sessions
-              .filter((s) => s.turns > 0)
+              .filter((s) => s.turns > 0 && s.channel !== 'internal' && s.channel !== 'cron')
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
                 // Extract session key from chat_id (e.g., "web:main" → "main")
