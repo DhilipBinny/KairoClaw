@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   turns INTEGER NOT NULL DEFAULT 0,
   metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
+  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
   expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id);
