@@ -4,7 +4,7 @@ export interface DatabaseAdapter {
   run(sql: string, params?: unknown[]): Promise<{ changes: number; lastInsertRowid: number | bigint }>;
   transaction<T>(fn: () => T | Promise<T>): Promise<T>;
   pragma(statement: string): unknown;
-  close(): void;
+  close(): void | Promise<void>;
   backup(path: string): void | Promise<void>;
 }
 

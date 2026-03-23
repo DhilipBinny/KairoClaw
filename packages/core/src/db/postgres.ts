@@ -98,8 +98,8 @@ export class PostgresAdapter implements DatabaseAdapter {
     return undefined;
   }
 
-  close(): void {
-    this.pool.end().catch(() => {});
+  async close(): Promise<void> {
+    await this.pool.end();
   }
 
   async backup(_path: string): Promise<void> {

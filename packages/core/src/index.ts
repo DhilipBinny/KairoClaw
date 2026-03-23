@@ -656,7 +656,7 @@ async function main(): Promise<void> {
     await server.close();
 
     // Close database
-    db.close();
+    await db.close();
 
     process.exit(0);
   };
