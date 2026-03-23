@@ -821,13 +821,12 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
               }
             }
 
-            // Remove the archive's master.key — this deployment uses its own
+            // Replace archive's master.key with this deployment's key
             if (reEncrypted && fs.existsSync(importedKeyPath)) {
-              const localKeyBuf = localKey;
               const archiveKeyBuf = fs.readFileSync(importedKeyPath);
-              if (!localKeyBuf.equals(archiveKeyBuf)) {
+              if (!localKey.every((b, i) => b === archiveKeyBuf[i]) || localKey.length !== archiveKeyBuf.length) {
                 fs.unlinkSync(importedKeyPath);
-                fs.writeFileSync(importedKeyPath, localKeyBuf, { mode: 0o600 });
+                fs.writeFileSync(importedKeyPath, new Uint8Array(localKey.buffer, localKey.byteOffset, localKey.byteLength), { mode: 0o600 });
               }
             }
           }
