@@ -13,13 +13,14 @@ COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
 RUN pnpm install
 
-# Stage 2: Build
+# Stage 2: Lint + Build (lint catches bugs, build catches type errors)
 FROM deps AS build
-COPY tsconfig.base.json ./
+COPY tsconfig.base.json eslint.config.js ./
 COPY packages/types/ packages/types/
 COPY packages/core/ packages/core/
 COPY packages/ui/ packages/ui/
-RUN pnpm --filter @agw/types build && \
+RUN pnpm lint && \
+    pnpm --filter @agw/types build && \
     pnpm --filter @agw/core build && \
     mkdir -p packages/core/dist/db/migrations && \
     cp packages/core/src/db/migrations/*.sql packages/core/dist/db/migrations/ && \

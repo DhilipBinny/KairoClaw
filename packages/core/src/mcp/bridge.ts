@@ -5,7 +5,6 @@ import type {
   MCPBridgeStatus,
   MCPServerConfig,
   MCPServerStatus,
-  MCPTransportType,
   JSONSchemaProperty,
 } from '@agw/types';
 import { MCPClient } from './client.js';

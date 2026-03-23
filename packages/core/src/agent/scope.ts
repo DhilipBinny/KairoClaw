@@ -32,7 +32,7 @@ export function deriveScopeKey(
   if (!id || id === 'system' || id === 'anonymous') return null;
 
   // Prevent path traversal — reject any id containing path separators or traversal sequences
-  if (/[\/\\]|\.\./.test(id) || /[\/\\]|\.\./.test(channel)) return null;
+  if (/[/\\]|\.\./.test(id) || /[/\\]|\.\./.test(channel)) return null;
 
   return `${channel}:${id}`;
 }

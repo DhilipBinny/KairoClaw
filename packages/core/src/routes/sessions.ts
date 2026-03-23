@@ -9,7 +9,6 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const tenantId = request.tenantId || 'default';
     const repo = new SessionRepository(db);
-    const messageRepo = new MessageRepository(db);
     const limit = parseInt((request.query as any)?.limit || '50');
     let sessions = repo.listByTenant(tenantId, limit);
 
