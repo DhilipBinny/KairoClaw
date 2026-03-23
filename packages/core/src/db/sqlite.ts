@@ -27,8 +27,18 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async transaction<T>(fn: () => T | Promise<T>): Promise<T> {
-    // better-sqlite3 transactions are synchronous — fn must be sync
-    return this.db.transaction(fn as () => T)();
+    // better-sqlite3 transactions are synchronous, but fn may be async
+    // (all db calls resolve immediately for SQLite, so await is safe).
+    // Use BEGIN/COMMIT/ROLLBACK manually to support async callbacks.
+    this.db.prepare('BEGIN').run();
+    try {
+      const result = await fn();
+      this.db.prepare('COMMIT').run();
+      return result;
+    } catch (e) {
+      this.db.prepare('ROLLBACK').run();
+      throw e;
+    }
   }
 
   pragma(statement: string): unknown {
