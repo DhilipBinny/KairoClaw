@@ -26,7 +26,7 @@ export class MessageRepository {
   }): MessageRow {
     const now = new Date().toISOString();
 
-    const result = this.db.run(
+    this.db.run(
       `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, metadata, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -41,7 +41,11 @@ export class MessageRepository {
       ],
     );
 
-    return this.db.get<MessageRow>('SELECT * FROM messages WHERE id = ?', [result.lastInsertRowid])!;
+    // Use RETURNING-compatible lookup: get the latest message we just inserted
+    return this.db.get<MessageRow>(
+      'SELECT * FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1',
+      [msg.sessionId, msg.role],
+    )!;
   }
 
   listBySession(sessionId: string, limit?: number, offset?: number): MessageRow[] {
@@ -54,7 +58,7 @@ export class MessageRepository {
     }
     if (offset !== undefined) {
       if (limit === undefined) {
-        sql += ' LIMIT -1';
+        sql += ' LIMIT 2147483647'; // max int, compatible with both SQLite and PostgreSQL
       }
       sql += ' OFFSET ?';
       params.push(offset);
@@ -81,5 +85,15 @@ export class MessageRepository {
 
   deleteBySession(sessionId: string): void {
     this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
+  }
+
+  /** Delete a single message by id. */
+  deleteById(id: number): void {
+    this.db.run('DELETE FROM messages WHERE id = ?', [id]);
+  }
+
+  /** Delete a message and all subsequent messages in the same session (for context cleanup). */
+  deleteFromId(sessionId: string, fromId: number): void {
+    this.db.run('DELETE FROM messages WHERE session_id = ? AND id >= ?', [sessionId, fromId]);
   }
 }

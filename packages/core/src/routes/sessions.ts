@@ -104,6 +104,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const { id, messageId } = request.params as { id: string; messageId: string };
     const sessionRepo = new SessionRepository(db);
+    const messageRepo = new MessageRepository(db);
 
     const session = sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
@@ -117,11 +118,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const msgId = parseInt(messageId);
     if (isNaN(msgId)) return reply.code(400).send({ error: 'Invalid message ID' });
 
-    db.run('DELETE FROM messages WHERE session_id = ? AND id >= ?', [id, msgId]);
+    messageRepo.deleteFromId(id, msgId);
 
     // Update session turn count
-    const count = db.get<{ c: number }>('SELECT COUNT(*) as c FROM messages WHERE session_id = ? AND role = ?', [id, 'user']);
-    db.run('UPDATE sessions SET turns = ?, updated_at = ? WHERE id = ?', [count?.c || 0, new Date().toISOString(), id]);
+    const turns = sessionRepo.countUserTurns(id);
+    db.run('UPDATE sessions SET turns = ?, updated_at = ? WHERE id = ?', [turns, new Date().toISOString(), id]);
 
     return { success: true };
   });
@@ -131,7 +132,6 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
-    const messageRepo = new MessageRepository(db);
 
     const session = sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
@@ -141,11 +141,8 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
-    // Delete all child records before the session (usage_records lacks ON DELETE CASCADE)
-    db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
-    db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
-    messageRepo.deleteBySession(id);
-    sessionRepo.delete(id);
+    // Delete session and all child records
+    sessionRepo.deleteWithCascade(id);
     // TODO: clean up scoped memory entries related to this session's date
     return { success: true };
   });

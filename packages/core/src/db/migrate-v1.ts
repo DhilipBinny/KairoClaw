@@ -89,8 +89,8 @@ export function migrateV1Data(
         for (const [key, session] of Object.entries(store)) {
           const sessionId = session.sessionId || key;
           db.run(
-            `INSERT OR IGNORE INTO sessions (id, tenant_id, channel, chat_id, model, input_tokens, output_tokens, turns, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO sessions (id, tenant_id, channel, chat_id, model, input_tokens, output_tokens, turns, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
             [
               sessionId,
               tenantId,
@@ -133,8 +133,8 @@ export function migrateV1Data(
         );
         if (!sessionExists) {
           db.run(
-            `INSERT OR IGNORE INTO sessions (id, tenant_id, channel, chat_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO sessions (id, tenant_id, channel, chat_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
             [sessionId, tenantId, 'web', sessionId, new Date().toISOString(), new Date().toISOString()],
           );
         }

@@ -261,14 +261,14 @@ export async function runAgent(
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           reqLog.error({ err: retryMsg }, 'LLM call failed after compaction');
           if (userMsgResult?.id) {
-            try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+            try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
           }
           return { text: 'Something went wrong processing your request. Please try again.', error: true };
         }
       } else {
         reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
         if (userMsgResult?.id) {
-          try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+          try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
         }
         return { text: 'Something went wrong processing your request. Please try again.', error: true };
       }

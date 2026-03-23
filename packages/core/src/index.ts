@@ -93,15 +93,10 @@ async function main(): Promise<void> {
 
   // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
   try {
-    const orphaned = db.query<{ id: string }>('SELECT id FROM sessions WHERE channel = ?', ['internal']);
-    if (orphaned.length > 0) {
-      for (const { id } of orphaned) {
-        db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
-        db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
-        db.run('DELETE FROM messages WHERE session_id = ?', [id]);
-        db.run('DELETE FROM sessions WHERE id = ?', [id]);
-      }
-      console.log(`  Cleaned ${orphaned.length} orphaned internal sessions`);
+    const sessionRepo = new SessionRepository(db);
+    const cleaned = sessionRepo.cleanupOrphans();
+    if (cleaned > 0) {
+      console.log(`  Cleaned ${cleaned} orphaned internal sessions`);
     }
   } catch { /* non-critical */ }
 
