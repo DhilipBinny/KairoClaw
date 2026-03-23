@@ -22,6 +22,7 @@
   let sessions: SessionRow[] = $state([]);
   let loading = $state(true);
   let searchQuery = $state('');
+  let channelFilter = $state('all');
   let confirmDeleteId = $state<string | null>(null);
   let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedSession: string | null = $state(null);
@@ -29,13 +30,17 @@
   let loadingMessages = $state(false);
   let deleteInProgress = $state('');
 
+  let channels = $derived([...new Set(sessions.map(s => s.channel))].sort());
+
   let filteredSessions = $derived(
-    searchQuery
-      ? sessions.filter((s) =>
-          s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          s.channel.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      : sessions
+    sessions.filter((s) => {
+      if (channelFilter !== 'all' && s.channel !== channelFilter) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q);
+      }
+      return true;
+    })
   );
 
   async function loadSessions() {
@@ -127,6 +132,12 @@
           placeholder="Search sessions..."
           bind:value={searchQuery}
         />
+        <select class="channel-filter" bind:value={channelFilter}>
+          <option value="all">All channels</option>
+          {#each channels as ch}
+            <option value={ch}>{ch}</option>
+          {/each}
+        </select>
       </div>
 
       {#if loading}
@@ -240,6 +251,9 @@
   }
   .search-bar {
     margin-bottom: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
     position: relative;
   }
   .search-icon {
@@ -252,6 +266,22 @@
   }
   .search-input {
     padding-left: 36px;
+    flex: 1;
+    min-width: 0;
+  }
+  .channel-filter {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 13px;
+    padding: 7px 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .channel-filter:focus {
+    outline: none;
+    border-color: var(--accent);
   }
   .sessions-list {
     flex: 1;
