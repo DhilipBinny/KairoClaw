@@ -112,37 +112,6 @@ export interface MCPEnvVarSpec {
 }
 
 /**
- * An entry in the curated MCP marketplace catalog.
- *
- * These are pre-configured server definitions that users can install
- * with a single click from the admin UI.
- */
-export interface MCPCatalogEntry {
-  /** Display name. */
-  name: string;
-  /** Short description of what the server provides. */
-  description: string;
-  /** npm package name. */
-  package: string;
-  /** Transport protocol. */
-  transport: MCPTransportType;
-  /** Command to spawn. */
-  command: string;
-  /** Command arguments (may contain `${VAR}` references). */
-  args: string[];
-  /** Environment variable mappings for the server process. */
-  env: Record<string, string>;
-  /** Environment variable keys the user must configure. */
-  envKeys: string[];
-  /** Rich env var specifications with labels, sensitivity, etc. */
-  envVars?: MCPEnvVarSpec[];
-  /** UI category for grouping. */
-  category: string;
-  /** Emoji icon for the UI. */
-  icon: string;
-}
-
-/**
  * Aggregated status of the MCP bridge.
  *
  * Returned by `MCPBridge.getStatus()`.

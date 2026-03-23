@@ -282,9 +282,6 @@ export async function updateMCPServer(id: string, data: { env?: Record<string, s
   return request(`/mcp/servers/${id}`, { method: 'PATCH', body: data });
 }
 
-export async function getMCPCatalog(): Promise<{ catalog: Array<{ id: string; name: string; description: string; transport: string; installed: boolean; enabled: boolean }> }> {
-  return request('/mcp/catalog');
-}
 
 export async function searchMCPMarketplace(search: string, limit = 20): Promise<{ servers: Array<{ id: string; name: string; description: string; qualifiedName: string }> }> {
   return request(`/mcp/marketplace?search=${encodeURIComponent(search)}&limit=${limit}`);
