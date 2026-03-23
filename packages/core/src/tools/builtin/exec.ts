@@ -19,6 +19,37 @@ export const SAFE_ENV_KEYS = [
   'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
 ];
 
+/** Dangerous command patterns blocked from execution. */
+const BLOCKED_COMMANDS = [
+  /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*-.*r.*-.*f|.*-.*f.*-.*r)\s*\//i, // rm -rf / variants
+  /\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+\/(?!\w)/i, // rm -r / (root)
+  /\bmkfs\b/i,                     // format filesystem
+  /\bdd\b.*\bof\s*=\s*\/dev\//i,   // dd to device
+  /\b:>\s*\/etc\//i,               // truncate system files
+  /\bchmod\s+(-R\s+)?[0-7]*\s+\//i, // chmod on root
+  /\bchown\s+(-R\s+)?.*\s+\//i,   // chown on root
+  /\bshutdown\b/i,                 // shutdown
+  /\breboot\b/i,                   // reboot
+  /\binit\s+[06]/i,                // init 0/6
+  /\bkill\s+-9\s+1\b/i,           // kill init
+  /\b>\s*\/dev\/[sh]d/i,           // write to disk device
+  /\bcurl\b.*\|\s*(ba)?sh/i,       // curl pipe to shell
+  /\bwget\b.*\|\s*(ba)?sh/i,       // wget pipe to shell
+];
+
+/**
+ * Check if a command contains dangerous patterns.
+ * Returns the matched pattern description, or null if safe.
+ */
+function checkBlockedCommand(command: string): string | null {
+  for (const pattern of BLOCKED_COMMANDS) {
+    if (pattern.test(command)) {
+      return `Blocked: command matches a dangerous pattern. If you need to run this, ask the user to execute it manually.`;
+    }
+  }
+  return null;
+}
+
 export const execTools: ToolRegistration[] = [
   {
     definition: {
@@ -41,6 +72,12 @@ export const execTools: ToolRegistration[] = [
       }
       if (command.length > 10000) {
         return { error: 'Command too long (max 10000 chars)' };
+      }
+
+      // Block dangerous commands
+      const blocked = checkBlockedCommand(command);
+      if (blocked) {
+        return { error: blocked };
       }
 
       const workspace = getWorkspace(context as Record<string, unknown>);
