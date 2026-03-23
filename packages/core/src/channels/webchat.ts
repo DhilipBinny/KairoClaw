@@ -389,17 +389,38 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'sessions.list': {
             const sessions = sessionRepo.listByTenant(tenantId, 100);
             // Show only web chat sessions with actual messages
-            const list = sessions
-              .filter((s) => s.turns > 0 && s.channel === 'web')
+            const webSessions = sessions
+              .filter((s) => s.turns > 0 && s.channel === 'web');
+
+            // Batch-fetch first user message for titles
+            const sIds = webSessions.map(s => s.id);
+            const titleMap = new Map<string, string>();
+            if (sIds.length > 0) {
+              const placeholders = sIds.map(() => '?').join(',');
+              const titleRows = db.query<{ session_id: string; content: string }>(
+                `SELECT session_id, content FROM messages
+                 WHERE session_id IN (${placeholders}) AND role = 'user'
+                 GROUP BY session_id HAVING id = MIN(id)`,
+                sIds,
+              );
+              for (const row of titleRows) {
+                const text = row.content.slice(0, 80).replace(/\n/g, ' ');
+                titleMap.set(row.session_id, text.length < row.content.length ? text + '...' : text);
+              }
+            }
+
+            const list = webSessions
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
-                // Extract session key from chat_id (e.g., "web:main" → "main")
                 const chatKey = s.chat_id?.startsWith('web:') ? s.chat_id.slice(4) : s.chat_id || s.id;
+                const metadata = JSON.parse(s.metadata || '{}');
+                const title = metadata.title || titleMap.get(s.id) || '';
                 return {
                   id: s.id,
                   sessionKey: chatKey,
                   channel: s.channel,
                   chatId: s.chat_id,
+                  title,
                   turns: s.turns,
                   inputTokens: s.input_tokens,
                   outputTokens: s.output_tokens,

@@ -6,6 +6,7 @@
   interface SessionRow {
     id: string;
     channel: string;
+    title?: string;
     turns: number;
     input_tokens: number;
     output_tokens: number;
@@ -37,7 +38,7 @@
       if (channelFilter !== 'all' && s.channel !== channelFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q);
+        return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q) || (s.title || '').toLowerCase().includes(q);
       }
       return true;
     })
@@ -162,7 +163,7 @@
                 <Badge variant={channelVariant(session.channel)}>{session.channel}</Badge>
                 <span class="session-turns">{session.turns} turns</span>
               </div>
-              <div class="session-id" title={session.id}>{session.id.slice(0, 16)}...</div>
+              <div class="session-title-text" title={session.id}>{session.title || session.id.slice(0, 24) + '...'}</div>
               <div class="session-date">
                 {new Date(session.updated_at || session.created_at).toLocaleString()}
               </div>
@@ -321,11 +322,13 @@
     font-size: 11px;
     color: var(--text-muted);
   }
-  .session-id {
+  .session-title-text {
     font-size: 12px;
-    font-family: var(--font-mono);
-    color: var(--text-secondary);
+    color: var(--text-primary);
     margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .session-date {
     font-size: 11px;
