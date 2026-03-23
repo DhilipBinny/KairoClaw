@@ -349,10 +349,9 @@
           {#if isConfigured(provider.id)}
             <div class="provider-details">
               {#if provider.id === 'anthropic'}
-                {@const pc = getProviderConfig('anthropic')}
                 <div class="detail-row">
                   <span class="detail-label">Auth:</span>
-                  <span class="detail-value">{pc?.authToken ? 'OAuth Token' : 'API Key'} {pc?.apiKey ? '(****)' : ''}</span>
+                  <span class="detail-value">{providerStatus.anthropic?.hasAuthToken ? 'OAuth Token' : 'API Key'}</span>
                 </div>
               {/if}
               {#if provider.id === 'openai'}
