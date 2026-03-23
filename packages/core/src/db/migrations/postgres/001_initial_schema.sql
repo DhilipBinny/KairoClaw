@@ -5,8 +5,8 @@ CREATE TABLE IF NOT EXISTS tenants (
   slug TEXT NOT NULL UNIQUE,
   plan TEXT NOT NULL DEFAULT 'community',
   settings TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
-  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 
 -- Users
@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin','user','viewer')),
   api_key_hash TEXT,
   settings TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
-  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   UNIQUE(tenant_id, email)
 );
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
@@ -37,8 +37,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   turns INTEGER NOT NULL DEFAULT 0,
   metadata TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
-  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   expires_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id);
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS messages (
   tool_calls TEXT,
   tool_call_id TEXT,
   metadata TEXT,
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_messages_tenant ON messages(tenant_id);
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','success','error','denied','timeout')),
   duration_ms INTEGER,
   approved_by TEXT,
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id);
 CREATE INDEX IF NOT EXISTS idx_tool_calls_tenant ON tool_calls(tenant_id);
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS usage_records (
   input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   cost_usd REAL,
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_usage_tenant ON usage_records(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_usage_tenant_date ON usage_records(tenant_id, created_at);
@@ -106,7 +106,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip_address TEXT,
   prev_hash TEXT,
   entry_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
@@ -124,8 +124,8 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   env TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL DEFAULT 1,
   pinned_hash TEXT,
-  installed_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
-  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT),
+  installed_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
   status_message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_tenant ON mcp_servers(tenant_id);
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS tool_permissions (
   role TEXT NOT NULL,
   tool_pattern TEXT NOT NULL,
   permission TEXT NOT NULL DEFAULT 'allow' CHECK(permission IN ('allow','deny','confirm')),
-  created_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  created_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_tool_perms_tenant ON tool_permissions(tenant_id);
 
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS memory_chunks (
   line_start INTEGER NOT NULL,
   line_end INTEGER NOT NULL,
   content TEXT NOT NULL,
-  updated_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );
 CREATE INDEX IF NOT EXISTS idx_memory_chunks_file ON memory_chunks(file_path);
 
@@ -169,5 +169,5 @@ CREATE TABLE IF NOT EXISTS pending_senders (
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
-  applied_at TEXT NOT NULL DEFAULT (NOW()::TEXT)
+  applied_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
 );

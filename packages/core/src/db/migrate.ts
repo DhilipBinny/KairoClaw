@@ -10,7 +10,9 @@ interface MigrationRecord {
 }
 
 async function ensureMigrationsTable(db: DatabaseAdapter, dialect: DbDialect): Promise<void> {
-  const defaultTs = dialect === 'postgres' ? "(NOW()::TEXT)" : "(datetime('now'))";
+  const defaultTs = dialect === 'postgres'
+    ? "to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"
+    : "(datetime('now'))";
   await db.run(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
