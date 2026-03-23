@@ -354,7 +354,9 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
           .sort((a, b) => a.id.localeCompare(b.id));
         return { success: true, models: chatModels };
       } else if (provider === 'ollama') {
-        const url = baseUrl || 'http://localhost:11434';
+        const url = baseUrl
+          || (useExisting ? (secretsStore?.get('providers.ollama', 'baseUrl') || config.providers?.ollama?.baseUrl) : null)
+          || 'http://localhost:11434';
         const resp = await fetch(url + '/api/tags', {
           signal: AbortSignal.timeout(5000),
         });
