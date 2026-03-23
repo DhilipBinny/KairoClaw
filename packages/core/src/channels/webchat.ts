@@ -7,6 +7,7 @@
  * Compatible with the original webchat.js message format.
  */
 
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
@@ -244,16 +245,28 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               .filter((img) => typeof img.data === 'string' && typeof img.mimeType === 'string')
               .map((img) => ({ data: img.data!, mimeType: img.mimeType!, filename: img.filename }));
 
-            // Prepend uploaded file references to the text
+            // Generate smart previews for uploaded files
             let fullText = text;
             const rawFiles = Array.isArray(msg.files) ? msg.files as Array<{ path?: string; name?: string }> : [];
             if (rawFiles.length > 0) {
-              const fileRefs = rawFiles
-                .filter((f) => typeof f.path === 'string' && !f.path.includes('..') && !path.isAbsolute(f.path!))
-                .map((f) => `[Document "${f.name || 'file'}" at ${f.path}]`)
-                .join('\n');
-              if (fileRefs) {
-                fullText = `${fileRefs}\n\n${text}`;
+              const workspace = config.agent.workspace;
+              const previews: string[] = [];
+              for (const f of rawFiles) {
+                if (typeof f.path !== 'string' || f.path.includes('..') || path.isAbsolute(f.path)) continue;
+                const resolved = path.join(workspace, f.path);
+                if (!fs.existsSync(resolved)) {
+                  previews.push(`[Document "${f.name || 'file'}" — file not found]`);
+                  continue;
+                }
+                try {
+                  const { generateFilePreview } = await import('../media/file-preview.js');
+                  previews.push(await generateFilePreview(resolved, f.name || path.basename(f.path)));
+                } catch {
+                  previews.push(`[Document "${f.name || 'file'}" at ${f.path}]`);
+                }
+              }
+              if (previews.length > 0) {
+                fullText = `${previews.join('\n\n')}\n\n${text}`;
               }
             }
 

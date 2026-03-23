@@ -1,4 +1,7 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
+import type { MediaAttachment } from '@agw/types';
 
 export const messagingTools: ToolRegistration[] = [
   {
@@ -77,6 +80,90 @@ export const messagingTools: ToolRegistration[] = [
       }
 
       return { error: `Unknown channel: ${channel}` };
+    },
+    source: 'builtin',
+    category: 'write',
+  },
+  {
+    definition: {
+      name: 'send_file',
+      description: 'Send a file from the workspace to the current chat as a document attachment. The file will be delivered via the channel the user is chatting on (Telegram, WhatsApp, or Web). Use this to share generated reports, exported data, or any file the user requests.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file in the workspace (relative or absolute)' },
+          caption: { type: 'string', description: 'Optional caption/message to send with the file' },
+        },
+        required: ['path'],
+      },
+    },
+    executor: async (args, context) => {
+      const filePath = args.path as string;
+      if (!filePath) return { error: 'path is required' };
+
+      const ctx = context as Record<string, unknown>;
+      const workspace = (ctx.workspace as string) ||
+        ((ctx.config as Record<string, Record<string, string>>)?.agent?.workspace) ||
+        process.cwd();
+
+      // Resolve relative paths against workspace
+      const resolved = path.isAbsolute(filePath) ? filePath : path.join(workspace, filePath);
+
+      if (!fs.existsSync(resolved)) {
+        return { error: `File not found: ${filePath}` };
+      }
+
+      // Security: ensure file is within workspace or /tmp
+      const real = fs.realpathSync(resolved);
+      if (!real.startsWith(fs.realpathSync(workspace)) && !real.startsWith('/tmp')) {
+        return { error: 'File must be within the workspace directory' };
+      }
+
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile()) {
+        return { error: `Not a file: ${filePath}` };
+      }
+
+      // 50MB limit
+      if (stat.size > 50 * 1024 * 1024) {
+        return { error: 'File too large (max 50MB)' };
+      }
+
+      const fileName = path.basename(resolved);
+      const ext = path.extname(fileName).slice(1).toLowerCase();
+
+      // Determine MIME type
+      const mimeMap: Record<string, string> = {
+        md: 'text/markdown', txt: 'text/plain', csv: 'text/csv',
+        json: 'application/json', yml: 'application/x-yaml', yaml: 'application/x-yaml',
+        xml: 'application/xml', html: 'text/html',
+        pdf: 'application/pdf', zip: 'application/zip',
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+        mp3: 'audio/mpeg', mp4: 'video/mp4', ogg: 'audio/ogg',
+        log: 'text/plain', sh: 'text/x-shellscript', py: 'text/x-python', ts: 'text/typescript', js: 'text/javascript',
+      };
+      const mimeType = mimeMap[ext] || 'application/octet-stream';
+
+      // Classify type for channel-specific sending
+      const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+      const type = imageExts.has(ext) ? 'image' : 'document';
+
+      const _media: MediaAttachment[] = [{
+        type: type as MediaAttachment['type'],
+        filePath: resolved,
+        fileName,
+        mimeType,
+      }];
+
+      return {
+        success: true,
+        fileName,
+        size: stat.size,
+        mimeType,
+        caption: (args.caption as string) || undefined,
+        note: `File "${fileName}" will be sent as an attachment to the current chat.`,
+        _media,
+      };
     },
     source: 'builtin',
     category: 'write',
