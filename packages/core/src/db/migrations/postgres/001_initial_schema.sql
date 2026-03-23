@@ -112,23 +112,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 
--- MCP servers
-CREATE TABLE IF NOT EXISTS mcp_servers (
-  id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  name TEXT NOT NULL DEFAULT '',
-  transport TEXT NOT NULL DEFAULT 'stdio' CHECK(transport IN ('stdio','sse','http')),
-  command TEXT,
-  args TEXT NOT NULL DEFAULT '[]',
-  url TEXT,
-  env TEXT NOT NULL DEFAULT '{}',
-  enabled INTEGER NOT NULL DEFAULT 1,
-  pinned_hash TEXT,
-  installed_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  updated_at TEXT NOT NULL DEFAULT to_char(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-  status_message TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_mcp_tenant ON mcp_servers(tenant_id);
+-- MCP servers are stored in config.json, not in the database.
 
 -- Tool permissions (RBAC)
 CREATE TABLE IF NOT EXISTS tool_permissions (

@@ -1,47 +1,7 @@
-import type { MCPCatalogEntry } from '@agw/types';
-
-// ══════════════════════════════════════════════
-// Curated MCP Server Catalog
-// ══════════════════════════════════════════════
-
-// Curated picks — lightweight, practical for a personal AI gateway
-export const MCP_CATALOG: Record<string, MCPCatalogEntry> = {
-  github: {
-    name: 'GitHub',
-    description: 'Issues, PRs, repos, code search, file contents',
-    package: '@modelcontextprotocol/server-github',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-github'],
-    env: { GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_PERSONAL_ACCESS_TOKEN}' },
-    envKeys: ['GITHUB_PERSONAL_ACCESS_TOKEN'],
-    envVars: [
-      { key: 'GITHUB_PERSONAL_ACCESS_TOKEN', label: 'GitHub Personal Access Token', required: true, sensitive: true, placeholder: 'ghp_...' },
-    ],
-    category: 'development',
-    icon: '🐙',
-  },
-slack: {
-    name: 'Slack',
-    description: 'Read channels, send messages, search Slack workspace',
-    package: '@modelcontextprotocol/server-slack',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-slack'],
-    env: { SLACK_BOT_TOKEN: '${SLACK_BOT_TOKEN}', SLACK_TEAM_ID: '${SLACK_TEAM_ID}' },
-    envKeys: ['SLACK_BOT_TOKEN', 'SLACK_TEAM_ID'],
-    envVars: [
-      { key: 'SLACK_BOT_TOKEN', label: 'Slack Bot Token', required: true, sensitive: true, placeholder: 'xoxb-...' },
-      { key: 'SLACK_TEAM_ID', label: 'Slack Team ID', required: true, sensitive: false, placeholder: 'T01234567' },
-    ],
-    category: 'communication',
-    icon: '💬',
-  },
-};
-
-// ══════════════════════════════════════════════
-// MCP Registry (marketplace) search
-// ══════════════════════════════════════════════
+/**
+ * MCP Registry (marketplace) search.
+ * Proxies to the official MCP registry at registry.modelcontextprotocol.io
+ */
 
 export interface MCPRegistryServer {
   id: string;
