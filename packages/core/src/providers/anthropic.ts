@@ -67,8 +67,11 @@ export class AnthropicProvider implements ProviderInterface {
       clientOpts.apiKey = apiKey;
       this.authType = 'api-key';
     } else {
-      // No explicit auth — SDK will try env vars
+      // No explicit auth — last resort: check env vars directly
+      // (ProviderRegistry normally passes credentials from secretsStore,
+      // so this branch only fires if secretsStore + config are both empty)
       const envToken = process.env.ANTHROPIC_AUTH_TOKEN;
+      const envKey = process.env.ANTHROPIC_API_KEY;
       if (envToken) {
         clientOpts.apiKey = '';
         clientOpts.authToken = envToken;
@@ -82,7 +85,7 @@ export class AnthropicProvider implements ProviderInterface {
         };
         this.authType = 'oauth-token';
       } else {
-        this.authType = process.env.ANTHROPIC_API_KEY ? 'api-key' : 'unknown';
+        this.authType = envKey ? 'api-key' : 'unknown';
       }
     }
 
