@@ -30,7 +30,7 @@ export interface NamespacedToolDefinition {
  * their tools to the agent's tool system.
  *
  * Server configs are stored in config.json under `mcp.servers`.
- * Secrets stay in ~/.agw/mcp-secrets.json.
+ * Secrets stored via unified SecretsStore (encrypted at rest).
  * Runtime state (connection status) stays in memory on MCPClient objects.
  */
 export class MCPBridge {

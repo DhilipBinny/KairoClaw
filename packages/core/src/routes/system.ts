@@ -781,13 +781,24 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         }
       }
 
+      // Validate: if secrets.enc was imported, check that a key is available
+      const importedEncrypted = fs.existsSync(path.join(stateDir, 'secrets.enc'));
+      const hasKeyFile = fs.existsSync(path.join(stateDir, 'master.key'));
+      const hasKeyEnv = !!process.env.AGW_MASTER_KEY;
+      let encryptionWarning: string | undefined;
+      if (importedEncrypted && !hasKeyFile && !hasKeyEnv) {
+        encryptionWarning = 'Imported encrypted secrets (secrets.enc) but no master.key file or AGW_MASTER_KEY env var found. Secrets will be unreadable after restart.';
+      }
+
       // Cleanup
       fs.rmSync(stagingDir, { recursive: true, force: true });
       fs.unlinkSync(tmpFile);
 
       return {
         success: true,
-        message: 'Import complete. Restart the server to apply changes.',
+        message: encryptionWarning
+          ? `Import complete. WARNING: ${encryptionWarning}`
+          : 'Import complete. Restart the server to apply changes.',
         backup: backupFile,
       };
     } catch (e: unknown) {
