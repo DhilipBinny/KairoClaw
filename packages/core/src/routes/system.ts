@@ -11,6 +11,7 @@ import { requireRole } from '../auth/middleware.js';
 import { getModelCapabilities } from '../models/registry.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
+import { resolveMasterKey, readEncryptedStore, decryptStore, encryptStore, writeEncryptedStore } from '../secrets/crypto.js';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -781,13 +782,56 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         }
       }
 
-      // Validate: if secrets.enc was imported, check that a key is available
-      const importedEncrypted = fs.existsSync(path.join(stateDir, 'secrets.enc'));
-      const hasKeyFile = fs.existsSync(path.join(stateDir, 'master.key'));
-      const hasKeyEnv = !!process.env.AGW_MASTER_KEY;
-      let encryptionWarning: string | undefined;
-      if (importedEncrypted && !hasKeyFile && !hasKeyEnv) {
-        encryptionWarning = 'Imported encrypted secrets (secrets.enc) but no master.key file or AGW_MASTER_KEY env var found. Secrets will be unreadable after restart.';
+      // Re-encrypt imported secrets with this deployment's master key
+      // This makes exports portable across deployments automatically
+      const importedEncPath = path.join(stateDir, 'secrets.enc');
+      const importedKeyPath = path.join(stateDir, 'master.key');
+      let reEncrypted = false;
+
+      if (fs.existsSync(importedEncPath)) {
+        // Resolve THIS deployment's master key (env var first, then existing keyfile)
+        const localKey = resolveMasterKey(stateDir);
+
+        if (localKey) {
+          // Try to decrypt with local key first (same deployment restore)
+          const encStore = readEncryptedStore(importedEncPath);
+          if (encStore) {
+            let needsReEncrypt = false;
+            try {
+              decryptStore(encStore, localKey);
+              // Local key works — no re-encryption needed (same-deployment restore)
+            } catch {
+              // Local key doesn't work — archive used a different key
+              needsReEncrypt = true;
+            }
+
+            if (needsReEncrypt && fs.existsSync(importedKeyPath)) {
+              // Decrypt with archive's key, re-encrypt with local key
+              try {
+                const archiveKey = fs.readFileSync(importedKeyPath);
+                if (archiveKey.length === 32) {
+                  const plainSecrets = decryptStore(encStore, archiveKey);
+                  const reEncStore = encryptStore(plainSecrets, localKey);
+                  writeEncryptedStore(importedEncPath, reEncStore);
+                  reEncrypted = true;
+                }
+              } catch (reEncErr) {
+                const msg = reEncErr instanceof Error ? reEncErr.message : String(reEncErr);
+                console.error(`[import] Failed to re-encrypt secrets: ${msg}`);
+              }
+            }
+
+            // Remove the archive's master.key — this deployment uses its own
+            if (reEncrypted && fs.existsSync(importedKeyPath)) {
+              const localKeyBuf = localKey;
+              const archiveKeyBuf = fs.readFileSync(importedKeyPath);
+              if (!localKeyBuf.equals(archiveKeyBuf)) {
+                fs.unlinkSync(importedKeyPath);
+                fs.writeFileSync(importedKeyPath, localKeyBuf, { mode: 0o600 });
+              }
+            }
+          }
+        }
       }
 
       // Cleanup
@@ -796,8 +840,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       return {
         success: true,
-        message: encryptionWarning
-          ? `Import complete. WARNING: ${encryptionWarning}`
+        message: reEncrypted
+          ? 'Import complete. Secrets re-encrypted with this deployment\'s key. Restart to apply.'
           : 'Import complete. Restart the server to apply changes.',
         backup: backupFile,
       };
