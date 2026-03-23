@@ -29,7 +29,7 @@ export async function loadSessions(): Promise<void> {
   try {
     const data = await fetchSessions(100);
     _sessions = (data.sessions || [])
-      .filter((s) => s.turns > 0)
+      .filter((s) => s.turns > 0 && s.channel === 'web')
       .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
       .map((s) => {
         // Extract session key from chat_id (e.g., "web:main" → "main")
