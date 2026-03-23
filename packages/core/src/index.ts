@@ -468,7 +468,7 @@ async function main(): Promise<void> {
   await server.register(registerCronRoutes, { scheduler });
 
   // 14. Register WebSocket (webchat) plugin
-  await server.register(webchatPlugin, { db, config, runner: createRunner });
+  await server.register(webchatPlugin, { db, config, runner: createRunner, secretsStore });
 
   // 15. Channel registry — mutable so channels can be hot-reloaded via Settings
   const channelRegistry: {

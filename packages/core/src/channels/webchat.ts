@@ -84,13 +84,14 @@ export interface WebchatPluginOptions {
   db: DatabaseAdapter;
   config: GatewayConfig;
   runner: AgentRunner;
+  secretsStore?: { get: (ns: string, key: string) => string | undefined };
 }
 
 /**
  * Fastify plugin that registers the `/ws` WebSocket route for WebChat.
  */
 export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (app, opts) => {
-  const { db, config, runner } = opts;
+  const { db, config, runner, secretsStore } = opts;
   const tenantId = (config as unknown as Record<string, unknown>).tenantId as string || 'default';
   const queue = new AgentQueue();
   const sessionRepo = new SessionRepository(db);
@@ -106,8 +107,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
       return;
     }
 
-    let authenticated = !config.gateway.token;
-    if (!config.gateway.token) {
+    const gatewayToken = secretsStore?.get('gateway', 'token') || config.gateway.token;
+    let authenticated = !gatewayToken;
+    if (!gatewayToken) {
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
     let clientId = `web-${Date.now()}`;
@@ -176,7 +178,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           }
           const token = msg.token as string | undefined;
           // Check against gateway token first
-          let authValid = safeTokenCompare(token, config.gateway.token);
+          let authValid = safeTokenCompare(token, gatewayToken);
           // If gateway token didn't match, check against user API keys in the DB
           if (!authValid && token) {
             const keyHash = hashApiKey(token);
