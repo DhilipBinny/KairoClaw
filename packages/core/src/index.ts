@@ -21,6 +21,7 @@ import { loadPlugins } from './plugins/store.js';
 import { MediaStore } from './media/store.js';
 import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
+import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { deriveScopeKey, ensureScopeDir } from './agent/scope.js';
@@ -162,7 +163,11 @@ async function main(): Promise<void> {
 
   // 6. Migrate secrets + create unified secrets store
   migrateToSecretsStore(stateDir);
-  const secretsStore = new SecretsStore(stateDir);
+  const masterKey = resolveMasterKey(stateDir);
+  const secretsStore = new SecretsStore(stateDir, masterKey);
+  if (secretsStore.isEncrypted) {
+    console.log('  Secrets: encrypted (AES-256-GCM envelope encryption)');
+  }
 
   // 6b. Initialize provider registry with secrets store
   const providerRegistry = new ProviderRegistry(config);

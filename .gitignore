@@ -11,6 +11,8 @@
 *.p12
 *.pfx
 secrets.json
+secrets.enc
+master.key
 .gh-token
 
 # ── Local reference (untracked, kept on disk) ──

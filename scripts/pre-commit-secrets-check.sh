@@ -78,8 +78,8 @@ for file in $STAGED_FILES; do
   if $skip; then continue; fi
 
   for pattern in "${PATTERNS[@]}"; do
-    # Check staged content (not working directory)
-    if git diff --cached -- "$file" | grep -qE "$pattern"; then
+    # Check only added lines in staged content (ignore removed lines)
+    if git diff --cached -- "$file" | grep '^+' | grep -qE "$pattern"; then
       if [ $FOUND -eq 0 ]; then
         echo -e "${RED}══════════════════════════════════════════════${NC}"
         echo -e "${RED}  SECRETS DETECTED IN STAGED FILES${NC}"
