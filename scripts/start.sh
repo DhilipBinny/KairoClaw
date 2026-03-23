@@ -13,8 +13,7 @@ echo "🔨 Building @agw/core..."
 pnpm --filter @agw/core build
 
 echo "📋 Copying migrations..."
-mkdir -p packages/core/dist/db/migrations
-cp packages/core/src/db/migrations/*.sql packages/core/dist/db/migrations/
+cp -r packages/core/src/db/migrations packages/core/dist/db/
 
 echo "🎨 Building @agw/ui..."
 pnpm --filter @agw/ui build
