@@ -10,7 +10,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const tenantId = request.tenantId || 'default';
     const repo = new SessionRepository(db);
     const limit = parseInt((request.query as any)?.limit || '50');
-    let sessions = repo.listByTenant(tenantId, limit);
+    let sessions = await repo.listByTenant(tenantId, limit);
 
     // Filter out internal/cron sessions (sub-agents, scheduled tasks)
     sessions = sessions.filter(s => s.channel !== 'internal' && s.channel !== 'cron');
@@ -26,7 +26,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     if (sessionIds.length > 0) {
       // Use a single query with GROUP BY to get the first user message per session
       const placeholders = sessionIds.map(() => '?').join(',');
-      const rows = db.query<{ session_id: string; content: string }>(
+      const rows = await db.query<{ session_id: string; content: string }>(
         `SELECT session_id, content FROM messages
          WHERE session_id IN (${placeholders}) AND role = 'user'
          GROUP BY session_id
@@ -62,7 +62,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
 
-    const session = sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check: non-admin users can only access their own sessions
@@ -70,7 +70,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
-    const messages = messageRepo.listBySession(id);
+    const messages = await messageRepo.listBySession(id);
     return { session, messages };
   });
 
@@ -81,7 +81,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const { title } = request.body as { title?: string };
     const sessionRepo = new SessionRepository(db);
 
-    const session = sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check
@@ -93,7 +93,7 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       // Store title in metadata JSON
       const metadata = JSON.parse(session.metadata || '{}');
       metadata.title = title.slice(0, 200);
-      sessionRepo.update(id, { metadata: JSON.stringify(metadata) });
+      await sessionRepo.update(id, { metadata: JSON.stringify(metadata) });
     }
 
     return { success: true };
@@ -104,8 +104,9 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const { id, messageId } = request.params as { id: string; messageId: string };
     const sessionRepo = new SessionRepository(db);
+    const messageRepo = new MessageRepository(db);
 
-    const session = sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check
@@ -117,11 +118,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const msgId = parseInt(messageId);
     if (isNaN(msgId)) return reply.code(400).send({ error: 'Invalid message ID' });
 
-    db.run('DELETE FROM messages WHERE session_id = ? AND id >= ?', [id, msgId]);
+    await messageRepo.deleteFromId(id, msgId);
 
     // Update session turn count
-    const count = db.get<{ c: number }>('SELECT COUNT(*) as c FROM messages WHERE session_id = ? AND role = ?', [id, 'user']);
-    db.run('UPDATE sessions SET turns = ?, updated_at = ? WHERE id = ?', [count?.c || 0, new Date().toISOString(), id]);
+    const turns = await sessionRepo.countUserTurns(id);
+    await sessionRepo.setTurns(id, turns);
 
     return { success: true };
   });
@@ -131,9 +132,8 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
-    const messageRepo = new MessageRepository(db);
 
-    const session = sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check: only session owner or admin can delete
@@ -141,11 +141,8 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(403).send({ error: 'Forbidden' });
     }
 
-    // Delete all child records before the session (usage_records lacks ON DELETE CASCADE)
-    db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
-    db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
-    messageRepo.deleteBySession(id);
-    sessionRepo.delete(id);
+    // Delete session and all child records
+    await sessionRepo.deleteWithCascade(id);
     // TODO: clean up scoped memory entries related to this session's date
     return { success: true };
   });

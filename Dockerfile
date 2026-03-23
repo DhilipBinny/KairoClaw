@@ -22,8 +22,7 @@ COPY packages/ui/ packages/ui/
 RUN pnpm lint && \
     pnpm --filter @agw/types build && \
     pnpm --filter @agw/core build && \
-    mkdir -p packages/core/dist/db/migrations && \
-    cp packages/core/src/db/migrations/*.sql packages/core/dist/db/migrations/ && \
+    cp -r packages/core/src/db/migrations packages/core/dist/db/ && \
     pnpm --filter @agw/ui build
 
 # Stage 3: Production (install deps + remove build tools in one layer)

@@ -15,7 +15,7 @@ export interface MessageRow {
 export class MessageRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  create(msg: {
+  async create(msg: {
     sessionId: string;
     tenantId: string;
     role: string;
@@ -23,10 +23,10 @@ export class MessageRepository {
     toolCalls?: string;
     toolCallId?: string;
     metadata?: string;
-  }): MessageRow {
+  }): Promise<MessageRow> {
     const now = new Date().toISOString();
 
-    const result = this.db.run(
+    await this.db.run(
       `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, metadata, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -41,10 +41,14 @@ export class MessageRepository {
       ],
     );
 
-    return this.db.get<MessageRow>('SELECT * FROM messages WHERE id = ?', [result.lastInsertRowid])!;
+    // Use RETURNING-compatible lookup: get the latest message we just inserted
+    return (await this.db.get<MessageRow>(
+      'SELECT * FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1',
+      [msg.sessionId, msg.role],
+    ))!;
   }
 
-  listBySession(sessionId: string, limit?: number, offset?: number): MessageRow[] {
+  async listBySession(sessionId: string, limit?: number, offset?: number): Promise<MessageRow[]> {
     let sql = 'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC';
     const params: unknown[] = [sessionId];
 
@@ -54,32 +58,42 @@ export class MessageRepository {
     }
     if (offset !== undefined) {
       if (limit === undefined) {
-        sql += ' LIMIT -1';
+        sql += ' LIMIT 2147483647'; // max int, compatible with both SQLite and PostgreSQL
       }
       sql += ' OFFSET ?';
       params.push(offset);
     }
 
-    return this.db.query<MessageRow>(sql, params);
+    return await this.db.query<MessageRow>(sql, params);
   }
 
-  countBySession(sessionId: string): number {
-    const row = this.db.get<{ count: number }>(
+  async countBySession(sessionId: string): Promise<number> {
+    const row = await this.db.get<{ count: number }>(
       'SELECT COUNT(*) as count FROM messages WHERE session_id = ?',
       [sessionId],
     );
     return row?.count ?? 0;
   }
 
-  getLatest(sessionId: string, count: number): MessageRow[] {
-    const rows = this.db.query<MessageRow>(
+  async getLatest(sessionId: string, count: number): Promise<MessageRow[]> {
+    const rows = await this.db.query<MessageRow>(
       'SELECT * FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?',
       [sessionId, count],
     );
     return rows.reverse();
   }
 
-  deleteBySession(sessionId: string): void {
-    this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
+  async deleteBySession(sessionId: string): Promise<void> {
+    await this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
+  }
+
+  /** Delete a single message by id. */
+  async deleteById(id: number): Promise<void> {
+    await this.db.run('DELETE FROM messages WHERE id = ?', [id]);
+  }
+
+  /** Delete a message and all subsequent messages in the same session (for context cleanup). */
+  async deleteFromId(sessionId: string, fromId: number): Promise<void> {
+    await this.db.run('DELETE FROM messages WHERE session_id = ? AND id >= ?', [sessionId, fromId]);
   }
 }

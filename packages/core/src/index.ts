@@ -81,32 +81,36 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const stateDir = process.env.AGW_STATE_DIR || path.join(home!, '.agw');
-  const dbPath = path.join(stateDir, 'gateway.db');
-  const db = createDatabase(dbPath);
+
+  // Database config: AGW_DATABASE_URL env var → config.database → default SQLite
+  const dbUrl = process.env.AGW_DATABASE_URL || (config as unknown as Record<string, unknown>).databaseUrl as string | undefined;
+  const dbDialect = dbUrl ? 'postgres' as const : 'sqlite' as const;
+  const db = dbUrl
+    ? createDatabase({ type: 'postgres', url: dbUrl })
+    : createDatabase(path.join(stateDir, 'gateway.db'));
+
+  if (dbDialect === 'postgres') {
+    console.log('  Database: PostgreSQL');
+  }
 
   // Store stateDir in config for route access
   config._stateDir = stateDir;
 
   // 3. Run migrations
   const migrationsDir = path.join(__dirname, 'db', 'migrations');
-  runMigrations(db, migrationsDir);
+  await runMigrations(db, migrationsDir, dbDialect);
 
   // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
   try {
-    const orphaned = db.query<{ id: string }>('SELECT id FROM sessions WHERE channel = ?', ['internal']);
-    if (orphaned.length > 0) {
-      for (const { id } of orphaned) {
-        db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
-        db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
-        db.run('DELETE FROM messages WHERE session_id = ?', [id]);
-        db.run('DELETE FROM sessions WHERE id = ?', [id]);
-      }
-      console.log(`  Cleaned ${orphaned.length} orphaned internal sessions`);
+    const sessionRepo = new SessionRepository(db);
+    const cleaned = await sessionRepo.cleanupOrphans();
+    if (cleaned > 0) {
+      console.log(`  Cleaned ${cleaned} orphaned internal sessions`);
     }
   } catch { /* non-critical */ }
 
   // 4. Seed database (first run)
-  const { apiKey, isFirstRun } = seedDatabase(db);
+  const { apiKey, isFirstRun } = await seedDatabase(db);
   if (isFirstRun && apiKey) {
     console.log('\n' + '='.repeat(60));
     console.log('  FIRST RUN — Your admin API key:');
@@ -146,14 +150,14 @@ async function main(): Promise<void> {
     }
   }
 
-  // 5. Migrate v1 data if present
-  const defaultTenant = db.get<{ id: string }>(
+  // 5. Migrate v1 data if present (SQLite only — PG deployments are fresh)
+  const defaultTenant = await db.get<{ id: string }>(
     'SELECT id FROM tenants WHERE slug = ?',
     ['default'],
   );
   const tenantId = defaultTenant?.id || 'default';
-  if (defaultTenant) {
-    const migration = migrateV1Data(db, stateDir, tenantId);
+  if (defaultTenant && dbDialect === 'sqlite') {
+    const migration = await migrateV1Data(db, stateDir, tenantId);
     if (migration.sessions > 0 || migration.messages > 0) {
       console.log(
         `v1 migration: ${migration.sessions} sessions, ${migration.messages} messages, ${migration.mcpServers} MCP servers`,
@@ -206,14 +210,14 @@ async function main(): Promise<void> {
 
   // 7b. Initialize memory system
   const memorySystem = new MemorySystem(db, config.agent.workspace);
-  memorySystem.init();
+  await memorySystem.init();
   setMemorySystem(memorySystem);
 
   // 8. Create Fastify server (needed before MCP bridge for server.log)
   const server = await createServer({ db, config });
 
-  // 9. One-time DB→config migration for MCP servers, then initialize bridge
-  const mcpMigrated = migrateDbMcpToConfig(db, CONFIG_PATH);
+  // 9. One-time DB→config migration for MCP servers (SQLite only), then initialize bridge
+  const mcpMigrated = dbDialect === 'sqlite' ? await migrateDbMcpToConfig(db, CONFIG_PATH) : 0;
   if (mcpMigrated > 0) {
     console.log(`DB→config migration: ${mcpMigrated} MCP servers moved to config.json`);
     // Reload config to pick up migrated MCP servers
@@ -244,18 +248,18 @@ async function main(): Promise<void> {
     const chatIdStr = String(inbound.chatId);
     // Only use userId if it's a real user ID from the users table, not a channel-generated ID
     const userRow = inbound.userId
-      ? db.get<{ id: string }>('SELECT id FROM users WHERE id = ?', [String(inbound.userId)])
+      ? await db.get<{ id: string }>('SELECT id FROM users WHERE id = ?', [String(inbound.userId)])
       : undefined;
     const validUserId = userRow?.id ?? undefined;
 
-    const existingSessions = sessionRepo.listByTenant(tenantId, 500);
+    const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
     let sessionRow = existingSessions.find(
       (s) => s.channel === inbound.channel && s.chat_id === chatIdStr,
     );
 
     if (!sessionRow) {
       const sessionId = crypto.randomUUID();
-      sessionRow = sessionRepo.create({
+      sessionRow = await sessionRepo.create({
         id: sessionId,
         tenantId,
         userId: validUserId,
@@ -264,7 +268,7 @@ async function main(): Promise<void> {
       });
       // Audit: session.create
       try {
-        auditService.log({
+        await auditService.log({
           tenantId,
           userId: validUserId,
           action: 'session.create',
@@ -290,8 +294,8 @@ async function main(): Promise<void> {
       userId: validUserId,
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
-      tools: toolRegistry.getDefinitions(),
-      executeTool: (name, args, ctx) => {
+      tools: await toolRegistry.getDefinitions(),
+      executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
           ...ctx,
@@ -299,7 +303,7 @@ async function main(): Promise<void> {
           config,
           tenantId,
           callLLM: (llmArgs: any) => providerRegistry.callWithFailover(llmArgs),
-          tools: toolRegistry.getDefinitions(),
+          tools: await toolRegistry.getDefinitions(),
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
@@ -311,7 +315,7 @@ async function main(): Promise<void> {
           whatsappSend: sharedServices.whatsappSend,
           broadcastToWeb,
           checkOutboundAllowed: (channel: 'whatsapp' | 'telegram', recipient: string) =>
-            checkOutboundAllowed(channel, recipient, config, db),
+            checkOutboundAllowed(channel, recipient, config, db),  // already returns Promise
           braveApiKey: secretsStore.get('tools.webSearch', 'apiKey') || config.tools?.webSearch?.apiKey || process.env.BRAVE_API_KEY || '',
           pluginReloader: () => reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore),
           mediaStore,
@@ -419,7 +423,7 @@ async function main(): Promise<void> {
     deliverer: async (text, channel, to, media) => {
       // Outbound policy check for cron delivery
       if ((channel === 'whatsapp' || channel === 'telegram') && to) {
-        const check = checkOutboundAllowed(channel, to, config, db);
+        const check = await checkOutboundAllowed(channel, to, config, db);
         if (!check.allowed) {
           const cronLog = createModuleLogger('cron');
           cronLog.warn({ channel, to, reason: check.reason }, 'Cron delivery blocked by outbound policy');
@@ -480,7 +484,7 @@ async function main(): Promise<void> {
   sharedServices.telegramSend = async (text: string, chatId?: string) => {
     if (!channelRegistry.telegram) throw new Error('Telegram channel not enabled');
     if (chatId) {
-      const check = checkOutboundAllowed('telegram', chatId, config, db);
+      const check = await checkOutboundAllowed('telegram', chatId, config, db);
       if (!check.allowed) throw new Error(`Outbound blocked: ${check.reason}`);
     }
     return channelRegistry.telegram.sendToChat(text, chatId);
@@ -488,7 +492,7 @@ async function main(): Promise<void> {
   sharedServices.whatsappSend = async (text: string, jid?: string) => {
     if (!channelRegistry.whatsapp) throw new Error('WhatsApp channel not enabled');
     if (jid) {
-      const check = checkOutboundAllowed('whatsapp', jid, config, db);
+      const check = await checkOutboundAllowed('whatsapp', jid, config, db);
       if (!check.allowed) throw new Error(`Outbound blocked: ${check.reason}`);
     }
     return channelRegistry.whatsapp.sendToChat(text, jid);
@@ -652,7 +656,7 @@ async function main(): Promise<void> {
     await server.close();
 
     // Close database
-    db.close();
+    await db.close();
 
     process.exit(0);
   };

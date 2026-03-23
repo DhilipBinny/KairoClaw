@@ -15,6 +15,7 @@ import type { MediaItem } from '../media/detector.js';
 import type { Context } from 'grammy';
 import type { GatewayConfig, InboundMessage, MediaAttachment } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
+import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
@@ -67,6 +68,7 @@ class TelegramChannel implements Channel {
   private readonly db: DatabaseAdapter;
   private readonly tenantId: string;
   private readonly secretsStore?: SecretsStore;
+  private readonly pendingSenders: PendingSenderRepository;
   private resolvedBotToken: string = '';
 
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string, secretsStore?: SecretsStore) {
@@ -74,6 +76,7 @@ class TelegramChannel implements Channel {
     this.db = db;
     this.tenantId = tenantId;
     this.secretsStore = secretsStore;
+    this.pendingSenders = new PendingSenderRepository(db);
   }
 
   async start(runner: AgentRunner): Promise<void> {
@@ -96,31 +99,9 @@ class TelegramChannel implements Channel {
         const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
         const cfg = this.config.channels.telegram;
         if (!cfg.allowFrom || cfg.allowFrom.length === 0) {
-          // No allowlist — record as 'seen' for onboarding (5-row budget)
+          // No allowlist — record as 'seen' for onboarding (capped budget)
           try {
-            const exists = this.db.get<{ id: number }>(
-              "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status = 'seen'",
-              [senderId],
-            );
-            if (exists) {
-              this.db.run(
-                "UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1 WHERE channel = 'telegram' AND sender_id = ? AND status = 'seen'",
-                [senderName, senderId],
-              );
-            } else {
-              const count = this.db.get<{ c: number }>(
-                "SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'telegram' AND status = 'seen'",
-              );
-              if ((count?.c ?? 0) >= PENDING_SEEN_CAP) {
-                this.db.run(
-                  "DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'seen' ORDER BY last_seen ASC LIMIT 1)",
-                );
-              }
-              this.db.run(
-                "INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'seen')",
-                ['telegram', senderId, senderName],
-              );
-            }
+            await this.pendingSenders.recordSighting('telegram', senderId, senderName, 'seen', PENDING_SEEN_CAP);
           } catch { /* non-critical */ }
         }
       }
@@ -316,21 +297,8 @@ class TelegramChannel implements Channel {
         log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
         try {
           // Evict oldest pending if at cap
-          this.db.run(`
-            DELETE FROM pending_senders WHERE id IN (
-              SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = 'pending'
-              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'telegram' AND status = 'pending') - ${PENDING_PENDING_CAP - 1})
-            )
-          `);
-          this.db.run(`
-            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
-            ON CONFLICT(channel, sender_id) DO UPDATE SET
-              sender_name = excluded.sender_name,
-              last_seen = datetime('now'),
-              message_count = message_count + 1,
-              status = 'pending'
-          `, ['telegram', senderId, senderName]);
+          await this.pendingSenders.evictOverCap('telegram', 'pending', PENDING_PENDING_CAP);
+          await this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
         } catch { /* non-critical */ }
         return;
       }
@@ -346,39 +314,8 @@ class TelegramChannel implements Channel {
       const hasGroupAllowlist = cfg.groupAllowFrom?.length > 0;
       try {
         const status = hasGroupAllowlist ? 'pending' : 'seen';
-        // Skip if already approved/rejected
-        const resolved = this.db.get<{ id: number }>(
-          "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('approved','rejected')",
-          [chatId],
-        );
-        if (!resolved) {
-          const existing = this.db.get<{ id: number }>(
-            "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('seen','pending')",
-            [chatId],
-          );
-          if (existing) {
-            this.db.run(
-              "UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1 WHERE channel = 'telegram' AND sender_id = ? AND status IN ('seen','pending')",
-              [groupName, chatId],
-            );
-          } else {
-            const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
-            const count = this.db.get<{ c: number }>(
-              `SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'telegram' AND status = ?`,
-              [status],
-            );
-            if ((count?.c ?? 0) >= cap) {
-              this.db.run(
-                `DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'telegram' AND status = ? ORDER BY last_seen ASC LIMIT 1)`,
-                [status],
-              );
-            }
-            this.db.run(
-              "INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, ?)",
-              ['telegram', chatId, groupName, status],
-            );
-          }
-        }
+        const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
+        await this.pendingSenders.recordWithResolutionCheck('telegram', chatId, groupName, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist (if set, only listed group IDs are allowed)
@@ -405,18 +342,9 @@ class TelegramChannel implements Channel {
           // Record as pending for admin approval
           try {
             const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
-            const resolved = this.db.get<{ id: number }>(
-              "SELECT id FROM pending_senders WHERE channel = 'telegram' AND sender_id = ? AND status IN ('approved','rejected')",
-              [senderId],
-            );
+            const resolved = await this.pendingSenders.findBySenderId('telegram', senderId, ['approved', 'rejected']);
             if (!resolved) {
-              this.db.run(
-                `INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
-                 VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
-                 ON CONFLICT(channel, sender_id) DO UPDATE SET
-                   sender_name = excluded.sender_name, last_seen = datetime('now'), message_count = message_count + 1`,
-                ['telegram', senderId, senderName],
-              );
+              await this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
             }
           } catch { /* non-critical */ }
           return;

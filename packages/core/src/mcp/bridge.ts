@@ -209,9 +209,9 @@ export class MCPBridge {
       }
 
       // Wire auto-reconnect on unexpected transport close
-      client.onTransportClose((_code) => {
+      client.onTransportClose(async (_code) => {
         if (client._status === 'error') {
-          this._unsyncToolsFromRegistry(id);
+          await this._unsyncToolsFromRegistry(id);
           if (!this._reconnecting.has(id)) {
             this._autoReconnect(id, serverConfig, pinnedHash);
           }
@@ -261,10 +261,10 @@ export class MCPBridge {
   }
 
   /** Remove an MCP server's tools from the ToolRegistry. */
-  private _unsyncToolsFromRegistry(id: string): void {
+  private async _unsyncToolsFromRegistry(id: string): Promise<void> {
     if (!this._toolRegistry) return;
     const prefix = `mcp__${id}__`;
-    const defs = this._toolRegistry.getDefinitions();
+    const defs = await this._toolRegistry.getDefinitions();
     let removed = 0;
     for (const def of defs) {
       if (def.name.startsWith(prefix)) {
@@ -445,7 +445,7 @@ export class MCPBridge {
 
     // Disconnect existing if any
     if (this.clients.has(id)) {
-      this._unsyncToolsFromRegistry(id);
+      await this._unsyncToolsFromRegistry(id);
       await this.clients.get(id)!.disconnect();
       this.clients.delete(id);
     }

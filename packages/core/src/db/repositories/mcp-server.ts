@@ -45,7 +45,7 @@ function parseRow(row: MCPServerRow): MCPServerParsed {
 export class MCPServerRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  create(server: {
+  async create(server: {
     id: string;
     tenantId: string;
     name: string;
@@ -54,10 +54,10 @@ export class MCPServerRepository {
     args?: string[];
     url?: string;
     env?: Record<string, string>;
-  }): MCPServerRow {
+  }): Promise<MCPServerRow> {
     const now = new Date().toISOString();
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO mcp_servers (id, tenant_id, name, transport, command, args, url, env, enabled, pinned_hash, installed_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)`,
       [
@@ -74,28 +74,28 @@ export class MCPServerRepository {
       ],
     );
 
-    return this.db.get<MCPServerRow>('SELECT * FROM mcp_servers WHERE id = ?', [server.id])!;
+    return (await this.db.get<MCPServerRow>('SELECT * FROM mcp_servers WHERE id = ?', [server.id]))!;
   }
 
-  getById(id: string): MCPServerRow | undefined {
-    return this.db.get<MCPServerRow>('SELECT * FROM mcp_servers WHERE id = ?', [id]);
+  async getById(id: string): Promise<MCPServerRow | undefined> {
+    return await this.db.get<MCPServerRow>('SELECT * FROM mcp_servers WHERE id = ?', [id]);
   }
 
-  listByTenant(tenantId: string): MCPServerRow[] {
-    return this.db.query<MCPServerRow>(
+  async listByTenant(tenantId: string): Promise<MCPServerRow[]> {
+    return await this.db.query<MCPServerRow>(
       'SELECT * FROM mcp_servers WHERE tenant_id = ? ORDER BY name ASC',
       [tenantId],
     );
   }
 
-  listEnabled(tenantId: string): MCPServerRow[] {
-    return this.db.query<MCPServerRow>(
+  async listEnabled(tenantId: string): Promise<MCPServerRow[]> {
+    return await this.db.query<MCPServerRow>(
       'SELECT * FROM mcp_servers WHERE tenant_id = ? AND enabled = 1 ORDER BY name ASC',
       [tenantId],
     );
   }
 
-  update(
+  async update(
     id: string,
     data: Partial<{
       name: string;
@@ -107,7 +107,7 @@ export class MCPServerRepository {
       url: string;
       env: Record<string, string>;
     }>,
-  ): void {
+  ): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
 
@@ -150,11 +150,11 @@ export class MCPServerRepository {
     values.push(new Date().toISOString());
     values.push(id);
 
-    this.db.run(`UPDATE mcp_servers SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.run(`UPDATE mcp_servers SET ${fields.join(', ')} WHERE id = ?`, values);
   }
 
-  delete(id: string): void {
-    this.db.run('DELETE FROM mcp_servers WHERE id = ?', [id]);
+  async delete(id: string): Promise<void> {
+    await this.db.run('DELETE FROM mcp_servers WHERE id = ?', [id]);
   }
 }
 

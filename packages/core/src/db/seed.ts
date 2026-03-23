@@ -7,16 +7,16 @@ import { hashApiKey } from '../auth/keys.js';
  * Only runs if no tenants exist (first-time setup).
  * Returns the generated admin API key (printed to console on first run).
  */
-export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun: boolean } {
+export async function seedDatabase(db: DatabaseAdapter): Promise<{ apiKey?: string; isFirstRun: boolean }> {
   // Check if any tenants exist
-  const existing = db.get<{ count: number }>('SELECT COUNT(*) as count FROM tenants');
+  const existing = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM tenants');
   if (existing && existing.count > 0) {
     return { isFirstRun: false };
   }
 
   // Create default tenant
   const tenantId = crypto.randomUUID();
-  db.run(
+  await db.run(
     'INSERT INTO tenants (id, name, slug, plan) VALUES (?, ?, ?, ?)',
     [tenantId, 'Default', 'default', 'community']
   );
@@ -26,7 +26,7 @@ export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun
   const apiKey = process.env.AGW_ADMIN_KEY || ('agw_sk_' + crypto.randomBytes(32).toString('hex'));
   const apiKeyHash = hashApiKey(apiKey);
 
-  db.run(
+  await db.run(
     'INSERT INTO users (id, tenant_id, name, role, api_key_hash) VALUES (?, ?, ?, ?, ?)',
     [userId, tenantId, 'Admin', 'admin', apiKeyHash]
   );
@@ -55,7 +55,7 @@ export function seedDatabase(db: DatabaseAdapter): { apiKey?: string; isFirstRun
   ];
 
   for (const p of defaultPermissions) {
-    db.run(
+    await db.run(
       'INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission) VALUES (?, ?, ?, ?)',
       [tenantId, p.role, p.pattern, p.permission]
     );

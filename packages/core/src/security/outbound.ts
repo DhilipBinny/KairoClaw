@@ -24,12 +24,12 @@ export interface OutboundCheckResult {
  * - 'session-only' (default): allowed if the recipient has an active session OR
  *   is in the channel's outboundAllowlist
  */
-export function checkOutboundAllowed(
+export async function checkOutboundAllowed(
   channel: 'whatsapp' | 'telegram',
   recipient: string,
   config: GatewayConfig,
   db: DatabaseAdapter,
-): OutboundCheckResult {
+): Promise<OutboundCheckResult> {
   const channelConfig = config.channels?.[channel];
   if (!channelConfig) {
     return { allowed: false, reason: `Channel "${channel}" is not configured — defaulting to deny` };
@@ -58,7 +58,7 @@ export function checkOutboundAllowed(
   // Check sessions table — does this recipient have an existing session?
   // Sessions are stored as chat_id = "whatsapp:JID" or "telegram:chatId"
   const chatIdPattern = `${channel}:${recipient}`;
-  const session = db.get<{ id: string }>(
+  const session = await db.get<{ id: string }>(
     'SELECT id FROM sessions WHERE channel = ? AND chat_id = ? LIMIT 1',
     [channel, chatIdPattern],
   );
@@ -68,7 +68,7 @@ export function checkOutboundAllowed(
 
   // Also try matching without channel prefix — escape LIKE metacharacters
   const escapedRecipient = recipient.replace(/[%_]/g, '\\$&');
-  const sessionAlt = db.get<{ id: string }>(
+  const sessionAlt = await db.get<{ id: string }>(
     "SELECT id FROM sessions WHERE chat_id LIKE ? ESCAPE '\\' LIMIT 1",
     [`%${escapedRecipient}%`],
   );
