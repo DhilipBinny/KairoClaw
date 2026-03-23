@@ -310,15 +310,25 @@
   }
 
   @media (max-width: 768px) {
+    .page-header h1 { font-size: 18px; }
     .layout {
       flex-direction: column;
     }
     .user-list {
       max-width: 100% !important;
       min-width: 0;
+      max-height: 40vh;
+      overflow-y: auto;
+      flex-shrink: 0;
     }
     .detail-panel {
       max-height: none;
+    }
+    .detail-header h2 {
+      font-size: 13px;
+    }
+    .content-block {
+      font-size: 11px;
     }
   }
 </style>

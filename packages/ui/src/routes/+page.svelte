@@ -330,6 +330,9 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
   }
   .sidebar-header {
     padding: 16px;
@@ -357,6 +360,7 @@
   .sidebar-footer {
     padding: 12px 16px;
     border-top: 1px solid var(--border);
+    flex-shrink: 0;
   }
   .sidebar-admin-link {
     display: flex;
