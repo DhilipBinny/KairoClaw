@@ -108,7 +108,7 @@
   }
 
   async function handleSearch() {
-    if (!searchQuery.trim()) {
+    if (!searchQuery.trim() || searchQuery.trim().length < 3) {
       marketplaceResults = [];
       return;
     }
@@ -217,7 +217,7 @@
   let searchTimeout: ReturnType<typeof setTimeout>;
   function onSearchInput() {
     clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(handleSearch, 400);
+    searchTimeout = setTimeout(handleSearch, 800);
   }
 
   onMount(loadData);
