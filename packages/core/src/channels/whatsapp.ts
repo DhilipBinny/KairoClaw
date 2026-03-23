@@ -23,7 +23,6 @@ import {
   jidNormalizedUser,
   type WASocket,
   type WAMessage,
-  proto,
 } from 'baileys';
 import type { GatewayConfig, InboundMessage } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
@@ -494,7 +493,7 @@ class WhatsAppChannel implements Channel {
         const mimeType = imgMsg.mimetype || 'image/jpeg';
         msgText = caption || "What's in this image?";
         images = [{ data: base64, mimeType }];
-      } catch (e: unknown) {
+      } catch (_e: unknown) {
         // Fallback: save to disk
         const localPath = await this.downloadMediaToDisk(msg, 'image.jpg');
         const workspace = this.config.agent.workspace;
@@ -547,7 +546,6 @@ class WhatsAppChannel implements Channel {
         }
       }
     } else if (contentType === 'audioMessage') {
-      const audioMsg = msg.message.audioMessage!;
       const ext = 'ogg';
       const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`);
       if (!localPath) {

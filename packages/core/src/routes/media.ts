@@ -30,7 +30,7 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
     const { filename } = request.params as { filename: string };
 
     // Sanitize: only allow simple filenames (uuid.ext)
-    if (!/^[a-f0-9\-]+\.[a-z0-9]+$/i.test(filename)) {
+    if (!/^[a-f0-9-]+\.[a-z0-9]+$/i.test(filename)) {
       return reply.code(400).send({ error: 'Invalid filename' });
     }
 

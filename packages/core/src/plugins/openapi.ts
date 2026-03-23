@@ -285,7 +285,6 @@ export async function importAllOpenAPIServices(
   services: OpenAPIImportOptions[],
   existingPlugins: HttpPluginConfig[],
 ): Promise<{ plugins: HttpPluginConfig[]; imported: string[]; errors: Array<{ name: string; error: string }> }> {
-  const existingNames = new Set(existingPlugins.map(p => p.name));
   const imported: string[] = [];
   const errors: Array<{ name: string; error: string }> = [];
   const newPlugins = [...existingPlugins];

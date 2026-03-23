@@ -147,8 +147,6 @@ export async function runAgent(
   // ── Build the user message content (text or multimodal) ──
   const caps = getModelCapabilities(model, config);
   let userContent: string | MessageContentPart[];
-  let userTextForLog = inbound.text;
-
   if (inbound.images && inbound.images.length > 0) {
     if (caps.supportsVision) {
       // Build multimodal content array
@@ -169,7 +167,6 @@ export async function runAgent(
       // Model doesn't support vision — append note to text
       userContent = inbound.text +
         '\n\n[Note: Images were sent but the current model does not support vision. Please switch to a vision-capable model like Claude or GPT-4o.]';
-      userTextForLog = userContent;
     }
   } else {
     userContent = inbound.text;
@@ -216,8 +213,6 @@ export async function runAgent(
   const toolCallCounts = new Map<string, number>();
   const subagentRegistry = new SubAgentRegistry();
   let round = 0;
-  let lastResponseHadToolCalls = false;
-
   while (round < maxToolRounds) {
     round++;
     if (onRoundStart) onRoundStart(round, maxToolRounds);
@@ -302,8 +297,6 @@ export async function runAgent(
       inputTokens: inTok, outputTokens: outTok,
       costUsd,
     });
-
-    lastResponseHadToolCalls = !!response.toolCalls;
 
     // If no tool calls, we're done
     if (!response.toolCalls) {

@@ -107,7 +107,7 @@ function resolveMediaPath(
   workspace: string,
 ): string | null {
   // Media store URL
-  const mediaMatch = ref.match(/\/api\/v1\/media\/([a-f0-9\-]+\.[a-z0-9]+)/i);
+  const mediaMatch = ref.match(/\/api\/v1\/media\/([a-f0-9-]+\.[a-z0-9]+)/i);
   if (mediaMatch) {
     const mediaPath = path.join(stateDir, 'media', mediaMatch[1]);
     if (fs.existsSync(mediaPath)) return mediaPath;

@@ -27,7 +27,7 @@ export function estimateTokens(text: string): number {
   if (!text) return 0;
   const s = String(text);
   // Detect code/JSON density by counting structural punctuation
-  const codeChars = (s.match(/[{}\[\]();:=<>\/\\]/g) || []).length;
+  const codeChars = (s.match(/[{}[\]();:=<>/\\]/g) || []).length;
   const codeRatio = codeChars / s.length;
   const charsPerToken = codeRatio > 0.05 ? 3.2 : 3.8;
   return Math.ceil(s.length / charsPerToken);
