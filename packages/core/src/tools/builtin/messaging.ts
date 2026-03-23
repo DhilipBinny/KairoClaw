@@ -297,7 +297,7 @@ IMPORTANT delivery rules:
           if (!args.prompt || !(args.prompt as string).trim()) return { error: 'prompt is required for add' };
 
           // Auto-fill and validate delivery targets from conversation context
-          let delivery = args.delivery as Record<string, unknown> | string | undefined;
+          const delivery = args.delivery as Record<string, unknown> | string | undefined;
           const session = (ctx.session as Record<string, unknown>) || {};
           const sessionChannel = session.channel as string || '';
           const sessionChatId = session.chat_id as string || '';

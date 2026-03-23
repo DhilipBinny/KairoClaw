@@ -99,7 +99,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
   // Ensure @fastify/websocket is registered
   await app.register(import('@fastify/websocket'));
 
-  app.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
+  app.get('/ws', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     if (clients.size >= MAX_WS_CONNECTIONS) {
       log.warn('WebSocket connection rejected: max connections reached');
       socket.close(1013, 'Too many connections');
@@ -361,14 +361,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'chat.history': {
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
-            // Look up session by ID first, then by chatId pattern
-            const allSessions = sessionRepo.listByTenant(tenantId, 500);
+            // Look up session by ID first, then by chatId pattern (web sessions only)
+            const webSessions = sessionRepo.listByTenant(tenantId, 500)
+              .filter((s) => s.channel === 'web');
             let session = sessionId
-              ? allSessions.find((s) => s.id === sessionId)
-              : allSessions.find((s) => s.chat_id === `web:${sessionKey}`);
+              ? webSessions.find((s) => s.id === sessionId)
+              : webSessions.find((s) => s.chat_id === `web:${sessionKey}`);
             // Also try matching by session ID as sessionKey
             if (!session) {
-              session = allSessions.find((s) => s.id === sessionKey);
+              session = webSessions.find((s) => s.id === sessionKey);
             }
             if (!session) {
               safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
@@ -387,18 +388,39 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // ── Session list ─────────────────────
           case 'sessions.list': {
             const sessions = sessionRepo.listByTenant(tenantId, 100);
-            // Filter out internal/cron sessions, keep only sessions with actual messages
-            const list = sessions
-              .filter((s) => s.turns > 0 && s.channel !== 'internal' && s.channel !== 'cron')
+            // Show only web chat sessions with actual messages
+            const webSessions = sessions
+              .filter((s) => s.turns > 0 && s.channel === 'web');
+
+            // Batch-fetch first user message for titles
+            const sIds = webSessions.map(s => s.id);
+            const titleMap = new Map<string, string>();
+            if (sIds.length > 0) {
+              const placeholders = sIds.map(() => '?').join(',');
+              const titleRows = db.query<{ session_id: string; content: string }>(
+                `SELECT session_id, content FROM messages
+                 WHERE session_id IN (${placeholders}) AND role = 'user'
+                 GROUP BY session_id HAVING id = MIN(id)`,
+                sIds,
+              );
+              for (const row of titleRows) {
+                const text = row.content.slice(0, 80).replace(/\n/g, ' ');
+                titleMap.set(row.session_id, text.length < row.content.length ? text + '...' : text);
+              }
+            }
+
+            const list = webSessions
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
-                // Extract session key from chat_id (e.g., "web:main" → "main")
                 const chatKey = s.chat_id?.startsWith('web:') ? s.chat_id.slice(4) : s.chat_id || s.id;
+                const metadata = JSON.parse(s.metadata || '{}');
+                const title = metadata.title || titleMap.get(s.id) || '';
                 return {
                   id: s.id,
                   sessionKey: chatKey,
                   channel: s.channel,
                   chatId: s.chat_id,
+                  title,
                   turns: s.turns,
                   inputTokens: s.input_tokens,
                   outputTokens: s.output_tokens,

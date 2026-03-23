@@ -146,7 +146,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
     const { key } = request.params as { key: string };
 
     // Validate scope key — no path traversal
-    if (/[\/\\]|\.\./.test(key)) {
+    if (/[/\\]|\.\./.test(key)) {
       return reply.code(400).send({ error: 'Invalid scope key' });
     }
 

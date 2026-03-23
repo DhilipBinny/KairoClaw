@@ -1,4 +1,4 @@
-import type { FastifyRequest, FastifyReply, FastifyPluginAsync } from 'fastify';
+import type { FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { hashApiKey } from './keys.js';
 import type { DatabaseAdapter } from '../db/index.js';
@@ -36,7 +36,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
 
     // Media files need to be loadable by <img> tags (no auth header possible)
     // Only bypass for actual file requests (uuid.ext pattern), not sub-routes
-    if (/^\/api\/v1\/media\/[a-f0-9\-]+\.[a-z0-9]+$/i.test(request.url.split('?')[0])) return;
+    if (/^\/api\/v1\/media\/[a-f0-9-]+\.[a-z0-9]+$/i.test(request.url.split('?')[0])) return;
 
     // Also skip non-API routes (static files, etc.)
     if (!request.url.startsWith('/api/')) return;

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { DatabaseAdapter } from '../index.js';
 
 export interface SessionRow {

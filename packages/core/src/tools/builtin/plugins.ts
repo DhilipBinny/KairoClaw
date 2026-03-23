@@ -10,14 +10,13 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
-import type { PluginsConfig } from '@agw/types';
 import { loadPlugins, savePlugins } from '../../plugins/store.js';
 
 const execFileAsync = promisify(execFileCb);
 
 /** Validate a command name is safe (no shell metacharacters). */
 function isValidCommand(cmd: string): boolean {
-  return /^[a-zA-Z0-9_\-\.]+$/.test(cmd);
+  return /^[a-zA-Z0-9_\-.]+$/.test(cmd);
 }
 
 export const pluginTools: ToolRegistration[] = [

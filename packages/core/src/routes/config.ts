@@ -78,7 +78,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     try {
       const raw = fs.readFileSync(configPath, 'utf8');
       rawConfig = JSON.parse(raw) as Record<string, unknown>;
-    } catch (e) {
+    } catch (_e) {
       return reply.code(500).send({ error: 'Failed to read config file' });
     }
 
@@ -103,7 +103,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     // Write back to disk
     try {
       fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
-    } catch (e) {
+    } catch (_e) {
       return reply.code(500).send({ error: 'Failed to write config file' });
     }
 
