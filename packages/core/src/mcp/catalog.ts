@@ -52,34 +52,11 @@ export interface MCPRegistryResult {
 
 // ── Local Catalog ────────────────────────────────────────
 
+// Only servers with NO CLI alternative — most tasks are better handled
+// by the built-in exec tool with CLI commands (gh, psql, aws, etc.)
+// Users can install any MCP server from the registry search below.
 export const MCP_CATALOG: Record<string, CatalogEntry> = {
-  // --- Development ---
-  github: {
-    name: 'GitHub',
-    description: 'Issues, PRs, repos, code search, file contents',
-    package: '@modelcontextprotocol/server-github',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-github'],
-    envVars: [
-      { key: 'GITHUB_PERSONAL_ACCESS_TOKEN', label: 'GitHub Personal Access Token', required: true, sensitive: true, placeholder: 'ghp_...', helpUrl: 'https://github.com/settings/tokens' },
-    ],
-    category: 'development',
-  },
-  gitlab: {
-    name: 'GitLab',
-    description: 'Issues, merge requests, repos, pipelines',
-    package: '@modelcontextprotocol/server-gitlab',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-gitlab'],
-    envVars: [
-      { key: 'GITLAB_PERSONAL_ACCESS_TOKEN', label: 'GitLab Personal Access Token', required: true, sensitive: true, placeholder: 'glpat-...' },
-      { key: 'GITLAB_API_URL', label: 'GitLab API URL', required: false, sensitive: false, placeholder: 'https://gitlab.com/api/v4' },
-    ],
-    category: 'development',
-  },
-  // --- Communication ---
+  // --- Communication (no CLI alternative for reading channels) ---
   slack: {
     name: 'Slack',
     description: 'Read channels, send messages, search workspace',
@@ -94,63 +71,7 @@ export const MCP_CATALOG: Record<string, CatalogEntry> = {
     category: 'communication',
   },
 
-  // --- Search ---
-  'brave-search': {
-    name: 'Brave Search',
-    description: 'Web search with privacy focus',
-    package: '@modelcontextprotocol/server-brave-search',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-brave-search'],
-    envVars: [
-      { key: 'BRAVE_API_KEY', label: 'Brave Search API Key', required: true, sensitive: true, placeholder: 'BSA...', helpUrl: 'https://brave.com/search/api/' },
-    ],
-    category: 'search',
-  },
-
-  // --- Data ---
-  postgres: {
-    name: 'PostgreSQL',
-    description: 'Query and manage PostgreSQL databases',
-    package: '@modelcontextprotocol/server-postgres',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-postgres'],
-    envVars: [
-      { key: 'POSTGRES_CONNECTION_STRING', label: 'Connection String', required: true, sensitive: true, placeholder: 'postgres://user:pass@host:5432/db' },
-    ],
-    category: 'data',
-  },
-  sqlite: {
-    name: 'SQLite',
-    description: 'Query and manage SQLite databases',
-    package: '@modelcontextprotocol/server-sqlite',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-sqlite'],
-    envVars: [
-      { key: 'SQLITE_DB_PATH', label: 'Database Path', required: true, sensitive: false, placeholder: '/path/to/database.db' },
-    ],
-    category: 'data',
-  },
-
-  // --- Cloud ---
-  'aws-kb-retrieval': {
-    name: 'AWS Knowledge Base',
-    description: 'Retrieve from AWS Bedrock Knowledge Bases using RAG',
-    package: '@modelcontextprotocol/server-aws-kb-retrieval',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@modelcontextprotocol/server-aws-kb-retrieval'],
-    envVars: [
-      { key: 'AWS_ACCESS_KEY_ID', label: 'AWS Access Key', required: true, sensitive: true },
-      { key: 'AWS_SECRET_ACCESS_KEY', label: 'AWS Secret Key', required: true, sensitive: true },
-      { key: 'AWS_REGION', label: 'AWS Region', required: true, sensitive: false, placeholder: 'us-east-1' },
-    ],
-    category: 'cloud',
-  },
-
-  // --- Productivity ---
+  // --- Productivity (no CLI alternative) ---
   'google-maps': {
     name: 'Google Maps',
     description: 'Location services, directions, and place details',
