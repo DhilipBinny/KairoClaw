@@ -99,7 +99,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
   // Ensure @fastify/websocket is registered
   await app.register(import('@fastify/websocket'));
 
-  app.get('/ws', { websocket: true }, (socket: WebSocket, req: FastifyRequest) => {
+  app.get('/ws', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     if (clients.size >= MAX_WS_CONNECTIONS) {
       log.warn('WebSocket connection rejected: max connections reached');
       socket.close(1013, 'Too many connections');

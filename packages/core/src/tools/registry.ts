@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
-import type { ToolRegistration, ToolExecutor } from './types.js';
+import type { ToolRegistration } from './types.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { checkToolPermission } from './permissions.js';
 import type { AuditService } from '../security/audit.js';

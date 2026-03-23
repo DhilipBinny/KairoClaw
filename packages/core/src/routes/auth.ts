@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { hashApiKey, generateApiKey } from '../auth/keys.js';
+import { hashApiKey } from '../auth/keys.js';
 import type { DatabaseAdapter } from '../db/index.js';
 
 // Per-IP login attempt tracking for brute-force protection

@@ -26,8 +26,6 @@ import { getScopedMemoryDir } from './scope.js';
 
 const log = createModuleLogger('memory');
 
-const PROFILE_FILE = 'memory/PROFILE.md';
-const SESSIONS_DIR = 'memory/sessions';
 const SESSION_RETENTION_DAYS = MEMORY_SESSION_RETENTION_DAYS;
 
 // ── Helpers ─────────────────────────────────────

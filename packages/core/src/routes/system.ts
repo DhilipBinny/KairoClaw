@@ -757,7 +757,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       try {
         await execFileAsync('tar', ['-xzf', tmpFile, '--no-same-owner', '-C', stagingDir], { timeout: 30_000 });
-      } catch (extractErr) {
+      } catch (_extractErr) {
         fs.rmSync(stagingDir, { recursive: true, force: true });
         fs.unlinkSync(tmpFile);
         return reply.code(400).send({ error: 'Failed to extract archive to staging directory' });
