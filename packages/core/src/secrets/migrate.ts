@@ -24,14 +24,21 @@ const ENV_TO_SECRETS: Array<{ envKey: string; namespace: string; secretKey: stri
 
 /**
  * Migrate secrets from .env + mcp-secrets.json into the unified secrets.json.
+ * This is a legacy migration — writes plaintext secrets.json which will then
+ * be encrypted by SecretsStore constructor when a master key is available.
  * Returns the number of secrets migrated.
  */
 export function migrateToSecretsStore(stateDir: string): number {
-  const store = new SecretsStore(stateDir);
+  // Use plaintext-only store (no master key, quiet) — encryption happens later in SecretsStore constructor
+  const store = new SecretsStore(stateDir, null, { quiet: true });
   const secretsPath = path.join(stateDir, 'secrets.json');
   let migrated = 0;
 
-  // Skip if secrets.json already has data
+  // Skip if already migrated (secrets.json has data OR secrets.enc exists)
+  const encryptedPath = path.join(stateDir, 'secrets.enc');
+  if (fs.existsSync(encryptedPath)) {
+    return 0; // already encrypted
+  }
   try {
     if (fs.existsSync(secretsPath)) {
       const existing = JSON.parse(fs.readFileSync(secretsPath, 'utf8'));
