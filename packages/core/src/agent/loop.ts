@@ -66,6 +66,8 @@ export interface AgentContext {
   subagentDepth?: number;
   /** Scope key for per-user memory isolation (e.g., "telegram:8606526093"). */
   scopeKey?: string | null;
+  /** Ephemeral mode — skip all DB persistence (for sub-agents). */
+  ephemeral?: boolean;
 }
 
 /** Observability callbacks fired around each round. */
@@ -88,22 +90,23 @@ export async function runAgent(
 ): Promise<AgentResult> {
   const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
+  const ephemeral = context.ephemeral ?? false;
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
 
   const maxToolRounds = config.agent?.maxToolRounds || 25;
   const model = context.model || config.model.primary;
 
   // Child logger with request context — auto-propagated to all log calls
-  const reqLog = log.child({ requestId, sessionId: session.id, channel: inbound.channel, model });
+  const reqLog = log.child({ requestId, sessionId: session.id, channel: inbound.channel, model, ephemeral });
 
-  const sessionRepo = new SessionRepository(db);
-  const messageRepo = new MessageRepository(db);
-  const usageRepo = new UsageRepository(db);
-  const toolCallRepo = new ToolCallRepository(db);
+  const sessionRepo = !ephemeral ? new SessionRepository(db) : null;
+  const messageRepo = !ephemeral ? new MessageRepository(db) : null;
+  const usageRepo = !ephemeral ? new UsageRepository(db) : null;
+  const toolCallRepo = !ephemeral ? new ToolCallRepository(db) : null;
 
-  // ── Slash commands ──────────────────────────────────────
+  // ── Slash commands (skip for ephemeral/sub-agent sessions) ──
   const trimmed = inbound.text.trim();
-  if (trimmed.startsWith('/')) {
+  if (!ephemeral && trimmed.startsWith('/')) {
     const [cmd, ...rest] = trimmed.split(/\s+/);
     const slashResult = await handleSlashCommand(cmd!, rest.join(' '), {
       db,
@@ -123,20 +126,22 @@ export async function runAgent(
     return { text: null };
   }
 
-  // ── Pre-turn compaction check ───────────────────────────
-  try {
-    await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    reqLog.warn({ err: msg }, 'Compaction check failed');
+  // ── Pre-turn compaction check (skip for ephemeral) ──────
+  if (!ephemeral) {
+    try {
+      await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      reqLog.warn({ err: msg }, 'Compaction check failed');
+    }
   }
 
   // ── Build system prompt ─────────────────────────────────
   const tools = context.tools ?? [];
   const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey);
 
-  // ── Load conversation history ───────────────────────────
-  const historyRows = messageRepo.listBySession(session.id);
+  // ── Load conversation history (empty for ephemeral) ─────
+  const historyRows = messageRepo ? messageRepo.listBySession(session.id) : [];
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -183,10 +188,9 @@ export async function runAgent(
     }
   }
 
-  // ── Persist inbound user message (track ID so we can delete on error) ──
-  // Store text-only content in DB (images are not persisted in message history)
+  // ── Persist inbound user message (skip for ephemeral) ──
   const persistText = typeof userContent === 'string' ? userContent : inbound.text;
-  const userMsgResult = messageRepo.create({
+  const userMsgResult = messageRepo ? messageRepo.create({
     sessionId: session.id,
     tenantId,
     role: 'user',
@@ -196,7 +200,7 @@ export async function runAgent(
       sender: inbound.senderName,
       ...(inbound.images && inbound.images.length > 0 ? { imageCount: inbound.images.length } : {}),
     }),
-  });
+  }) : null;
   // ── Build thinking config if enabled + model supports it ──
   const thinkingCfg = config.agent?.thinking;
   const thinkingConfig = (thinkingCfg?.enabled && caps.supportsThinking)
@@ -246,12 +250,12 @@ export async function runAgent(
 
       // Context overflow recovery: compact and retry on first round
       const isOverflow = /context.length|context.window|too.many.tokens|exceeds.*max|max.*token/i.test(msg);
-      if (isOverflow && round === 1) {
+      if (isOverflow && round === 1 && !ephemeral) {
         reqLog.warn({ err: msg }, 'Context overflow detected — attempting mid-turn compaction');
         try {
           await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
           // Reload messages after compaction
-          const freshRows = messageRepo.listBySession(session.id);
+          const freshRows = messageRepo!.listBySession(session.id);
           messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
           response = await context.callLLM({
             messages, tools: tools.length > 0 ? tools : undefined,
@@ -288,10 +292,10 @@ export async function runAgent(
       stopReason: ('stopReason' in response ? (response as Record<string, unknown>).stopReason : undefined) || (toolCount > 0 ? 'tool_use' : 'end_turn'),
     }, 'LLM call completed');
 
-    // Record per-round usage with cost estimate
+    // Record per-round usage with cost estimate (skip for ephemeral)
     const provider = model.split('/')[0] ?? 'unknown';
     const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
-    usageRepo.record({
+    if (usageRepo) usageRepo.record({
       tenantId, userId,
       sessionId: session.id,
       model, provider,
@@ -394,18 +398,20 @@ export async function runAgent(
 
       const durationMs = Date.now() - toolStartTime;
 
-      // Record tool call in the database
-      toolCallRepo.record({
-        id: tc.id || crypto.randomUUID(),
-        sessionId: session.id,
-        tenantId,
-        userId,
-        toolName,
-        arguments: toolArgs,
-        result,
-        status: toolStatus,
-        durationMs,
-      });
+      // Record tool call in the database (skip for ephemeral)
+      if (toolCallRepo) {
+        toolCallRepo.record({
+          id: tc.id || crypto.randomUUID(),
+          sessionId: session.id,
+          tenantId,
+          userId,
+          toolName,
+          arguments: toolArgs,
+          result,
+          status: toolStatus,
+          durationMs,
+        });
+      }
 
       // Collect _media attachments from tool results
       if (result && typeof result === 'object' && !Array.isArray(result)) {
@@ -517,8 +523,8 @@ export async function runAgent(
     }
   }
 
-  // ── Persist assistant message ─────────────────────────────
-  if (fullText) {
+  // ── Persist assistant message (skip for ephemeral) ───────
+  if (fullText && messageRepo) {
     messageRepo.create({
       sessionId: session.id,
       tenantId,
@@ -527,12 +533,14 @@ export async function runAgent(
     });
   }
 
-  // ── Update session usage ──────────────────────────────────
-  sessionRepo.addUsage(session.id, totalInputTokens, totalOutputTokens);
-  sessionRepo.incrementTurns(session.id);
+  // ── Update session usage (skip for ephemeral) ─────────────
+  if (sessionRepo) {
+    sessionRepo.addUsage(session.id, totalInputTokens, totalOutputTokens);
+    sessionRepo.incrementTurns(session.id);
+  }
 
-  // ── Auto-summarize to memory (fire-and-forget, don't block response) ──
-  if (totalInputTokens + totalOutputTokens > 0) {
+  // ── Auto-summarize to memory (skip for ephemeral — sub-agents don't generate memory) ──
+  if (!ephemeral && totalInputTokens + totalOutputTokens > 0) {
     autoSummarizeToMemory({
       sessionId: session.id,
       channel: inbound.channel,
