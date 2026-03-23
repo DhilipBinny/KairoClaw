@@ -39,34 +39,34 @@ function patternSpecificity(pattern: string): number {
 export class ToolPermissionRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  create(perm: {
+  async create(perm: {
     tenantId: string;
     role: string;
     toolPattern: string;
     permission: string;
-  }): void {
+  }): Promise<void> {
     const now = new Date().toISOString();
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission, created_at)
        VALUES (?, ?, ?, ?, ?)`,
       [perm.tenantId, perm.role, perm.toolPattern, perm.permission, now],
     );
   }
 
-  listByTenantAndRole(tenantId: string, role: string): ToolPermissionRow[] {
-    return this.db.query<ToolPermissionRow>(
+  async listByTenantAndRole(tenantId: string, role: string): Promise<ToolPermissionRow[]> {
+    return await this.db.query<ToolPermissionRow>(
       'SELECT * FROM tool_permissions WHERE tenant_id = ? AND role = ?',
       [tenantId, role],
     );
   }
 
-  delete(id: number): void {
-    this.db.run('DELETE FROM tool_permissions WHERE id = ?', [id]);
+  async delete(id: number): Promise<void> {
+    await this.db.run('DELETE FROM tool_permissions WHERE id = ?', [id]);
   }
 
-  checkPermission(tenantId: string, role: string, toolName: string): 'allow' | 'deny' | 'confirm' {
-    const permissions = this.listByTenantAndRole(tenantId, role);
+  async checkPermission(tenantId: string, role: string, toolName: string): Promise<'allow' | 'deny' | 'confirm'> {
+    const permissions = await this.listByTenantAndRole(tenantId, role);
 
     // Find all matching permissions and pick the most specific
     let bestMatch: ToolPermissionRow | null = null;

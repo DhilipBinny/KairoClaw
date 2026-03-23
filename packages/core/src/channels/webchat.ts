@@ -182,7 +182,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // If gateway token didn't match, check against user API keys in the DB
           if (!authValid && token) {
             const keyHash = hashApiKey(token);
-            const user = db.get<{ id: string }>(
+            const user = await db.get<{ id: string }>(
               'SELECT id FROM users WHERE api_key_hash = ?',
               [keyHash],
             );
@@ -364,7 +364,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
             // Look up session by ID first, then by chatId pattern (web sessions only)
-            const webSessions = sessionRepo.listByTenant(tenantId, 500)
+            const webSessions = (await sessionRepo.listByTenant(tenantId, 500))
               .filter((s) => s.channel === 'web');
             let session = sessionId
               ? webSessions.find((s) => s.id === sessionId)
@@ -378,7 +378,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               break;
             }
             const limit = (msg.limit as number) || 50;
-            const rows = messageRepo.listBySession(session.id);
+            const rows = await messageRepo.listBySession(session.id);
             const messages = rows.slice(-limit).map((m) => ({
               role: m.role,
               content: m.content?.slice(0, 5000),
@@ -389,7 +389,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
 
           // ── Session list ─────────────────────
           case 'sessions.list': {
-            const sessions = sessionRepo.listByTenant(tenantId, 100);
+            const sessions = await sessionRepo.listByTenant(tenantId, 100);
             // Show only web chat sessions with actual messages
             const webSessions = sessions
               .filter((s) => s.turns > 0 && s.channel === 'web');
@@ -399,7 +399,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const titleMap = new Map<string, string>();
             if (sIds.length > 0) {
               const placeholders = sIds.map(() => '?').join(',');
-              const titleRows = db.query<{ session_id: string; content: string }>(
+              const titleRows = await db.query<{ session_id: string; content: string }>(
                 `SELECT session_id, content FROM messages
                  WHERE session_id IN (${placeholders}) AND role = 'user'
                  GROUP BY session_id HAVING id = MIN(id)`,

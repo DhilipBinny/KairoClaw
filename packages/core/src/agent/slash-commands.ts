@@ -63,17 +63,17 @@ export async function handleSlashCommand(
 
   if (action === 'reset') {
     // Delete messages for the session — the caller creates a new session
-    messageRepo.deleteBySession(session.id);
+    await messageRepo.deleteBySession(session.id);
     return {
       text: `Session reset. New session: \`${session.id.slice(0, 8)}\``,
     };
   }
 
   if (action === 'status') {
-    const messages = messageRepo.listBySession(session.id);
+    const messages = await messageRepo.listBySession(session.id);
     const tokenEst = estimateMessageTokens(messages);
     const modelName = config.model?.primary || 'default';
-    const compaction = needsCompaction(session.id, modelName, db, config);
+    const compaction = await needsCompaction(session.id, modelName, db, config);
     return {
       text:
         `**Session Status**\n` +
@@ -136,7 +136,7 @@ export async function handleSlashCommand(
     // Store per-session override in metadata instead of mutating global config
     const meta = JSON.parse(session.metadata || '{}');
     meta.model_override = newModel;
-    sessionRepo.update(session.id, { metadata: JSON.stringify(meta) });
+    await sessionRepo.update(session.id, { metadata: JSON.stringify(meta) });
     return {
       text: `Model switched for this session: \`${newModel}\``,
     };
@@ -157,7 +157,7 @@ export async function handleSlashCommand(
   }
 
   if (action === 'sessions') {
-    const sessions = sessionRepo.listByTenant(context.tenantId);
+    const sessions = await sessionRepo.listByTenant(context.tenantId);
     const lines = sessions.map((s) => {
       const totalTokens = (s.input_tokens || 0) + (s.output_tokens || 0);
       return `- \`${s.channel}:${s.chat_id ?? 'main'}\` — ${s.turns || 0} turns, ${totalTokens} tokens`;

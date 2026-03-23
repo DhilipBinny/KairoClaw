@@ -19,9 +19,9 @@ export const registerAuditRoutes: FastifyPluginAsync = async (app) => {
     const audit = new AuditService(db);
 
     if (action) {
-      return { entries: audit.repo.listByAction(tenantId, action, parseInt(limit)) };
+      return { entries: await audit.repo.listByAction(tenantId, action, parseInt(limit)) };
     }
-    return { entries: audit.getRecent(tenantId, parseInt(limit), parseInt(offset)) };
+    return { entries: await audit.getRecent(tenantId, parseInt(limit), parseInt(offset)) };
   });
 
   // GET /api/v1/admin/audit/verify -- verify chain integrity
@@ -29,6 +29,6 @@ export const registerAuditRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
     const tenantId = request.tenantId || 'default';
     const audit = new AuditService(db);
-    return audit.verifyChain(tenantId);
+    return await audit.verifyChain(tenantId);
   });
 };

@@ -103,13 +103,13 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
     try {
       const repo = new PendingSenderRepository(db);
-      const pending = repo.listByStatus('pending', 50);
-      const seen = repo.listByStatus('seen', 50);
+      const pending = await repo.listByStatus('pending', 50);
+      const seen = await repo.listByStatus('seen', 50);
       return {
         senders: [...pending, ...seen],
         counts: {
-          pending: repo.countAllByStatus('pending'),
-          seen: repo.countAllByStatus('seen'),
+          pending: await repo.countAllByStatus('pending'),
+          seen: await repo.countAllByStatus('seen'),
         },
       };
     } catch {
@@ -124,7 +124,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
-    const sender = repo.getById(Number(id));
+    const sender = await repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -170,7 +170,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(500).send({ error: 'Failed to update config' });
     }
 
-    repo.updateStatus(Number(id), 'approved');
+    await repo.updateStatus(Number(id), 'approved');
     return { success: true };
   });
 
@@ -180,12 +180,12 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
-    const sender = repo.getById(Number(id));
+    const sender = await repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    repo.updateStatus(Number(id), 'rejected');
+    await repo.updateStatus(Number(id), 'rejected');
     return { success: true };
   });
 };

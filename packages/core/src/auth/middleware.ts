@@ -53,7 +53,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     const keyHash = hashApiKey(apiKey);
 
     // Look up user by hashed API key
-    const user = db.get<{ id: string; tenant_id: string; name: string; role: string }>(
+    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string }>(
       'SELECT id, tenant_id, name, role FROM users WHERE api_key_hash = ?',
       [keyHash]
     );
@@ -79,7 +79,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
 
     // Audit: authenticated API request
     try {
-      auditService?.log({
+      await auditService?.log({
         tenantId: user.tenant_id,
         userId: user.id,
         action: 'auth.request',

@@ -101,7 +101,7 @@ class TelegramChannel implements Channel {
         if (!cfg.allowFrom || cfg.allowFrom.length === 0) {
           // No allowlist — record as 'seen' for onboarding (capped budget)
           try {
-            this.pendingSenders.recordSighting('telegram', senderId, senderName, 'seen', PENDING_SEEN_CAP);
+            await this.pendingSenders.recordSighting('telegram', senderId, senderName, 'seen', PENDING_SEEN_CAP);
           } catch { /* non-critical */ }
         }
       }
@@ -297,8 +297,8 @@ class TelegramChannel implements Channel {
         log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
         try {
           // Evict oldest pending if at cap
-          this.pendingSenders.evictOverCap('telegram', 'pending', PENDING_PENDING_CAP);
-          this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
+          await this.pendingSenders.evictOverCap('telegram', 'pending', PENDING_PENDING_CAP);
+          await this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
         } catch { /* non-critical */ }
         return;
       }
@@ -315,7 +315,7 @@ class TelegramChannel implements Channel {
       try {
         const status = hasGroupAllowlist ? 'pending' : 'seen';
         const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
-        this.pendingSenders.recordWithResolutionCheck('telegram', chatId, groupName, status, cap);
+        await this.pendingSenders.recordWithResolutionCheck('telegram', chatId, groupName, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist (if set, only listed group IDs are allowed)
@@ -342,9 +342,9 @@ class TelegramChannel implements Channel {
           // Record as pending for admin approval
           try {
             const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
-            const resolved = this.pendingSenders.findBySenderId('telegram', senderId, ['approved', 'rejected']);
+            const resolved = await this.pendingSenders.findBySenderId('telegram', senderId, ['approved', 'rejected']);
             if (!resolved) {
-              this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
+              await this.pendingSenders.upsert('telegram', senderId, senderName, 'pending');
             }
           } catch { /* non-critical */ }
           return;

@@ -59,7 +59,7 @@ export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
 
     const db = (request as any).ctx.db as DatabaseAdapter;
     const keyHash = hashApiKey(apiKey);
-    const user = db.get<{ id: string; tenant_id: string; name: string; role: string; email: string }>(
+    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; email: string }>(
       'SELECT id, tenant_id, name, role, email FROM users WHERE api_key_hash = ?',
       [keyHash]
     );

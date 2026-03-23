@@ -7,8 +7,8 @@ interface MigrationRecord {
   name: string;
 }
 
-function ensureMigrationsTable(db: DatabaseAdapter): void {
-  db.run(`
+async function ensureMigrationsTable(db: DatabaseAdapter): Promise<void> {
+  await db.run(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -17,8 +17,8 @@ function ensureMigrationsTable(db: DatabaseAdapter): void {
   `);
 }
 
-function getAppliedVersions(db: DatabaseAdapter): Set<number> {
-  const rows = db.query<MigrationRecord>('SELECT version FROM schema_migrations');
+async function getAppliedVersions(db: DatabaseAdapter): Promise<Set<number>> {
+  const rows = await db.query<MigrationRecord>('SELECT version FROM schema_migrations');
   return new Set(rows.map((r) => r.version));
 }
 
@@ -46,9 +46,9 @@ function discoverMigrations(migrationsDir: string): MigrationFile[] {
   return migrations.sort((a, b) => a.version - b.version);
 }
 
-export function runMigrations(db: DatabaseAdapter, migrationsDir: string): void {
-  ensureMigrationsTable(db);
-  const applied = getAppliedVersions(db);
+export async function runMigrations(db: DatabaseAdapter, migrationsDir: string): Promise<void> {
+  await ensureMigrationsTable(db);
+  const applied = await getAppliedVersions(db);
   const migrations = discoverMigrations(migrationsDir);
 
   for (const migration of migrations) {
@@ -74,9 +74,9 @@ export function runMigrations(db: DatabaseAdapter, migrationsDir: string): void 
       // (PRAGMA foreign_keys cannot be toggled inside a transaction)
       db.pragma('foreign_keys = OFF');
       for (const stmt of nonPragmas) {
-        db.run(stmt);
+        await db.run(stmt);
       }
-      db.run('INSERT INTO schema_migrations (version, name) VALUES (?, ?)', [
+      await db.run('INSERT INTO schema_migrations (version, name) VALUES (?, ?)', [
         migration.version,
         migration.name,
       ]);
@@ -87,11 +87,11 @@ export function runMigrations(db: DatabaseAdapter, migrationsDir: string): void 
         const pragmaBody = pragma.replace(/^PRAGMA\s+/i, '');
         db.pragma(pragmaBody);
       }
-      db.transaction(() => {
+      await db.transaction(async () => {
         for (const stmt of nonPragmas) {
-          db.run(stmt);
+          await db.run(stmt);
         }
-        db.run('INSERT INTO schema_migrations (version, name) VALUES (?, ?)', [
+        await db.run('INSERT INTO schema_migrations (version, name) VALUES (?, ?)', [
           migration.version,
           migration.name,
         ]);
