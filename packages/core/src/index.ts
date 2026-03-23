@@ -81,15 +81,24 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   const stateDir = process.env.AGW_STATE_DIR || path.join(home!, '.agw');
-  const dbPath = path.join(stateDir, 'gateway.db');
-  const db = createDatabase(dbPath);
+
+  // Database config: AGW_DATABASE_URL env var → config.database → default SQLite
+  const dbUrl = process.env.AGW_DATABASE_URL || (config as unknown as Record<string, unknown>).databaseUrl as string | undefined;
+  const dbDialect = dbUrl ? 'postgres' as const : 'sqlite' as const;
+  const db = dbUrl
+    ? createDatabase({ type: 'postgres', url: dbUrl })
+    : createDatabase(path.join(stateDir, 'gateway.db'));
+
+  if (dbDialect === 'postgres') {
+    console.log('  Database: PostgreSQL');
+  }
 
   // Store stateDir in config for route access
   config._stateDir = stateDir;
 
   // 3. Run migrations
   const migrationsDir = path.join(__dirname, 'db', 'migrations');
-  await runMigrations(db, migrationsDir);
+  await runMigrations(db, migrationsDir, dbDialect);
 
   // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
   try {
@@ -141,13 +150,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // 5. Migrate v1 data if present
+  // 5. Migrate v1 data if present (SQLite only — PG deployments are fresh)
   const defaultTenant = await db.get<{ id: string }>(
     'SELECT id FROM tenants WHERE slug = ?',
     ['default'],
   );
   const tenantId = defaultTenant?.id || 'default';
-  if (defaultTenant) {
+  if (defaultTenant && dbDialect === 'sqlite') {
     const migration = await migrateV1Data(db, stateDir, tenantId);
     if (migration.sessions > 0 || migration.messages > 0) {
       console.log(
@@ -207,8 +216,8 @@ async function main(): Promise<void> {
   // 8. Create Fastify server (needed before MCP bridge for server.log)
   const server = await createServer({ db, config });
 
-  // 9. One-time DB→config migration for MCP servers, then initialize bridge
-  const mcpMigrated = await migrateDbMcpToConfig(db, CONFIG_PATH);
+  // 9. One-time DB→config migration for MCP servers (SQLite only), then initialize bridge
+  const mcpMigrated = dbDialect === 'sqlite' ? await migrateDbMcpToConfig(db, CONFIG_PATH) : 0;
   if (mcpMigrated > 0) {
     console.log(`DB→config migration: ${mcpMigrated} MCP servers moved to config.json`);
     // Reload config to pick up migrated MCP servers
