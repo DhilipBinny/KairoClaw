@@ -23,7 +23,7 @@ export interface UsageSummary {
 export class UsageRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  record(usage: {
+  async record(usage: {
     tenantId: string;
     userId?: string;
     sessionId?: string;
@@ -32,10 +32,10 @@ export class UsageRepository {
     inputTokens: number;
     outputTokens: number;
     costUsd?: number;
-  }): void {
+  }): Promise<void> {
     const now = new Date().toISOString();
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO usage_records (tenant_id, user_id, session_id, model, provider, input_tokens, output_tokens, cost_usd, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -52,10 +52,10 @@ export class UsageRepository {
     );
   }
 
-  summarizeByTenant(tenantId: string, days = 30): UsageSummary {
+  async summarizeByTenant(tenantId: string, days = 30): Promise<UsageSummary> {
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
-    const totals = this.db.get<{ total_input: number; total_output: number; total_cost: number }>(
+    const totals = await this.db.get<{ total_input: number; total_output: number; total_cost: number }>(
       `SELECT COALESCE(SUM(input_tokens), 0) as total_input,
               COALESCE(SUM(output_tokens), 0) as total_output,
               COALESCE(SUM(cost_usd), 0) as total_cost
@@ -63,7 +63,7 @@ export class UsageRepository {
       [tenantId, cutoff],
     );
 
-    const byModelRows = this.db.query<{
+    const byModelRows = await this.db.query<{
       model: string;
       input: number;
       output: number;
@@ -91,8 +91,8 @@ export class UsageRepository {
     };
   }
 
-  summarizeByDateRange(tenantId: string, startDate: string, endDate: string): UsageRow[] {
-    return this.db.query<UsageRow>(
+  async summarizeByDateRange(tenantId: string, startDate: string, endDate: string): Promise<UsageRow[]> {
+    return await this.db.query<UsageRow>(
       `SELECT * FROM usage_records WHERE tenant_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC`,
       [tenantId, startDate, endDate],
     );

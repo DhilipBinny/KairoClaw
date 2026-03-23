@@ -37,8 +37,8 @@ export const memoryTools: ToolRegistration[] = [
         return { results: [], error: 'Memory system not initialized' };
       }
 
-      const results = memorySystem.search(query, topN);
-      const stats = memorySystem.getStats();
+      const results = await memorySystem.search(query, topN);
+      const stats = await memorySystem.getStats();
 
       return {
         results: results.map((r) => ({

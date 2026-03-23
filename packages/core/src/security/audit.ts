@@ -16,24 +16,24 @@ export class AuditService {
   }
 
   /** Log an audit event with auto-populated context. */
-  log(opts: {
+  async log(opts: {
     tenantId: string;
     userId?: string;
     action: string;
     resource?: string;
     details?: Record<string, unknown>;
     ipAddress?: string;
-  }): void {
-    this.repo.append(opts);
+  }): Promise<void> {
+    await this.repo.append(opts);
   }
 
   /** Get recent audit entries for a tenant. */
-  getRecent(tenantId: string, limit = 100, offset = 0) {
-    return this.repo.listByTenant(tenantId, limit, offset);
+  async getRecent(tenantId: string, limit = 100, offset = 0) {
+    return await this.repo.listByTenant(tenantId, limit, offset);
   }
 
   /** Verify audit chain integrity for a tenant. */
-  verifyChain(tenantId: string) {
-    return this.repo.verifyChain(tenantId);
+  async verifyChain(tenantId: string) {
+    return await this.repo.verifyChain(tenantId);
   }
 }

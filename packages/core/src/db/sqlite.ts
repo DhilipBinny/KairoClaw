@@ -14,20 +14,31 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.db.pragma('foreign_keys = ON');
   }
 
-  query<T>(sql: string, params: unknown[] = []): T[] {
+  async query<T>(sql: string, params: unknown[] = []): Promise<T[]> {
     return this.db.prepare(sql).all(...params) as T[];
   }
 
-  get<T>(sql: string, params: unknown[] = []): T | undefined {
+  async get<T>(sql: string, params: unknown[] = []): Promise<T | undefined> {
     return this.db.prepare(sql).get(...params) as T | undefined;
   }
 
-  run(sql: string, params: unknown[] = []): { changes: number; lastInsertRowid: number | bigint } {
+  async run(sql: string, params: unknown[] = []): Promise<{ changes: number; lastInsertRowid: number | bigint }> {
     return this.db.prepare(sql).run(...params);
   }
 
-  transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+  async transaction<T>(fn: () => T | Promise<T>): Promise<T> {
+    // better-sqlite3 transactions are synchronous, but fn may be async
+    // (all db calls resolve immediately for SQLite, so await is safe).
+    // Use BEGIN/COMMIT/ROLLBACK manually to support async callbacks.
+    this.db.prepare('BEGIN').run();
+    try {
+      const result = await fn();
+      this.db.prepare('COMMIT').run();
+      return result;
+    } catch (e) {
+      this.db.prepare('ROLLBACK').run();
+      throw e;
+    }
   }
 
   pragma(statement: string): unknown {

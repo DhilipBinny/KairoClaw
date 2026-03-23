@@ -141,7 +141,7 @@ export async function runAgent(
   const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey);
 
   // ── Load conversation history (empty for ephemeral) ─────
-  const historyRows = messageRepo ? messageRepo.listBySession(session.id) : [];
+  const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -187,7 +187,7 @@ export async function runAgent(
 
   // ── Persist inbound user message (skip for ephemeral) ──
   const persistText = typeof userContent === 'string' ? userContent : inbound.text;
-  const userMsgResult = messageRepo ? messageRepo.create({
+  const userMsgResult = messageRepo ? await messageRepo.create({
     sessionId: session.id,
     tenantId,
     role: 'user',
@@ -250,7 +250,7 @@ export async function runAgent(
         try {
           await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
           // Reload messages after compaction
-          const freshRows = messageRepo!.listBySession(session.id);
+          const freshRows = await messageRepo!.listBySession(session.id);
           messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
           response = await context.callLLM({
             messages, tools: tools.length > 0 ? tools : undefined,
@@ -261,14 +261,14 @@ export async function runAgent(
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
           reqLog.error({ err: retryMsg }, 'LLM call failed after compaction');
           if (userMsgResult?.id) {
-            try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+            try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
           }
           return { text: 'Something went wrong processing your request. Please try again.', error: true };
         }
       } else {
         reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
         if (userMsgResult?.id) {
-          try { db.run('DELETE FROM messages WHERE id = ?', [userMsgResult.id]); } catch { /* best effort */ }
+          try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
         }
         return { text: 'Something went wrong processing your request. Please try again.', error: true };
       }
@@ -290,7 +290,7 @@ export async function runAgent(
     // Record per-round usage with cost estimate (skip for ephemeral)
     const provider = model.split('/')[0] ?? 'unknown';
     const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
-    if (usageRepo) usageRepo.record({
+    if (usageRepo) await usageRepo.record({
       tenantId, userId,
       sessionId: session.id,
       model, provider,
@@ -393,7 +393,7 @@ export async function runAgent(
 
       // Record tool call in the database (skip for ephemeral)
       if (toolCallRepo) {
-        toolCallRepo.record({
+        await toolCallRepo.record({
           id: tc.id || crypto.randomUUID(),
           sessionId: session.id,
           tenantId,
@@ -518,7 +518,7 @@ export async function runAgent(
 
   // ── Persist assistant message (skip for ephemeral) ───────
   if (fullText && messageRepo) {
-    messageRepo.create({
+    await messageRepo.create({
       sessionId: session.id,
       tenantId,
       role: 'assistant',
@@ -528,8 +528,8 @@ export async function runAgent(
 
   // ── Update session usage (skip for ephemeral) ─────────────
   if (sessionRepo) {
-    sessionRepo.addUsage(session.id, totalInputTokens, totalOutputTokens);
-    sessionRepo.incrementTurns(session.id);
+    await sessionRepo.addUsage(session.id, totalInputTokens, totalOutputTokens);
+    await sessionRepo.incrementTurns(session.id);
   }
 
   // ── Auto-summarize to memory (skip for ephemeral — sub-agents don't generate memory) ──

@@ -26,6 +26,7 @@ import {
 } from 'baileys';
 import type { GatewayConfig, InboundMessage } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
+import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, markdownToWhatsApp } from './utils.js';
@@ -76,10 +77,13 @@ class WhatsAppChannel implements Channel {
   /** LID → phone number mapping (WhatsApp's Linked Identity system). */
   private lidToPhone = new Map<string, string>();
 
+  private readonly pendingSenders: PendingSenderRepository;
+
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string) {
     this.config = config;
     this.db = db;
     this.tenantId = tenantId;
+    this.pendingSenders = new PendingSenderRepository(db);
     const stateDir = config._stateDir || path.join(process.env.HOME || '/tmp', '.agw');
     this.authDir = path.join(stateDir, 'whatsapp');
   }
@@ -264,54 +268,15 @@ class WhatsAppChannel implements Channel {
       if (!cfg.allowFrom.includes(senderPhone)) {
         log.warn({ senderPhone }, 'WhatsApp: sender not in allowFrom list — rejected');
         try {
-          // Evict oldest pending if at cap
-          this.db.run(`
-            DELETE FROM pending_senders WHERE id IN (
-              SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND status = 'pending'
-              ORDER BY last_seen ASC LIMIT max(0, (SELECT COUNT(*) FROM pending_senders WHERE channel = 'whatsapp' AND status = 'pending') - ${PENDING_PENDING_CAP - 1})
-            )
-          `);
-          this.db.run(`
-            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
-            ON CONFLICT(channel, sender_id) DO UPDATE SET
-              sender_name = excluded.sender_name,
-              last_seen = datetime('now'),
-              message_count = message_count + 1,
-              status = 'pending'
-          `, ['whatsapp', senderPhone, waSenderName]);
+          await this.pendingSenders.evictOverCap('whatsapp', 'pending', PENDING_PENDING_CAP);
+          await this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
         } catch { /* non-critical */ }
         return;
       }
     } else if (!isGroup) {
-      // No allowlist — record sender as 'seen' for onboarding (fixed 5-row budget)
+      // No allowlist — record sender as 'seen' for onboarding (capped budget)
       try {
-        const exists = this.db.get<{ id: number }>(
-          "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status = 'seen'",
-          [senderPhone],
-        );
-        if (exists) {
-          this.db.run(`
-            UPDATE pending_senders SET sender_name = ?, last_seen = datetime('now'), message_count = message_count + 1
-            WHERE channel = 'whatsapp' AND sender_id = ? AND status = 'seen'
-          `, [waSenderName, senderPhone]);
-        } else {
-          const count = this.db.get<{ c: number }>(
-            "SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'whatsapp' AND status = 'seen'",
-          );
-          if ((count?.c ?? 0) >= PENDING_SEEN_CAP) {
-            this.db.run(`
-              DELETE FROM pending_senders WHERE id = (
-                SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND status = 'seen'
-                ORDER BY last_seen ASC LIMIT 1
-              )
-            `);
-          }
-          this.db.run(`
-            INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
-            VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'seen')
-          `, ['whatsapp', senderPhone, waSenderName]);
-        }
+        await this.pendingSenders.recordSighting('whatsapp', senderPhone, waSenderName, 'seen', PENDING_SEEN_CAP);
       } catch { /* non-critical */ }
     }
 
@@ -326,39 +291,8 @@ class WhatsAppChannel implements Channel {
       const hasGroupAllowlist = cfg.groupAllowFrom?.length > 0;
       try {
         const status = hasGroupAllowlist ? 'pending' : 'seen';
-        // Skip if already approved/rejected
-        const resolved = this.db.get<{ id: number }>(
-          "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status IN ('approved','rejected')",
-          [jid],
-        );
-        if (!resolved) {
-          const existing = this.db.get<{ id: number }>(
-            "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status IN ('seen','pending')",
-            [jid],
-          );
-          if (existing) {
-            this.db.run(
-              "UPDATE pending_senders SET last_seen = datetime('now'), message_count = message_count + 1 WHERE channel = 'whatsapp' AND sender_id = ? AND status IN ('seen','pending')",
-              [jid],
-            );
-          } else {
-            const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
-            const count = this.db.get<{ c: number }>(
-              `SELECT COUNT(*) as c FROM pending_senders WHERE channel = 'whatsapp' AND status = ?`,
-              [status],
-            );
-            if ((count?.c ?? 0) >= cap) {
-              this.db.run(
-                `DELETE FROM pending_senders WHERE id = (SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND status = ? ORDER BY last_seen ASC LIMIT 1)`,
-                [status],
-              );
-            }
-            this.db.run(
-              "INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status) VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, ?)",
-              ['whatsapp', jid, jid, status],
-            );
-          }
-        }
+        const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
+        await this.pendingSenders.recordWithResolutionCheck('whatsapp', jid, jid, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist
@@ -425,18 +359,9 @@ class WhatsAppChannel implements Channel {
           log.debug({ senderPhone, jid }, 'WhatsApp: group sender not in allowFrom — ignored');
           // Record as pending for admin approval
           try {
-            const resolved = this.db.get<{ id: number }>(
-              "SELECT id FROM pending_senders WHERE channel = 'whatsapp' AND sender_id = ? AND status IN ('approved','rejected')",
-              [senderPhone],
-            );
+            const resolved = await this.pendingSenders.findBySenderId('whatsapp', senderPhone, ['approved', 'rejected']);
             if (!resolved) {
-              this.db.run(
-                `INSERT INTO pending_senders (channel, sender_id, sender_name, first_seen, last_seen, message_count, status)
-                 VALUES (?, ?, ?, datetime('now'), datetime('now'), 1, 'pending')
-                 ON CONFLICT(channel, sender_id) DO UPDATE SET
-                   sender_name = excluded.sender_name, last_seen = datetime('now'), message_count = message_count + 1`,
-                ['whatsapp', senderPhone, waSenderName],
-              );
+              await this.pendingSenders.upsert('whatsapp', senderPhone, waSenderName, 'pending');
             }
           } catch { /* non-critical */ }
           return;

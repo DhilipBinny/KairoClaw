@@ -110,7 +110,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     // Audit log
     if (auditService) {
       try {
-        auditService.log({
+        await auditService.log({
           tenantId: (request as any).ctx.tenantId || 'default',
           userId: (request as any).ctx.userId,
           action: 'config.update',
@@ -267,7 +267,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     // Audit
     if (auditService) {
       try {
-        auditService.log({
+        await auditService.log({
           tenantId: (request as any).ctx.tenantId || 'default',
           userId: (request as any).ctx.userId,
           action: 'plugins.update',
@@ -367,7 +367,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     // Audit
     if (auditService) {
       try {
-        auditService.log({
+        await auditService.log({
           tenantId: (request as any).ctx.tenantId || 'default',
           userId: (request as any).ctx.userId,
           action: 'config.bulk_update',

@@ -16,17 +16,17 @@ export interface UserRow {
 export class UserRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  create(user: {
+  async create(user: {
     tenantId: string;
     name: string;
     email?: string;
     role?: string;
     apiKeyHash?: string;
-  }): UserRow {
+  }): Promise<UserRow> {
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO users (id, tenant_id, email, name, role, api_key_hash, settings, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
       [
@@ -41,25 +41,25 @@ export class UserRepository {
       ],
     );
 
-    return this.getById(id)!;
+    return (await this.getById(id))!;
   }
 
-  getById(id: string, tenantId?: string): UserRow | undefined {
+  async getById(id: string, tenantId?: string): Promise<UserRow | undefined> {
     if (tenantId) {
-      return this.db.get<UserRow>('SELECT * FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+      return await this.db.get<UserRow>('SELECT * FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
     }
-    return this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
+    return await this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   }
 
-  getByApiKeyHash(hash: string): UserRow | undefined {
-    return this.db.get<UserRow>('SELECT * FROM users WHERE api_key_hash = ?', [hash]);
+  async getByApiKeyHash(hash: string): Promise<UserRow | undefined> {
+    return await this.db.get<UserRow>('SELECT * FROM users WHERE api_key_hash = ?', [hash]);
   }
 
-  listByTenant(tenantId: string): UserRow[] {
-    return this.db.query<UserRow>('SELECT * FROM users WHERE tenant_id = ?', [tenantId]);
+  async listByTenant(tenantId: string): Promise<UserRow[]> {
+    return await this.db.query<UserRow>('SELECT * FROM users WHERE tenant_id = ?', [tenantId]);
   }
 
-  update(id: string, data: Partial<{ name: string; email: string; role: string; settings: string }>): void {
+  async update(id: string, data: Partial<{ name: string; email: string; role: string; settings: string }>): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
 
@@ -86,14 +86,14 @@ export class UserRepository {
     values.push(new Date().toISOString());
     values.push(id);
 
-    this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
   }
 
-  delete(id: string, tenantId?: string): void {
+  async delete(id: string, tenantId?: string): Promise<void> {
     if (tenantId) {
-      this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+      await this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
     } else {
-      this.db.run('DELETE FROM users WHERE id = ?', [id]);
+      await this.db.run('DELETE FROM users WHERE id = ?', [id]);
     }
   }
 }

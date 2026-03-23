@@ -41,16 +41,16 @@ export class ToolRegistry {
    * When `userRole` is provided along with `db` and `tenantId`, tools
    * the role is denied access to are excluded from the returned list.
    */
-  getDefinitions(opts?: {
+  async getDefinitions(opts?: {
     userRole?: string;
     db?: DatabaseAdapter;
     tenantId?: string;
-  }): ToolDefinition[] {
+  }): Promise<ToolDefinition[]> {
     const definitions: ToolDefinition[] = [];
 
     for (const reg of this.tools.values()) {
       if (opts?.userRole && opts.db && opts.tenantId) {
-        const perm = checkToolPermission(
+        const perm = await checkToolPermission(
           reg.definition.name,
           opts.userRole,
           opts.db,
@@ -88,11 +88,11 @@ export class ToolRegistry {
     const userRole = (context.user as Record<string, unknown>)?.role as string || 'user';
 
     if (db) {
-      permission = checkToolPermission(name, userRole, db, tenantId);
+      permission = await checkToolPermission(name, userRole, db, tenantId);
       if (permission === 'deny') {
         // Audit: tool denied by RBAC
         try {
-          this.auditService?.log({
+          await this.auditService?.log({
             tenantId,
             userId: context.user?.id,
             action: 'tool.denied',
@@ -108,7 +108,7 @@ export class ToolRegistry {
     const callId = crypto.randomUUID();
     if (permission === 'confirm') {
       try {
-        this.auditService?.log({
+        await this.auditService?.log({
           tenantId,
           userId: context.user?.id,
           action: 'tool.confirm_required',
@@ -143,7 +143,7 @@ export class ToolRegistry {
     if (db) {
       try {
         const repo = new ToolCallRepository(db);
-        repo.record({
+        await repo.record({
           id: callId,
           sessionId: context.session?.sessionId || 'unknown',
           tenantId,
@@ -161,7 +161,7 @@ export class ToolRegistry {
 
     // Audit: tool executed
     try {
-      this.auditService?.log({
+      await this.auditService?.log({
         tenantId,
         userId: context.user?.id,
         action: 'tool.execute',

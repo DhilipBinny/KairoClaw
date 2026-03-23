@@ -17,7 +17,7 @@ export interface ToolCallRow {
 export class ToolCallRepository {
   constructor(private db: DatabaseAdapter) {}
 
-  record(call: {
+  async record(call: {
     id: string;
     sessionId: string;
     tenantId: string;
@@ -27,10 +27,10 @@ export class ToolCallRepository {
     result?: unknown;
     status: string;
     durationMs?: number;
-  }): void {
+  }): Promise<void> {
     const now = new Date().toISOString();
 
-    this.db.run(
+    await this.db.run(
       `INSERT INTO tool_calls (id, session_id, tenant_id, user_id, tool_name, arguments, result, status, duration_ms, approved_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
       [
@@ -48,21 +48,21 @@ export class ToolCallRepository {
     );
   }
 
-  listBySession(sessionId: string, limit = 100): ToolCallRow[] {
-    return this.db.query<ToolCallRow>(
+  async listBySession(sessionId: string, limit = 100): Promise<ToolCallRow[]> {
+    return await this.db.query<ToolCallRow>(
       'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
       [sessionId, limit],
     );
   }
 
-  listByTool(tenantId: string, toolName: string, limit = 100): ToolCallRow[] {
-    return this.db.query<ToolCallRow>(
+  async listByTool(tenantId: string, toolName: string, limit = 100): Promise<ToolCallRow[]> {
+    return await this.db.query<ToolCallRow>(
       'SELECT * FROM tool_calls WHERE tenant_id = ? AND tool_name = ? ORDER BY created_at DESC LIMIT ?',
       [tenantId, toolName, limit],
     );
   }
 
-  updateStatus(id: string, status: string, result?: unknown, durationMs?: number): void {
+  async updateStatus(id: string, status: string, result?: unknown, durationMs?: number): Promise<void> {
     const fields: string[] = ['status = ?'];
     const values: unknown[] = [status];
 
@@ -77,6 +77,6 @@ export class ToolCallRepository {
 
     values.push(id);
 
-    this.db.run(`UPDATE tool_calls SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.run(`UPDATE tool_calls SET ${fields.join(', ')} WHERE id = ?`, values);
   }
 }

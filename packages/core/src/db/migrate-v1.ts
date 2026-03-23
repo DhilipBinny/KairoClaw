@@ -70,11 +70,11 @@ function normalizeRole(role: string | undefined): string {
  *
  * Safe to call multiple times — checks for .migrated suffix.
  */
-export function migrateV1Data(
+export async function migrateV1Data(
   db: DatabaseAdapter,
   stateDir: string,
   tenantId: string,
-): { sessions: number; messages: number; mcpServers: number } {
+): Promise<{ sessions: number; messages: number; mcpServers: number }> {
   let sessionCount = 0;
   let messageCount = 0;
   let mcpCount = 0;
@@ -85,12 +85,12 @@ export function migrateV1Data(
     try {
       const store: V1SessionStore = JSON.parse(fs.readFileSync(storePath, 'utf8'));
 
-      db.transaction(() => {
+      await db.transaction(async () => {
         for (const [key, session] of Object.entries(store)) {
           const sessionId = session.sessionId || key;
-          db.run(
-            `INSERT OR IGNORE INTO sessions (id, tenant_id, channel, chat_id, model, input_tokens, output_tokens, turns, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          await db.run(
+            `INSERT INTO sessions (id, tenant_id, channel, chat_id, model, input_tokens, output_tokens, turns, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
             [
               sessionId,
               tenantId,
@@ -127,21 +127,21 @@ export function migrateV1Data(
         const sessionId = path.basename(file, '.jsonl');
 
         // Ensure session row exists (transcript may reference a session not in store.json)
-        const sessionExists = db.get<{ id: string }>(
+        const sessionExists = await db.get<{ id: string }>(
           'SELECT id FROM sessions WHERE id = ?',
           [sessionId],
         );
         if (!sessionExists) {
-          db.run(
-            `INSERT OR IGNORE INTO sessions (id, tenant_id, channel, chat_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+          await db.run(
+            `INSERT INTO sessions (id, tenant_id, channel, chat_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
             [sessionId, tenantId, 'web', sessionId, new Date().toISOString(), new Date().toISOString()],
           );
         }
 
         const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
 
-        db.transaction(() => {
+        await db.transaction(async () => {
           for (const line of lines) {
             try {
               const entry: V1TranscriptEntry = JSON.parse(line);
@@ -150,7 +150,7 @@ export function migrateV1Data(
                   ? entry.content
                   : JSON.stringify(entry.content || '');
 
-              db.run(
+              await db.run(
                 `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, metadata, created_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
@@ -188,16 +188,16 @@ export function migrateV1Data(
       const config = JSON.parse(configRaw);
       const mcpServers: Record<string, V1McpServer> = config?.mcp?.servers || {};
 
-      db.transaction(() => {
+      await db.transaction(async () => {
         for (const [id, server] of Object.entries(mcpServers)) {
           // Check if already migrated
-          const exists = db.get<{ id: string }>(
+          const exists = await db.get<{ id: string }>(
             'SELECT id FROM mcp_servers WHERE id = ?',
             [id],
           );
           if (exists) continue;
 
-          db.run(
+          await db.run(
             `INSERT INTO mcp_servers (id, tenant_id, name, transport, command, args, url, env, enabled)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
@@ -230,10 +230,10 @@ export function migrateV1Data(
  * Idempotent — skips if config.json already has MCP servers.
  * Returns the number of servers migrated.
  */
-export function migrateDbMcpToConfig(
+export async function migrateDbMcpToConfig(
   db: DatabaseAdapter,
   configPath: string,
-): number {
+): Promise<number> {
   // Read existing config
   let rawConfig: Record<string, any>;
   try {
@@ -259,7 +259,7 @@ export function migrateDbMcpToConfig(
     pinned_hash: string | null;
   }>;
   try {
-    dbServers = db.query<any>(
+    dbServers = await db.query<any>(
       'SELECT id, transport, command, args, url, env, enabled, pinned_hash FROM mcp_servers',
       [],
     );
