@@ -148,7 +148,7 @@ export const registerMCPRoutes: FastifyPluginAsync<{ auditService?: AuditService
   });
 
   // GET /api/v1/mcp/marketplace — registry search (also serves as default listing)
-  app.get('/api/v1/mcp/marketplace', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.get('/api/v1/mcp/marketplace', { preHandler: [requireRole('admin')] }, async (request, _reply) => {
     const query = (request.query as any)?.search || '';
     const limit = Math.min(parseInt((request.query as any)?.limit || '20'), 50);
     const cursor = (request.query as any)?.cursor || undefined;
@@ -158,10 +158,8 @@ export const registerMCPRoutes: FastifyPluginAsync<{ auditService?: AuditService
       return result;
     } catch (e) {
       const err = e as Error;
-      if (err.message === 'Registry request timed out') {
-        return reply.code(504).send({ error: 'Registry request timed out' });
-      }
-      return reply.code(500).send({ error: err.message });
+      // Return empty results instead of error — UI degrades gracefully
+      return { servers: [], nextCursor: null, total: 0, error: err.message };
     }
   });
 };
