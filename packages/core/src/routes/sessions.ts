@@ -13,6 +13,9 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const limit = parseInt((request.query as any)?.limit || '50');
     let sessions = repo.listByTenant(tenantId, limit);
 
+    // Filter out internal/cron sessions (sub-agents, scheduled tasks)
+    sessions = sessions.filter(s => s.channel !== 'internal' && s.channel !== 'cron');
+
     // Filter by user ownership if authenticated (non-admin sees only own sessions)
     if (request.user?.id && request.user.role !== 'admin') {
       sessions = sessions.filter(s => s.user_id === request.user!.id);
