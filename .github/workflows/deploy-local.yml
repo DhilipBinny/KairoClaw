@@ -1,11 +1,13 @@
 # Deploy KairoClaw to local server (192.168.88.110)
-# Triggered on push to deploy/localhosted branch
-# Runs on self-hosted runner (Docker container on the target machine)
+# Only runs AFTER the CI workflow passes — broken code never deploys
+# Also triggerable manually via workflow_dispatch
 
 name: Deploy to Local Server
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [deploy/railway]
   workflow_dispatch:
 
@@ -13,10 +15,16 @@ jobs:
   build-and-deploy:
     runs-on: self-hosted
     timeout-minutes: 15
+    # Only deploy if CI passed (or if manually triggered)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: deploy/railway
 
       - name: Build Docker image
         run: |
@@ -26,7 +34,7 @@ jobs:
       - name: Deploy stack
         run: docker stack deploy -c /home/binny/Binny/KAIROCLAW/docker-compose.yml kairoclaw
 
-      - name: Cleanup previous kairoclaw image
+      - name: Cleanup previous image
         run: docker rmi kairoclaw:prev 2>/dev/null || true
 
       - name: Wait for healthy
