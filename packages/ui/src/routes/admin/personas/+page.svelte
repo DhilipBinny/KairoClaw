@@ -17,19 +17,15 @@
   let saveMessage = $state('');
 
   const fileDescriptions: Record<string, string> = {
-    'IDENTITY.md': 'Core identity and behavior of the AI agent',
-    'SOUL.md': 'Personality, tone, and communication style',
-    'USER.md': 'Information about the user (preferences, context)',
-    'AGENTS.md': 'Multi-agent coordination and delegation rules',
-    'MEMORY.md': 'Persistent memory and learned context',
+    'IDENTITY.md': 'Who the agent is — name, role, basic identity',
+    'SOUL.md': 'How the agent behaves — personality, tone, communication style',
+    'RULES.md': 'Hard constraints — what to do and not do, safety rules',
   };
 
   const fileColors: Record<string, string> = {
     'IDENTITY.md': 'var(--accent)',
     'SOUL.md': 'var(--cost)',
-    'USER.md': 'var(--blue)',
-    'AGENTS.md': 'var(--agent)',
-    'MEMORY.md': 'var(--green)',
+    'RULES.md': 'var(--blue)',
   };
 
   async function loadFiles() {

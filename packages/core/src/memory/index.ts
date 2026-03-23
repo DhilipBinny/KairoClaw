@@ -199,15 +199,11 @@ export class MemorySystem {
 
   /**
    * Get all memory file paths to index:
-   * - MEMORY.md in workspace root
-   * - memory/*.md in workspace
+   * - memory dir .md files in workspace (global)
+   * - scopes per-user memory .md files
    */
   private getMemoryFiles(): string[] {
     const files: string[] = [];
-
-    // Global memory files
-    const memoryMd = path.join(this.workspace, 'MEMORY.md');
-    if (fs.existsSync(memoryMd)) files.push(memoryMd);
 
     const memoryDir = path.join(this.workspace, 'memory');
     if (fs.existsSync(memoryDir)) {
@@ -332,7 +328,6 @@ export class MemorySystem {
    */
   private startWatcher(): void {
     const watchPaths = [
-      path.join(this.workspace, 'MEMORY.md'),
       path.join(this.workspace, 'memory'),
       path.join(this.workspace, 'scopes'),
     ];
@@ -362,7 +357,7 @@ export class MemorySystem {
                 log.debug({ file: relativePath }, 'Deleted memory file chunks');
               }
             } else if (!filename) {
-              // MEMORY.md itself changed
+              // Directory-level change with no filename — re-index if the watched path is a file
               if (fs.existsSync(watchPath) && watchPath.endsWith('.md')) {
                 this.indexFile(watchPath);
               }
