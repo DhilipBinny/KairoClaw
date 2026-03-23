@@ -31,14 +31,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Type-check (types package)
-        run: pnpm --filter @agw/types typecheck
-
-      - name: Type-check (core package)
-        run: pnpm --filter @agw/core typecheck
-
-      - name: Build (types)
+      - name: Build types (required by core)
         run: pnpm --filter @agw/types build
+
+      - name: Type-check (core)
+        run: pnpm --filter @agw/core typecheck
 
       - name: Build (core)
         run: pnpm --filter @agw/core build
