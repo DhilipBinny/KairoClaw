@@ -361,14 +361,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'chat.history': {
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
-            // Look up session by ID first, then by chatId pattern
-            const allSessions = sessionRepo.listByTenant(tenantId, 500);
+            // Look up session by ID first, then by chatId pattern (web sessions only)
+            const webSessions = sessionRepo.listByTenant(tenantId, 500)
+              .filter((s) => s.channel === 'web');
             let session = sessionId
-              ? allSessions.find((s) => s.id === sessionId)
-              : allSessions.find((s) => s.chat_id === `web:${sessionKey}`);
+              ? webSessions.find((s) => s.id === sessionId)
+              : webSessions.find((s) => s.chat_id === `web:${sessionKey}`);
             // Also try matching by session ID as sessionKey
             if (!session) {
-              session = allSessions.find((s) => s.id === sessionKey);
+              session = webSessions.find((s) => s.id === sessionKey);
             }
             if (!session) {
               safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
@@ -387,9 +388,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // ── Session list ─────────────────────
           case 'sessions.list': {
             const sessions = sessionRepo.listByTenant(tenantId, 100);
-            // Filter out internal/cron sessions, keep only sessions with actual messages
+            // Show only web chat sessions with actual messages
             const list = sessions
-              .filter((s) => s.turns > 0 && s.channel !== 'internal' && s.channel !== 'cron')
+              .filter((s) => s.turns > 0 && s.channel === 'web')
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
                 // Extract session key from chat_id (e.g., "web:main" → "main")
