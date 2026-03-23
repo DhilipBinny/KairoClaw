@@ -774,9 +774,11 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       await execFileAsync('cp', ['-a', `${stagingDir}/.`, stateDir], { timeout: 30_000 });
 
       // Set safe permissions on sensitive files
-      const secretsPath = path.join(stateDir, 'secrets.json');
-      if (fs.existsSync(secretsPath)) {
-        fs.chmodSync(secretsPath, 0o600);
+      for (const secFile of ['secrets.json', 'secrets.enc', 'master.key']) {
+        const secPath = path.join(stateDir, secFile);
+        if (fs.existsSync(secPath)) {
+          fs.chmodSync(secPath, 0o600);
+        }
       }
 
       // Cleanup
