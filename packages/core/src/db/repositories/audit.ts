@@ -28,13 +28,23 @@ export class AuditRepository {
     const now = new Date().toISOString();
     const detailsJson = JSON.stringify(entry.details ?? {});
 
-    // Wrap read-last-hash + insert in a transaction to prevent race conditions
+    // Wrap read-last-hash + insert in a transaction to prevent race conditions.
+    // PostgreSQL: FOR UPDATE locks the row to serialize concurrent writers.
+    // SQLite: single-writer, inherently serialized — falls back to plain SELECT.
     let entryHash = '';
     await this.db.transaction(async () => {
-      const lastEntry = await this.db.get<{ entry_hash: string }>(
-        'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1',
-        [entry.tenantId],
-      );
+      let lastEntry: { entry_hash: string } | undefined;
+      try {
+        lastEntry = await this.db.get<{ entry_hash: string }>(
+          'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE',
+          [entry.tenantId],
+        );
+      } catch {
+        lastEntry = await this.db.get<{ entry_hash: string }>(
+          'SELECT entry_hash FROM audit_log WHERE tenant_id = ? ORDER BY id DESC LIMIT 1',
+          [entry.tenantId],
+        );
+      }
       const prevHash = lastEntry?.entry_hash ?? '';
 
       entryHash = crypto
