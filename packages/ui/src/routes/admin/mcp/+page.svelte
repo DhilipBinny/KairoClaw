@@ -54,6 +54,7 @@
   let searchQuery = $state('');
   let loading = $state(true);
   let searching = $state(false);
+  let searchError = $state('');
   let actionInProgress = $state('');
 
   // Catalog install form state
@@ -83,7 +84,6 @@
 
   // Polling
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let searchTimeout: ReturnType<typeof setTimeout>;
 
   function hasTransitionalServers(): boolean {
     return servers.some(s => s.status === 'installing' || s.status === 'connecting');
@@ -288,21 +288,25 @@
 
   // ── Search ─────────────────────────────────
   async function handleSearch() {
-    if (!searchQuery.trim() || searchQuery.trim().length < 3) {
-      marketplaceResults = [];
-      return;
-    }
+    if (!searchQuery.trim()) return;
     searching = true;
+    searchError = '';
+    marketplaceResults = [];
     try {
-      const data = await searchMCPMarketplace(searchQuery);
-      marketplaceResults = data.servers || [];
-    } catch { /* ignore */ }
-    finally { searching = false; }
-  }
-
-  function onSearchInput() {
-    clearTimeout(searchTimeout);
-    searchTimeout = setTimeout(handleSearch, 800);
+      const data = await searchMCPMarketplace(searchQuery) as any;
+      if (data.error) {
+        searchError = 'Registry is currently unavailable. Try again later.';
+      } else {
+        marketplaceResults = data.servers || [];
+        if (marketplaceResults.length === 0) {
+          searchError = `No servers found for "${searchQuery}"`;
+        }
+      }
+    } catch {
+      searchError = 'Registry is currently unavailable. Try again later.';
+    } finally {
+      searching = false;
+    }
   }
 
   // ── Server actions ─────────────────────────
@@ -586,17 +590,18 @@
     <!-- ── Registry Search ────────────────── -->
     <div class="section">
       <h2 class="section-title">Search Registry</h2>
-      <p class="section-hint">Search the official MCP registry for additional servers. Requires manual configuration.</p>
+      <p class="section-hint">Search the official MCP registry for additional servers.</p>
       <div class="search-bar">
-        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"></circle>
-          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-        </svg>
-        <input class="input search-input" type="text" placeholder="Search MCP registry (min 3 chars)..." bind:value={searchQuery} oninput={onSearchInput} />
-        {#if searching}
-          <span class="searching-label"><span class="spinner" style="width:12px;height:12px;border-width:2px;"></span></span>
-        {/if}
+        <input class="input search-input" type="text" placeholder="e.g. notion, figma, jira..." bind:value={searchQuery}
+          onkeydown={(e) => { if ((e as KeyboardEvent).key === 'Enter') handleSearch(); }} />
+        <button class="btn btn-primary btn-sm" onclick={handleSearch} disabled={searching || !searchQuery.trim()}>
+          {searching ? 'Searching...' : 'Search'}
+        </button>
       </div>
+
+      {#if searchError}
+        <div class="search-error">{searchError}</div>
+      {/if}
 
       {#if marketplaceResults.length > 0}
         <div class="marketplace-list">
@@ -655,8 +660,6 @@
             </div>
           {/each}
         </div>
-      {:else if searchQuery.trim().length >= 3 && !searching}
-        <div class="empty-state">No servers found</div>
       {/if}
     </div>
   {/if}
@@ -718,10 +721,9 @@
   .help-link:hover { text-decoration: underline; }
 
   /* Search */
-  .search-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; position: relative; }
-  .search-icon { position: absolute; left: 12px; color: var(--text-muted); pointer-events: none; z-index: 1; }
-  .search-input { padding-left: 36px; }
-  .searching-label { display: flex; align-items: center; flex-shrink: 0; }
+  .search-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .search-input { flex: 1; }
+  .search-error { font-size: 13px; color: var(--text-muted); padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 16px; }
   .marketplace-list { display: flex; flex-direction: column; gap: 12px; }
   .marketplace-card { padding: 16px 22px; }
   .marketplace-header { margin-bottom: 6px; }
