@@ -24,13 +24,15 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     const sessionIds = sessions.filter(s => s.turns > 0).map(s => s.id);
     const firstMsgMap = new Map<string, string>();
     if (sessionIds.length > 0) {
-      // Use a single query with GROUP BY to get the first user message per session
+      // Get first user message per session (compatible with both SQLite and PostgreSQL)
       const placeholders = sessionIds.map(() => '?').join(',');
       const rows = await db.query<{ session_id: string; content: string }>(
-        `SELECT session_id, content FROM messages
-         WHERE session_id IN (${placeholders}) AND role = 'user'
-         GROUP BY session_id
-         HAVING id = MIN(id)`,
+        `SELECT m.session_id, m.content FROM messages m
+         INNER JOIN (
+           SELECT session_id, MIN(id) as min_id FROM messages
+           WHERE session_id IN (${placeholders}) AND role = 'user'
+           GROUP BY session_id
+         ) first ON m.id = first.min_id`,
         sessionIds,
       );
       for (const row of rows) {
