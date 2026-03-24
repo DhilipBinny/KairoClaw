@@ -21,6 +21,8 @@ docs/_local_reference/
 
 # ── Runtime data (app-managed) ──
 agw-data/
+local_data/
+docker-compose.dev.yml
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
@@ -48,6 +50,9 @@ coverage/
 # ── OS files ──
 .DS_Store
 Thumbs.db
+
+# ── Claude Code ──
+.claude/
 
 # ── Editor / IDE ──
 .vscode/
