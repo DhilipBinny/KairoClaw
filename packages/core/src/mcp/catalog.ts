@@ -30,6 +30,13 @@ export interface CatalogEntry {
   category: string;
 }
 
+export interface RegistryEnvVar {
+  name: string;
+  description: string;
+  isRequired: boolean;
+  isSecret: boolean;
+}
+
 export interface MCPRegistryServer {
   id: string;
   name: string;
@@ -42,6 +49,7 @@ export interface MCPRegistryServer {
   repoUrl: string;
   installable: boolean;
   transport: string;
+  envVars: RegistryEnvVar[];
 }
 
 export interface MCPRegistryResult {
@@ -155,13 +163,13 @@ export async function searchMCPRegistry(
       servers?: Array<{
         server?: {
           name?: string; description?: string; version?: string;
-          packages?: Array<{ registryType?: string; identifier?: string; runtimeHint?: string }>;
-          remotes?: Array<{ url?: string; type?: string }>;
+          packages?: Array<{ registryType?: string; identifier?: string; runtimeHint?: string; environmentVariables?: Array<Record<string, unknown>> }>;
+          remotes?: Array<{ url?: string; type?: string; environmentVariables?: Array<Record<string, unknown>> }>;
           repository?: { url?: string };
         };
         name?: string; description?: string; version?: string;
-        packages?: Array<{ registryType?: string; identifier?: string; runtimeHint?: string }>;
-        remotes?: Array<{ url?: string; type?: string }>;
+        packages?: Array<{ registryType?: string; identifier?: string; runtimeHint?: string; environmentVariables?: Array<Record<string, unknown>> }>;
+        remotes?: Array<{ url?: string; type?: string; environmentVariables?: Array<Record<string, unknown>> }>;
         repository?: { url?: string };
       }>;
       metadata?: { nextCursor?: string; total?: number };
@@ -171,6 +179,14 @@ export async function searchMCPRegistry(
       const s = entry.server || entry;
       const npmPkg = (s.packages || []).find(p => p.registryType === 'npm');
       const remote = (s.remotes || [])[0];
+      // Extract env vars from the first package that has them
+      const rawEnvVars = npmPkg?.environmentVariables || remote?.environmentVariables || [];
+      const envVars: RegistryEnvVar[] = (rawEnvVars as Array<Record<string, unknown>>).map(v => ({
+        name: (v.name as string) || '',
+        description: (v.description as string) || '',
+        isRequired: !!(v.isRequired),
+        isSecret: !!(v.isSecret),
+      })).filter(v => v.name);
       return {
         id: s.name || '',
         name: s.name || '',
@@ -183,6 +199,7 @@ export async function searchMCPRegistry(
         repoUrl: s.repository?.url || '',
         installable: !!(npmPkg?.identifier || remote?.url),
         transport: npmPkg ? 'stdio' : remote ? 'sse' : '',
+        envVars,
       };
     });
 

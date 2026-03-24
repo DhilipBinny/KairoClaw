@@ -38,6 +38,13 @@
     envStatus: Record<string, boolean>;
   }
 
+  interface RegistryEnvVar {
+    name: string;
+    description: string;
+    isRequired: boolean;
+    isSecret: boolean;
+  }
+
   interface MarketplaceEntry {
     id: string;
     name: string;
@@ -46,6 +53,8 @@
     package?: string;
     installable?: boolean;
     transport?: string;
+    repoUrl?: string;
+    envVars?: RegistryEnvVar[];
   }
 
   let servers: MCPServer[] = $state([]);
@@ -184,7 +193,12 @@
     regInstall = entry;
     const pkg = entry.package || entry.name || '';
     regInstallId = pkg.split('/').pop()?.replace(/^server-/, '') || entry.name?.replace(/[^a-z0-9-]/gi, '-') || '';
-    regInstallEnvRows = [{ key: '', value: '' }];
+    // Pre-fill env var rows from registry data
+    if (entry.envVars?.length) {
+      regInstallEnvRows = entry.envVars.map(v => ({ key: v.name, value: '' }));
+    } else {
+      regInstallEnvRows = [{ key: '', value: '' }];
+    }
     regInstallError = '';
   }
 
@@ -621,6 +635,12 @@
                 {#if entry.transport}
                   <Badge>{entry.transport}</Badge>
                 {/if}
+                {#if entry.envVars?.length}
+                  <span class="env-count">{entry.envVars.length} env var{entry.envVars.length !== 1 ? 's' : ''}</span>
+                {/if}
+                {#if entry.repoUrl}
+                  <a href={entry.repoUrl} target="_blank" rel="noopener noreferrer" class="help-link">Docs</a>
+                {/if}
               </div>
 
               <!-- Registry install form (inline) -->
@@ -634,17 +654,32 @@
                     <span class="env-label">{entry.package ? 'Package' : 'Remote URL'}</span>
                     <input class="input input-sm" type="text" value={entry.package || (entry as any).remoteUrl || 'N/A'} disabled />
                   </div>
-                  <span class="env-label" style="margin-top:8px">Environment Variables (optional)</span>
-                  {#each regInstallEnvRows as row, i}
-                    <div class="env-fields">
+                  {#if regInstall?.envVars?.length}
+                    <span class="env-label" style="margin-top:8px">Required Configuration</span>
+                    {#each regInstallEnvRows as row, i}
+                      {@const spec = regInstall?.envVars?.find(v => v.name === row.key)}
                       <div class="env-field">
-                        <input class="input input-sm" type="text" placeholder="ENV_KEY" bind:value={regInstallEnvRows[i].key} />
+                        <span class="env-label">
+                          {spec?.name || row.key}
+                          {#if spec?.isRequired}<span class="required">*</span>{/if}
+                          {#if spec?.description}<span class="env-hint">{spec.description}</span>{/if}
+                        </span>
+                        <input class="input input-sm" type={spec?.isSecret ? 'password' : 'text'} placeholder={row.key} bind:value={regInstallEnvRows[i].value} />
                       </div>
-                      <div class="env-field">
-                        <input class="input input-sm" type="password" placeholder="value" bind:value={regInstallEnvRows[i].value} />
+                    {/each}
+                  {:else}
+                    <span class="env-label" style="margin-top:8px">Environment Variables (optional)</span>
+                    {#each regInstallEnvRows as row, i}
+                      <div class="env-fields">
+                        <div class="env-field">
+                          <input class="input input-sm" type="text" placeholder="ENV_KEY" bind:value={regInstallEnvRows[i].key} />
+                        </div>
+                        <div class="env-field">
+                          <input class="input input-sm" type="password" placeholder="value" bind:value={regInstallEnvRows[i].value} />
+                        </div>
                       </div>
-                    </div>
-                  {/each}
+                    {/each}
+                  {/if}
                   <button class="btn btn-xs" onclick={addRegEnvRow} style="margin-bottom:8px">+ Add env var</button>
                   {#if regInstallError}
                     <div class="install-error">{regInstallError}</div>
@@ -731,6 +766,8 @@
   .marketplace-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
   .marketplace-meta { display: flex; align-items: center; gap: 8px; }
   .marketplace-pkg { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); background: var(--bg-raised); padding: 2px 6px; border-radius: var(--radius-sm); }
+  .env-count { font-size: 11px; color: var(--text-muted); }
+  .env-hint { font-size: 11px; color: var(--text-muted); font-weight: 400; display: block; margin-top: 1px; }
 
   @media (max-width: 768px) {
     .page-title { font-size: 20px; }
