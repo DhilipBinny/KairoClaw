@@ -67,6 +67,16 @@
   let regInstallEnvRows = $state<Array<{ key: string; value: string }>>([{ key: '', value: '' }]);
   let regInstallError = $state('');
 
+  // Manual add form state
+  let showManualForm = $state(false);
+  let manualId = $state('');
+  let manualTransport = $state<'stdio' | 'sse'>('stdio');
+  let manualCommand = $state('npx');
+  let manualArgs = $state('');
+  let manualUrl = $state('');
+  let manualEnvRows = $state<Array<{ key: string; value: string }>>([{ key: '', value: '' }]);
+  let manualError = $state('');
+
   // Env var editor state (for installed servers)
   let envEditorOpen = $state<string | null>(null);
   let envEditorValues = $state<Record<string, string>>({});
@@ -233,6 +243,49 @@
     }
   }
 
+  // ── Manual add ─────────────────────────────
+  function openManualForm() {
+    showManualForm = true;
+    manualId = ''; manualTransport = 'stdio'; manualCommand = 'npx';
+    manualArgs = ''; manualUrl = ''; manualError = '';
+    manualEnvRows = [{ key: '', value: '' }];
+  }
+
+  function closeManualForm() {
+    showManualForm = false;
+    manualError = '';
+  }
+
+  async function handleManualInstall() {
+    if (!manualId.trim()) { manualError = 'Server ID is required'; return; }
+    if (manualTransport === 'stdio' && !manualCommand.trim()) { manualError = 'Command is required'; return; }
+    if (manualTransport === 'sse' && !manualUrl.trim()) { manualError = 'URL is required'; return; }
+
+    actionInProgress = manualId;
+    manualError = '';
+    try {
+      const env: Record<string, string> = {};
+      for (const row of manualEnvRows) {
+        if (row.key.trim() && row.value.trim()) env[row.key.trim()] = row.value.trim();
+      }
+      const args = manualArgs.trim() ? manualArgs.trim().split(/\s+/) : undefined;
+      await installMCPServer({
+        id: manualId.trim(),
+        transport: manualTransport,
+        command: manualTransport === 'stdio' ? manualCommand.trim() : undefined,
+        args: manualTransport === 'stdio' ? args : undefined,
+        url: manualTransport === 'sse' ? manualUrl.trim() : undefined,
+        env,
+      });
+      closeManualForm();
+      await loadData();
+    } catch (e: any) {
+      manualError = e?.message || 'Install failed';
+    } finally {
+      actionInProgress = '';
+    }
+  }
+
   // ── Search ─────────────────────────────────
   async function handleSearch() {
     if (!searchQuery.trim() || searchQuery.trim().length < 3) {
@@ -329,9 +382,72 @@
 
 <div class="mcp-page">
   <div class="page-header">
-    <h1 class="page-title">MCP Servers</h1>
-    <p class="page-desc">Manage Model Context Protocol servers and discover new tools.</p>
+    <div class="page-header-row">
+      <div>
+        <h1 class="page-title">MCP Servers</h1>
+        <p class="page-desc">Manage Model Context Protocol servers and discover new tools.</p>
+      </div>
+      {#if !showManualForm}
+        <button class="btn btn-primary" onclick={openManualForm}>Add Server</button>
+      {/if}
+    </div>
   </div>
+
+  <!-- Manual add form -->
+  {#if showManualForm}
+    <div class="card manual-form">
+      <h3 class="manual-title">Add Custom MCP Server</h3>
+      <div class="env-field">
+        <span class="env-label">Server ID <span class="required">*</span></span>
+        <input class="input input-sm" type="text" placeholder="my-server" bind:value={manualId} />
+      </div>
+      <div class="env-field">
+        <span class="env-label">Transport</span>
+        <select class="input input-sm" bind:value={manualTransport}>
+          <option value="stdio">stdio (local command)</option>
+          <option value="sse">SSE (remote URL)</option>
+        </select>
+      </div>
+      {#if manualTransport === 'stdio'}
+        <div class="env-fields">
+          <div class="env-field">
+            <span class="env-label">Command <span class="required">*</span></span>
+            <input class="input input-sm" type="text" placeholder="npx" bind:value={manualCommand} />
+          </div>
+          <div class="env-field">
+            <span class="env-label">Arguments</span>
+            <input class="input input-sm" type="text" placeholder="-y @scope/server-name" bind:value={manualArgs} />
+          </div>
+        </div>
+      {:else}
+        <div class="env-field">
+          <span class="env-label">URL <span class="required">*</span></span>
+          <input class="input input-sm" type="text" placeholder="https://my-server.example.com/sse" bind:value={manualUrl} />
+        </div>
+      {/if}
+      <span class="env-label" style="margin-top:8px">Environment Variables</span>
+      {#each manualEnvRows as row, i}
+        <div class="env-fields">
+          <div class="env-field">
+            <input class="input input-sm" type="text" placeholder="ENV_KEY" bind:value={manualEnvRows[i].key} />
+          </div>
+          <div class="env-field">
+            <input class="input input-sm" type="password" placeholder="value (stored encrypted)" bind:value={manualEnvRows[i].value} />
+          </div>
+        </div>
+      {/each}
+      <button class="btn btn-xs" onclick={() => { manualEnvRows = [...manualEnvRows, { key: '', value: '' }]; }} style="margin-bottom:8px">+ Add env var</button>
+      {#if manualError}
+        <div class="install-error">{manualError}</div>
+      {/if}
+      <div class="install-actions">
+        <button class="btn btn-sm btn-primary" onclick={handleManualInstall} disabled={actionInProgress === manualId}>
+          {actionInProgress === manualId ? 'Installing...' : 'Add & Connect'}
+        </button>
+        <button class="btn btn-sm" onclick={closeManualForm}>Cancel</button>
+      </div>
+    </div>
+  {/if}
 
   {#if loading}
     <div class="loading"><span class="spinner"></span> Loading...</div>
@@ -549,6 +665,9 @@
 <style>
   .mcp-page { max-width: 1000px; }
   .page-header { margin-bottom: 24px; }
+  .page-header-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .manual-form { padding: 20px; margin-bottom: 24px; }
+  .manual-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
   .page-title { font-size: 24px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
   .page-desc { color: var(--text-muted); font-size: 14px; }
   .loading { color: var(--text-muted); padding: 40px 0; display: flex; align-items: center; gap: 10px; }
