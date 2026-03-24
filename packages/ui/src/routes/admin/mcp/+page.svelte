@@ -56,10 +56,16 @@
   let searching = $state(false);
   let actionInProgress = $state('');
 
-  // Install form state
+  // Catalog install form state
   let installTarget = $state<CatalogEntry | null>(null);
   let installEnvValues = $state<Record<string, string>>({});
   let installError = $state('');
+
+  // Registry install form state
+  let regInstall = $state<MarketplaceEntry | null>(null);
+  let regInstallId = $state('');
+  let regInstallEnvRows = $state<Array<{ key: string; value: string }>>([{ key: '', value: '' }]);
+  let regInstallError = $state('');
 
   // Env var editor state (for installed servers)
   let envEditorOpen = $state<string | null>(null);
@@ -158,6 +164,57 @@
       await loadData();
     } catch (e: any) {
       installError = e?.message || 'Install failed';
+    } finally {
+      actionInProgress = '';
+    }
+  }
+
+  // ── Install from registry ──────────────────
+  function openRegInstall(entry: MarketplaceEntry) {
+    regInstall = entry;
+    // Auto-generate an ID from the package name (last segment)
+    const pkg = entry.package || entry.name || '';
+    regInstallId = pkg.split('/').pop()?.replace(/^server-/, '') || entry.name || '';
+    regInstallEnvRows = [{ key: '', value: '' }];
+    regInstallError = '';
+  }
+
+  function closeRegInstall() {
+    regInstall = null;
+    regInstallId = '';
+    regInstallEnvRows = [{ key: '', value: '' }];
+    regInstallError = '';
+  }
+
+  function addRegEnvRow() {
+    regInstallEnvRows = [...regInstallEnvRows, { key: '', value: '' }];
+  }
+
+  async function handleRegInstall() {
+    if (!regInstall) return;
+    if (!regInstallId.trim()) { regInstallError = 'Server ID is required'; return; }
+
+    const pkg = regInstall.package;
+    if (!pkg) { regInstallError = 'No npm package found for this server'; return; }
+
+    actionInProgress = regInstallId;
+    regInstallError = '';
+    try {
+      const env: Record<string, string> = {};
+      for (const row of regInstallEnvRows) {
+        if (row.key.trim() && row.value.trim()) env[row.key.trim()] = row.value.trim();
+      }
+      await installMCPServer({
+        id: regInstallId.trim(),
+        transport: (regInstall.transport as 'stdio' | 'sse') || 'stdio',
+        command: 'npx',
+        args: ['-y', pkg],
+        env,
+      });
+      closeRegInstall();
+      await loadData();
+    } catch (e: any) {
+      regInstallError = e?.message || 'Install failed';
     } finally {
       actionInProgress = '';
     }
@@ -417,9 +474,14 @@
           {#each marketplaceResults as entry}
             <div class="card marketplace-card">
               <div class="marketplace-header">
-                <h3 class="marketplace-name">{entry.name}</h3>
+                <div>
+                  <h3 class="marketplace-name">{entry.name}</h3>
+                  <p class="marketplace-desc">{entry.description || 'No description'}</p>
+                </div>
+                {#if entry.installable && entry.package}
+                  <button class="btn btn-sm btn-primary" onclick={() => openRegInstall(entry)} disabled={!!actionInProgress}>Install</button>
+                {/if}
               </div>
-              <p class="marketplace-desc">{entry.description || 'No description'}</p>
               <div class="marketplace-meta">
                 {#if entry.package}
                   <code class="marketplace-pkg">{entry.package}</code>
@@ -428,6 +490,41 @@
                   <Badge>{entry.transport}</Badge>
                 {/if}
               </div>
+
+              <!-- Registry install form (inline) -->
+              {#if regInstall?.id === entry.id}
+                <div class="install-form">
+                  <div class="env-field">
+                    <span class="env-label">Server ID</span>
+                    <input class="input input-sm" type="text" bind:value={regInstallId} placeholder="my-server" />
+                  </div>
+                  <div class="env-field">
+                    <span class="env-label">Package</span>
+                    <input class="input input-sm" type="text" value={entry.package} disabled />
+                  </div>
+                  <span class="env-label" style="margin-top:8px">Environment Variables (optional)</span>
+                  {#each regInstallEnvRows as row, i}
+                    <div class="env-fields">
+                      <div class="env-field">
+                        <input class="input input-sm" type="text" placeholder="ENV_KEY" bind:value={regInstallEnvRows[i].key} />
+                      </div>
+                      <div class="env-field">
+                        <input class="input input-sm" type="password" placeholder="value" bind:value={regInstallEnvRows[i].value} />
+                      </div>
+                    </div>
+                  {/each}
+                  <button class="btn btn-xs" onclick={addRegEnvRow} style="margin-bottom:8px">+ Add env var</button>
+                  {#if regInstallError}
+                    <div class="install-error">{regInstallError}</div>
+                  {/if}
+                  <div class="install-actions">
+                    <button class="btn btn-sm btn-primary" onclick={handleRegInstall} disabled={actionInProgress === regInstallId}>
+                      {actionInProgress === regInstallId ? 'Installing...' : 'Install'}
+                    </button>
+                    <button class="btn btn-sm" onclick={closeRegInstall}>Cancel</button>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
