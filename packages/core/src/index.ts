@@ -49,6 +49,7 @@ import { chatRoutes } from './routes/chat.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
+import { registerDatabaseRoutes } from './routes/database.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerWhatsAppRoutes } from './routes/whatsapp.js';
 import { registerChannelRoutes } from './routes/channels.js';
@@ -402,6 +403,7 @@ async function main(): Promise<void> {
   await server.register(chatRoutes, { runner: createRunner });
   await server.register(registerWorkspaceRoutes);
   await server.register(registerSystemRoutes, { providerRegistry, secretsStore });
+  await server.register(registerDatabaseRoutes);
   await server.register(registerMediaRoutes, { mediaStore });
 
   // 13. Start cron scheduler
