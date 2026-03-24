@@ -24,4 +24,4 @@ echo "   http://localhost:18181"
 echo "   Ctrl+C to stop"
 echo ""
 
-AGW_STATE_DIR=./agw-data AGW_CONFIG=./agw-data/config.json exec node packages/core/dist/index.js
+AGW_STATE_DIR=./local_data/agw-data AGW_CONFIG=./local_data/agw-data/config.json exec node packages/core/dist/index.js

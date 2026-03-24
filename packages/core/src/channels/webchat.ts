@@ -400,9 +400,12 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             if (sIds.length > 0) {
               const placeholders = sIds.map(() => '?').join(',');
               const titleRows = await db.query<{ session_id: string; content: string }>(
-                `SELECT session_id, content FROM messages
-                 WHERE session_id IN (${placeholders}) AND role = 'user'
-                 GROUP BY session_id HAVING id = MIN(id)`,
+                `SELECT m.session_id, m.content FROM messages m
+                 INNER JOIN (
+                   SELECT session_id, MIN(id) as min_id FROM messages
+                   WHERE session_id IN (${placeholders}) AND role = 'user'
+                   GROUP BY session_id
+                 ) first ON m.id = first.min_id`,
                 sIds,
               );
               for (const row of titleRows) {
