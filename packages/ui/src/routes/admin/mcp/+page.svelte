@@ -172,9 +172,8 @@
   // ── Install from registry ──────────────────
   function openRegInstall(entry: MarketplaceEntry) {
     regInstall = entry;
-    // Auto-generate an ID from the package name (last segment)
     const pkg = entry.package || entry.name || '';
-    regInstallId = pkg.split('/').pop()?.replace(/^server-/, '') || entry.name || '';
+    regInstallId = pkg.split('/').pop()?.replace(/^server-/, '') || entry.name?.replace(/[^a-z0-9-]/gi, '-') || '';
     regInstallEnvRows = [{ key: '', value: '' }];
     regInstallError = '';
   }
@@ -194,8 +193,8 @@
     if (!regInstall) return;
     if (!regInstallId.trim()) { regInstallError = 'Server ID is required'; return; }
 
-    const pkg = regInstall.package;
-    if (!pkg) { regInstallError = 'No npm package found for this server'; return; }
+    const entry = regInstall;
+    const isSSE = entry.transport === 'sse' || (!entry.package && (entry as any).remoteUrl);
 
     actionInProgress = regInstallId;
     regInstallError = '';
@@ -204,13 +203,27 @@
       for (const row of regInstallEnvRows) {
         if (row.key.trim() && row.value.trim()) env[row.key.trim()] = row.value.trim();
       }
-      await installMCPServer({
-        id: regInstallId.trim(),
-        transport: (regInstall.transport as 'stdio' | 'sse') || 'stdio',
-        command: 'npx',
-        args: ['-y', pkg],
-        env,
-      });
+
+      if (isSSE) {
+        const url = (entry as any).remoteUrl;
+        if (!url) { regInstallError = 'No remote URL found for this SSE server'; actionInProgress = ''; return; }
+        await installMCPServer({
+          id: regInstallId.trim(),
+          transport: 'sse',
+          url,
+          env,
+        });
+      } else {
+        const pkg = entry.package;
+        if (!pkg) { regInstallError = 'No npm package found'; actionInProgress = ''; return; }
+        await installMCPServer({
+          id: regInstallId.trim(),
+          transport: 'stdio',
+          command: 'npx',
+          args: ['-y', pkg],
+          env,
+        });
+      }
       closeRegInstall();
       await loadData();
     } catch (e: any) {
@@ -478,9 +491,7 @@
                   <h3 class="marketplace-name">{entry.name}</h3>
                   <p class="marketplace-desc">{entry.description || 'No description'}</p>
                 </div>
-                {#if entry.installable && entry.package}
-                  <button class="btn btn-sm btn-primary" onclick={() => openRegInstall(entry)} disabled={!!actionInProgress}>Install</button>
-                {/if}
+                <button class="btn btn-sm btn-primary" onclick={() => openRegInstall(entry)} disabled={!!actionInProgress}>Install</button>
               </div>
               <div class="marketplace-meta">
                 {#if entry.package}
@@ -499,8 +510,8 @@
                     <input class="input input-sm" type="text" bind:value={regInstallId} placeholder="my-server" />
                   </div>
                   <div class="env-field">
-                    <span class="env-label">Package</span>
-                    <input class="input input-sm" type="text" value={entry.package} disabled />
+                    <span class="env-label">{entry.package ? 'Package' : 'Remote URL'}</span>
+                    <input class="input input-sm" type="text" value={entry.package || (entry as any).remoteUrl || 'N/A'} disabled />
                   </div>
                   <span class="env-label" style="margin-top:8px">Environment Variables (optional)</span>
                   {#each regInstallEnvRows as row, i}
