@@ -21,6 +21,8 @@ docs/_local_reference/
 
 # ── Runtime data (app-managed) ──
 agw-data/
+dev-data/
+dev-pgdata/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
