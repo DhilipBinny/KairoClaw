@@ -237,7 +237,7 @@
                 </td>
                 <td>
                   <span class="badge badge-{u.role}">{u.role}</span>
-                  {#if u.elevated}<span class="badge badge-elevated" title="Has access to dangerous tools">elevated</span>{/if}
+                  {#if u.elevated}<span class="badge badge-elevated" title="Has access to exec, cron, file write/delete">power user</span>{/if}
                 </td>
                 <td>
                   {#if u.active}
@@ -328,7 +328,7 @@
           <div class="form-group">
             <label class="checkbox-label">
               <input type="checkbox" bind:checked={createElevated} />
-              Elevated (access to exec, cron, file write/delete)
+              Power User (grants exec, cron, file write/delete tools)
             </label>
           </div>
           <div class="modal-actions">
@@ -363,7 +363,7 @@
         <div class="form-group">
           <label class="checkbox-label">
             <input type="checkbox" bind:checked={editElevated} />
-            Elevated (access to exec, cron, file write/delete)
+            Power User (grants exec, cron, file write/delete tools)
           </label>
         </div>
         <div class="modal-actions">
