@@ -3,19 +3,19 @@ import type { ToolPermissionLevel } from '@agw/types';
 import { ToolPermissionRepository } from '../db/repositories/tool-permission.js';
 
 /**
- * Tools that require admin or elevated access.
- * Non-admin, non-elevated users are denied these tools.
- */
-const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file'];
-
-/**
  * Check whether a tool is allowed for a given user.
+ *
+ * All permission logic is driven by DB rules (tool_permissions table).
+ * No hardcoded tool lists — admin controls everything from Settings UI.
  *
  * Order of checks:
  * 1. Admin → always allow
- * 2. Dangerous tool + non-elevated user → deny
- * 3. DB permission rules (glob matching, most specific wins)
- * 4. No rules → allow (open by default for single-user setups)
+ * 2. DB permission rules (glob matching, most specific wins)
+ *    - 'allow'      → allow for all users
+ *    - 'deny'       → deny (admin only)
+ *    - 'power_user' → allow only if user has elevated flag
+ *    - 'confirm'    → allow but flag for confirmation
+ * 3. No rules → allow (open by default for single-user setups)
  */
 export async function checkToolPermission(
   toolName: string,
@@ -27,11 +27,6 @@ export async function checkToolPermission(
   // Admin bypasses all checks
   if (userRole === 'admin') return 'allow';
 
-  // Dangerous tools require elevated access for non-admins
-  if (DANGEROUS_TOOLS.includes(toolName) && !elevated) {
-    return 'deny';
-  }
-
   const repo = new ToolPermissionRepository(db);
   const permissions = await repo.listByTenantAndRole(tenantId, userRole);
 
@@ -40,5 +35,12 @@ export async function checkToolPermission(
     return 'allow';
   }
 
-  return await repo.checkPermission(tenantId, userRole, toolName);
+  const permission = await repo.checkPermission(tenantId, userRole, toolName);
+
+  // power_user: allow only if user has elevated flag
+  if (permission === 'power_user') {
+    return elevated ? 'allow' : 'deny';
+  }
+
+  return permission;
 }

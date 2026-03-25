@@ -373,7 +373,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'permissions array is required' });
     }
 
-    const validPerms = ['allow', 'deny', 'confirm'];
+    const validPerms = ['allow', 'deny', 'confirm', 'power_user'];
 
     // Delete existing rules for this role, then insert new ones
     const repo = new ToolPermissionRepository(db);
