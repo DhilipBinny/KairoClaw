@@ -128,6 +128,15 @@ node scripts/migrate-sqlite-to-pg.js ./path/to/gateway.db postgres://user:pass@h
   the chain may show `brokenAt` for old entries
 - New entries after migration maintain correct chain integrity
 
+### PostgreSQL connection validation
+- On startup, the app validates the PG connection BEFORE any migration
+- If the connection fails (wrong URL, wrong credentials, PG not running):
+  - Clear error message: `POSTGRESQL CONNECTION FAILED: <reason>`
+  - Shows masked connection string for debugging
+  - App exits cleanly (exit code 1)
+  - `gateway.db` is NEVER touched — safe to fix the URL and retry
+- Connection is validated with a simple `SELECT 1` query
+
 ### PostgreSQL connection requirements
 - Minimum PostgreSQL 13 (tested on 17)
 - User needs CREATE TABLE, INSERT, UPDATE, DELETE permissions
@@ -193,3 +202,32 @@ volumes:
   kairoclaw-data:
   postgres-data:
 ```
+
+---
+
+## Troubleshooting
+
+### "POSTGRESQL CONNECTION FAILED"
+- Check that PostgreSQL is running and accessible
+- Verify `AGW_DATABASE_URL` format: `postgres://user:password@host:port/database`
+- If using Docker Compose, ensure `depends_on` with `service_healthy` condition
+- `gateway.db` is safe — not touched when connection fails
+
+### Migration didn't run
+- Check all 4 conditions: `AGW_DATABASE_URL` set, `gateway.db` exists, no `.migrated` file, PG tenants empty
+- Check logs for `[db] Auto-migrating` or `[db] Migration complete`
+- If `.migrated` exists from a previous attempt, rename it back to `.db` to retry
+
+### Old admin key doesn't work after switching to PG
+- If auto-migration ran: old key should work (user table migrated)
+- If PG was already seeded (had data): migration was skipped, new key was generated
+- Fix: clear PG data, restore `gateway.db` from `.migrated`, restart
+
+### Lost admin key after PG volume reset
+- PG volume was deleted but `.migrated` exists → seed created new key
+- The new key was printed in startup logs (check `docker logs`)
+- To restore old data: rename `.migrated` → `.db`, delete PG volume, restart
+
+### Migration completed but some data seems missing
+- Sessions list filters out `internal` and `cron` sessions — check with direct PG query
+- Verify with: `psql <url> -c "SELECT COUNT(*) FROM sessions"`
