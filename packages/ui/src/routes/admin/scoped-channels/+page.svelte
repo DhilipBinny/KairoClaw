@@ -72,10 +72,14 @@
             onclick={() => viewScope(scope.scopeKey)}
           >
             <div class="user-card-header">
-              <span class="channel-badge" style="color: {channelColor(scope.channel)}">
-                {scope.channel}
-              </span>
-              <span class="user-id">{scope.userId}</span>
+              {#if scope.userName}
+                <strong>{scope.userName}</strong>
+              {:else}
+                <span class="channel-badge" style="color: {channelColor(scope.channel)}">
+                  {scope.channel}
+                </span>
+                <span class="user-id">{scope.userId}</span>
+              {/if}
             </div>
             <div class="user-card-meta">
               {#if scope.sessionCount > 0}
