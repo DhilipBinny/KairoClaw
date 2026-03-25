@@ -372,10 +372,11 @@
         </div>
         <div class="pending-list">
           {#each pendingSenders.filter(s => s.status === 'pending') as sender (sender.id)}
+            {@const isGroup = (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
             <div class="pending-row">
               <div class="pending-info">
                 <span class="pending-name">
-                  {#if (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
+                  {#if isGroup}
                     <span class="badge badge-group">Group</span>
                   {/if}
                   {sender.sender_name || sender.sender_id}
@@ -385,12 +386,15 @@
                 </span>
               </div>
               <div class="pending-actions">
-                <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
-                  Onboard
-                </button>
-                <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
-                  {approvingId === sender.id ? 'Adding...' : 'Approve Only'}
-                </button>
+                {#if isGroup}
+                  <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
+                    {approvingId === sender.id ? 'Approving...' : 'Approve'}
+                  </button>
+                {:else}
+                  <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
+                    Add as User
+                  </button>
+                {/if}
                 <button class="btn btn-sm" disabled={rejectingId === sender.id} onclick={() => handleRejectSender(sender.id)}>
                   Dismiss
                 </button>
@@ -410,10 +414,11 @@
         </div>
         <div class="pending-list">
           {#each pendingSenders.filter(s => s.status === 'seen') as sender (sender.id)}
+            {@const isGroup = (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
             <div class="pending-row">
               <div class="pending-info">
                 <span class="pending-name">
-                  {#if (sender.channel === 'telegram' && sender.sender_id.startsWith('-')) || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'))}
+                  {#if isGroup}
                     <span class="badge badge-group">Group</span>
                   {/if}
                   {sender.sender_name || sender.sender_id}
@@ -423,12 +428,15 @@
                 </span>
               </div>
               <div class="pending-actions">
-                <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
-                  Onboard
-                </button>
-                <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
-                  {approvingId === sender.id ? 'Adding...' : 'Add to allowlist'}
-                </button>
+                {#if isGroup}
+                  <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
+                    {approvingId === sender.id ? 'Approving...' : 'Approve'}
+                  </button>
+                {:else}
+                  <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
+                    Add as User
+                  </button>
+                {/if}
                 <button class="btn btn-sm" disabled={rejectingId === sender.id} onclick={() => handleRejectSender(sender.id)}>
                   Dismiss
                 </button>
@@ -444,7 +452,7 @@
       <div class="modal-overlay" onclick={() => { if (!onboardedApiKey) onboardSenderData = null; }} role="presentation">
         <div class="modal card" onclick={(e) => e.stopPropagation()} role="dialog">
           {#if onboardedApiKey}
-            <h2 class="modal-title">User Onboarded</h2>
+            <h2 class="modal-title">User Created</h2>
             <p style="margin-bottom: 12px;">Save this API key now. It will not be shown again.</p>
             <div class="key-display">
               <code class="key-value">{onboardedApiKey}</code>
@@ -454,7 +462,7 @@
               <button class="btn" onclick={() => { onboardSenderData = null; onboardedApiKey = ''; }}>Done</button>
             </div>
           {:else}
-            <h2 class="modal-title">Onboard User</h2>
+            <h2 class="modal-title">Add as User</h2>
             <p class="onboard-sender-info">
               <span class="badge badge-{onboardSenderData.channel}">{onboardSenderData.channel}</span>
               {onboardSenderData.sender_name || onboardSenderData.sender_id}
@@ -488,12 +496,12 @@
               <div class="form-group">
                 <label class="checkbox-label">
                   <input type="checkbox" bind:checked={onboardElevated} />
-                  Elevated (access to exec, cron, file write/delete)
+                  Power User (grants exec, cron, file write/delete tools)
                 </label>
               </div>
               <div class="modal-actions">
                 <button class="btn" onclick={() => onboardSenderData = null}>Cancel</button>
-                <button class="btn btn-primary" onclick={handleOnboard} disabled={!onboardName.trim()}>Create & Approve</button>
+                <button class="btn btn-primary" onclick={handleOnboard} disabled={!onboardName.trim()}>Create Account</button>
               </div>
             {:else}
               <div class="form-group">

@@ -1,10 +1,25 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import AdminNav from '$lib/components/AdminNav.svelte';
+  import { checkAuth, getUser } from '$lib/stores/auth.svelte';
 
   let { children } = $props();
   let navOpen = $state(false);
+  let authorized = $state(false);
+
+  onMount(async () => {
+    await checkAuth();
+    const user = getUser();
+    if (!user || user.role !== 'admin') {
+      goto('/');
+    } else {
+      authorized = true;
+    }
+  });
 </script>
 
+{#if authorized}
 <div class="admin-layout">
   <div class="admin-nav-wrapper" class:open={navOpen}>
     <AdminNav />
@@ -26,6 +41,7 @@
     {@render children()}
   </main>
 </div>
+{/if}
 
 <style>
   .admin-layout {
