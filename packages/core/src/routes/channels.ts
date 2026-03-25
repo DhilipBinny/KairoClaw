@@ -126,8 +126,9 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
     const { id } = request.params as { id: string };
 
+    const tenantId = request.tenantId || 'default';
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id));
+    const sender = await repo.getById(Number(id), tenantId);
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -173,12 +174,11 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(500).send({ error: 'Failed to update config' });
     }
 
-    await repo.updateStatus(Number(id), 'approved');
+    await repo.updateStatus(Number(id), 'approved', tenantId);
 
     // If userId provided, create sender_link (maps this sender to a user account)
     const { userId: linkUserId } = (request.body as { userId?: string }) || {};
     if (linkUserId && !isGroup) {
-      const tenantId = request.tenantId || 'default';
       const senderLinkRepo = new SenderLinkRepository(db);
       await senderLinkRepo.link({
         tenantId,
@@ -195,15 +195,16 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
   // POST /api/v1/admin/channels/pending-senders/:id/reject
   app.post('/api/v1/admin/channels/pending-senders/:id/reject', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id));
+    const sender = await repo.getById(Number(id), tenantId);
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    await repo.updateStatus(Number(id), 'rejected');
+    await repo.updateStatus(Number(id), 'rejected', tenantId);
     return { success: true };
   });
 
@@ -220,13 +221,13 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(400).send({ error: 'Name is required' });
     }
 
+    const tenantId = request.tenantId || 'default';
+
     const pendingRepo = new PendingSenderRepository(db);
-    const sender = await pendingRepo.getById(Number(id));
+    const sender = await pendingRepo.getById(Number(id), tenantId);
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
-
-    const tenantId = request.tenantId || 'default';
     const validRoles = ['admin', 'user'];
     const userRole = role && validRoles.includes(role) ? role : 'user';
 
@@ -291,7 +292,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     }
 
     // 4. Mark sender as approved (after DB operations succeed, before return)
-    try { await pendingRepo.updateStatus(Number(id), 'approved'); } catch { /* non-critical */ }
+    try { await pendingRepo.updateStatus(Number(id), 'approved', tenantId); } catch { /* non-critical */ }
 
     return {
       user: {

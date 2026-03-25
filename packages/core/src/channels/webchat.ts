@@ -182,11 +182,11 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // If gateway token didn't match, check against user API keys in the DB
           if (!authValid && token) {
             const keyHash = hashApiKey(token);
-            const user = await db.get<{ id: string }>(
-              'SELECT id FROM users WHERE api_key_hash = ?',
+            const user = await db.get<{ id: string; active: number }>(
+              'SELECT id, active FROM users WHERE api_key_hash = ?',
               [keyHash],
             );
-            if (user) {
+            if (user && user.active) {
               authValid = true;
               // Use stable user ID for scoped memory (not ephemeral clientId)
               clientId = (user as Record<string, unknown>).id as string || clientId;
