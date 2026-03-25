@@ -92,6 +92,22 @@ async function main(): Promise<void> {
 
   if (dbDialect === 'postgres') {
     console.log('  Database: PostgreSQL');
+    // Validate PG connection before proceeding
+    try {
+      await db.get('SELECT 1 as ok');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('\n' + '='.repeat(60));
+      console.error('  POSTGRESQL CONNECTION FAILED');
+      console.error(`  ${msg}`);
+      console.error('');
+      console.error('  Check AGW_DATABASE_URL:');
+      console.error(`  ${dbUrl?.replace(/:[^:@]+@/, ':***@')}`);
+      console.error('');
+      console.error('  Ensure PostgreSQL is running and accessible.');
+      console.error('='.repeat(60) + '\n');
+      process.exit(1);
+    }
   }
 
   // Store stateDir in config for route access
