@@ -19,12 +19,17 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.db;
     const config = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.config;
 
-    // First-run detection: only 1 user (the seeded admin) and no active sessions
+    // First-run detection and user stats
     let firstRun = false;
+    let totalUsers = 0;
+    let activeUsers = 0;
     try {
       const userCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM users');
+      const activeCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM users WHERE active = 1');
       const sessionCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM sessions');
-      firstRun = (userCount?.count ?? 0) <= 1 && (sessionCount?.count ?? 0) === 0;
+      totalUsers = userCount?.count ?? 0;
+      activeUsers = activeCount?.count ?? 0;
+      firstRun = totalUsers <= 1 && (sessionCount?.count ?? 0) === 0;
     } catch { /* non-critical */ }
 
     return {
@@ -38,6 +43,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       },
       model: (config as Record<string, Record<string, string>>)?.model?.primary || 'not configured',
       firstRun,
+      users: { total: totalUsers, active: activeUsers },
     };
   });
 

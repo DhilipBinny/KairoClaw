@@ -85,10 +85,12 @@ export class ToolRegistry {
     let permission: ToolPermissionLevel = 'allow';
     const db = context.db as DatabaseAdapter | undefined;
     const tenantId = context.tenant || 'default';
-    const userRole = (context.user as Record<string, unknown>)?.role as string || 'user';
+    const userObj = context.user as Record<string, unknown> | undefined;
+    const userRole = (userObj?.role as string) || 'user';
+    const userElevated = !!(userObj?.elevated);
 
     if (db) {
-      permission = await checkToolPermission(name, userRole, db, tenantId);
+      permission = await checkToolPermission(name, userRole, db, tenantId, userElevated);
       if (permission === 'deny') {
         // Audit: tool denied by RBAC
         try {

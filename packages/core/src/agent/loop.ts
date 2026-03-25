@@ -50,6 +50,8 @@ export interface AgentContext {
   session: SessionRow;
   tenantId: string;
   userId?: string;
+  /** User info for permission checks (role + elevated toggle). */
+  user?: { id: string; role: string; elevated: boolean };
   /** Generic LLM call function — decoupled from specific providers. */
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   /** Tool definitions available for this turn. */

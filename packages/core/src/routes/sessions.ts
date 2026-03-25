@@ -40,6 +40,20 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
+    // Fetch user names for display
+    const userIds = [...new Set(sessions.map(s => s.user_id).filter(Boolean))] as string[];
+    const userNameMap = new Map<string, string>();
+    if (userIds.length > 0) {
+      const placeholders = userIds.map(() => '?').join(',');
+      const userRows = await db.query<{ id: string; name: string }>(
+        `SELECT id, name FROM users WHERE id IN (${placeholders})`,
+        userIds,
+      );
+      for (const row of userRows) {
+        userNameMap.set(row.id, row.name);
+      }
+    }
+
     const enriched = sessions.map((s) => {
       const metadata = JSON.parse(s.metadata || '{}');
       let title = metadata.title || '';
@@ -51,7 +65,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
           if (content.length > 80) title += '...';
         }
       }
-      return { ...s, title };
+      return {
+        ...s,
+        title,
+        user_name: s.user_id ? userNameMap.get(s.user_id) || null : null,
+      };
     });
 
     return { sessions: enriched };
