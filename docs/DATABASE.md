@@ -71,7 +71,7 @@ When you switch to PostgreSQL, data migrates automatically on first startup:
 | Table | Description |
 |-------|------------|
 | tenants | Multi-tenant organizations |
-| users | Admin and user accounts (with API key hashes) |
+| users | Admin and user accounts (with API key hashes, roles, elevated flag) |
 | sessions | Chat sessions (web, telegram, whatsapp, etc.) |
 | messages | Conversation history |
 | tool_calls | Tool execution audit trail |
@@ -80,6 +80,7 @@ When you switch to PostgreSQL, data migrates automatically on first startup:
 | tool_permissions | RBAC rules |
 | memory_chunks | Workspace memory index |
 | pending_senders | Channel discovery records |
+| sender_links | Maps Telegram/WhatsApp sender IDs to user accounts |
 
 ### Conditions for auto-migration
 
