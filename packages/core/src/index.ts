@@ -281,10 +281,10 @@ async function main(): Promise<void> {
 
     // Resolve user: try direct lookup first (webchat/API), then sender_links (Telegram/WhatsApp)
     let validUserId: string | undefined;
-    let resolvedUser: { id: string; elevated: number; active: number } | undefined;
+    let resolvedUser: { id: string; role: string; elevated: number; active: number } | undefined;
     if (inbound.userId) {
-      resolvedUser = await db.get<{ id: string; elevated: number; active: number }>(
-        'SELECT id, elevated, active FROM users WHERE id = ? AND active = 1',
+      resolvedUser = await db.get<{ id: string; role: string; elevated: number; active: number }>(
+        'SELECT id, role, elevated, active FROM users WHERE id = ? AND active = 1',
         [String(inbound.userId)],
       );
     }
@@ -292,8 +292,8 @@ async function main(): Promise<void> {
       // Channel sender — look up sender_links
       const link = await senderLinkRepo.findByChannelSender(tenantId, inbound.channel, String(inbound.userId));
       if (link) {
-        resolvedUser = await db.get<{ id: string; elevated: number; active: number }>(
-          'SELECT id, elevated, active FROM users WHERE id = ? AND active = 1',
+        resolvedUser = await db.get<{ id: string; role: string; elevated: number; active: number }>(
+          'SELECT id, role, elevated, active FROM users WHERE id = ? AND active = 1',
           [link.user_id],
         );
       }
@@ -343,11 +343,11 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
-      user: resolvedUser ? { id: resolvedUser.id, role: 'user', elevated: !!resolvedUser.elevated } : undefined,
+      user: resolvedUser ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated } : undefined,
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: await toolRegistry.getDefinitions({
-        userRole: resolvedUser ? 'user' : 'admin',
+        userRole: resolvedUser?.role || 'admin', // unlinked/cron/system → admin; resolved users → their actual role
         db,
         tenantId,
         elevated: !!resolvedUser?.elevated,

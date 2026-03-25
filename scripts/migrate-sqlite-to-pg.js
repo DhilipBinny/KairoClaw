@@ -39,6 +39,7 @@ const TABLES = [
   'tool_permissions',
   'memory_chunks',
   'pending_senders',
+  'sender_links',
 ];
 
 async function migrate() {
@@ -104,7 +105,7 @@ async function migrate() {
       console.log(`  ${table}: ${inserted} rows migrated`);
 
       // Reset serial sequences for tables with SERIAL columns
-      if (['messages', 'usage_records', 'audit_log', 'tool_permissions', 'memory_chunks', 'pending_senders'].includes(table)) {
+      if (['messages', 'usage_records', 'audit_log', 'tool_permissions', 'memory_chunks', 'pending_senders', 'sender_links'].includes(table)) {
         try {
           await pool.query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE((SELECT MAX(id) FROM ${table}), 0) + 1, false)`);
         } catch { /* sequence may not exist */ }
