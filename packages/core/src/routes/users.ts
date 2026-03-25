@@ -112,7 +112,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     const senderLinkRepo = new SenderLinkRepository(db);
     const usageRepo = new UsageRepository(db);
 
-    const links = await senderLinkRepo.listByUser(id);
+    const links = await senderLinkRepo.listByUser(tenantId, id);
     const usage = await usageRepo.summarizeByUser(tenantId, id, 30);
 
     const sessionCount = await db.get<{ count: number }>(
@@ -189,9 +189,9 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
 
     // Remove sender links so deactivated user can't message via channels
     const senderLinkRepo = new SenderLinkRepository(db);
-    const links = await senderLinkRepo.listByUser(id);
+    const links = await senderLinkRepo.listByUser(tenantId, id);
     for (const link of links) {
-      await senderLinkRepo.unlink(link.id);
+      await senderLinkRepo.unlink(link.id, tenantId);
     }
 
     return { success: true };
@@ -249,10 +249,11 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/users/:id/sender-links — list linked senders
   app.get('/api/v1/admin/users/:id/sender-links', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
 
     const senderLinkRepo = new SenderLinkRepository(db);
-    return await senderLinkRepo.listByUser(id);
+    return await senderLinkRepo.listByUser(tenantId, id);
   });
 
   // POST /api/v1/admin/users/:id/sender-links — link a sender
@@ -285,13 +286,14 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/admin/users/:id/sender-links/:linkId — unlink
   app.delete('/api/v1/admin/users/:id/sender-links/:linkId', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
+    const tenantId = request.tenantId || 'default';
     const { linkId } = request.params as { id: string; linkId: string };
 
     const senderLinkRepo = new SenderLinkRepository(db);
-    const link = await senderLinkRepo.getById(Number(linkId));
+    const link = await senderLinkRepo.getById(Number(linkId), tenantId);
     if (!link) return reply.code(404).send({ error: 'Link not found' });
 
-    await senderLinkRepo.unlink(Number(linkId));
+    await senderLinkRepo.unlink(Number(linkId), tenantId);
     return { success: true };
   });
 };

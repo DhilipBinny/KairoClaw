@@ -46,21 +46,21 @@ export class SenderLinkRepository {
     return row!;
   }
 
-  async unlink(id: number): Promise<void> {
-    await this.db.run('DELETE FROM sender_links WHERE id = ?', [id]);
+  async unlink(id: number, tenantId: string): Promise<void> {
+    await this.db.run('DELETE FROM sender_links WHERE id = ? AND tenant_id = ?', [id, tenantId]);
   }
 
-  async findByChannelSender(channelType: string, senderId: string): Promise<SenderLinkRow | undefined> {
+  async findByChannelSender(tenantId: string, channelType: string, senderId: string): Promise<SenderLinkRow | undefined> {
     return await this.db.get<SenderLinkRow>(
-      'SELECT * FROM sender_links WHERE channel_type = ? AND sender_id = ?',
-      [channelType, senderId],
+      'SELECT * FROM sender_links WHERE tenant_id = ? AND channel_type = ? AND sender_id = ?',
+      [tenantId, channelType, senderId],
     );
   }
 
-  async listByUser(userId: string): Promise<SenderLinkRow[]> {
+  async listByUser(tenantId: string, userId: string): Promise<SenderLinkRow[]> {
     return await this.db.query<SenderLinkRow>(
-      'SELECT * FROM sender_links WHERE user_id = ? ORDER BY linked_at DESC',
-      [userId],
+      'SELECT * FROM sender_links WHERE tenant_id = ? AND user_id = ? ORDER BY linked_at DESC',
+      [tenantId, userId],
     );
   }
 
@@ -71,7 +71,7 @@ export class SenderLinkRepository {
     );
   }
 
-  async getById(id: number): Promise<SenderLinkRow | undefined> {
-    return await this.db.get<SenderLinkRow>('SELECT * FROM sender_links WHERE id = ?', [id]);
+  async getById(id: number, tenantId: string): Promise<SenderLinkRow | undefined> {
+    return await this.db.get<SenderLinkRow>('SELECT * FROM sender_links WHERE id = ? AND tenant_id = ?', [id, tenantId]);
   }
 }
