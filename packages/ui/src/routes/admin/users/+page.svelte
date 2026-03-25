@@ -38,6 +38,11 @@
   let newApiKey = $state('');
   let newApiKeyUserId = $state('');
 
+  // Regenerate key modal
+  let regenUserId = $state('');
+  let regenUserName = $state('');
+  let regenConfirmText = $state('');
+
   async function loadUsers() {
     loading = true;
     error = '';
@@ -128,12 +133,20 @@
     }
   }
 
-  async function handleRegenerateKey(id: string) {
-    if (!confirm('Regenerate API key? The old key will stop working immediately.')) return;
+  function startRegenKey(u: UserInfo) {
+    regenUserId = u.id;
+    regenUserName = u.name;
+    regenConfirmText = '';
+  }
+
+  async function handleRegenerateKey() {
+    if (regenConfirmText !== 'REGENERATE') return;
     try {
-      const result = await regenerateApiKey(id);
+      const result = await regenerateApiKey(regenUserId);
       newApiKey = result.api_key;
-      newApiKeyUserId = id;
+      newApiKeyUserId = regenUserId;
+      regenUserId = '';
+      regenConfirmText = '';
     } catch (e: any) {
       error = e.message;
     }
@@ -253,7 +266,7 @@
                 </td>
                 <td class="actions-cell">
                   <button class="btn-sm" onclick={() => startEdit(u)}>Edit</button>
-                  <button class="btn-sm" onclick={() => handleRegenerateKey(u.id)}>Key</button>
+                  <button class="btn-sm" onclick={() => startRegenKey(u)}>Key</button>
                   <button class="btn-sm" onclick={() => { linkUserId = u.id; }}>Link</button>
                   {#if u.active}
                     <button class="btn-sm btn-danger" onclick={() => handleDeactivate(u.id)}>Deactivate</button>
@@ -401,6 +414,26 @@
       </div>
     </div>
   {/if}
+
+  <!-- Regenerate Key Modal -->
+  {#if regenUserId}
+    <div class="modal-overlay" onclick={() => regenUserId = ''} role="presentation">
+      <div class="modal card" onclick={(e) => e.stopPropagation()} role="dialog">
+        <h2 class="modal-title">Regenerate API Key</h2>
+        <div class="warning-box">
+          The current API key for <strong>{regenUserName}</strong> will be <strong>permanently invalidated</strong>. The user will be locked out until they receive the new key.
+        </div>
+        <div class="form-group">
+          <label class="label">Type REGENERATE to confirm</label>
+          <input class="input" type="text" bind:value={regenConfirmText} placeholder="REGENERATE" autocomplete="off" />
+        </div>
+        <div class="modal-actions">
+          <button class="btn" onclick={() => regenUserId = ''}>Cancel</button>
+          <button class="btn btn-danger" onclick={handleRegenerateKey} disabled={regenConfirmText !== 'REGENERATE'}>Regenerate Key</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -476,6 +509,11 @@
   .btn-sm:hover { background: var(--bg-raised); color: var(--text-primary); }
   .btn-danger { color: var(--red, #ef4444); border-color: var(--red, #ef4444); }
   .btn-danger:hover { background: var(--red-subtle, #fef2f2); }
+  .warning-box {
+    background: var(--red-subtle, #fef2f2); color: var(--red, #ef4444);
+    padding: 12px 16px; border-radius: var(--radius); margin-bottom: 16px;
+    font-size: 13px; line-height: 1.5; border: 1px solid var(--red, #ef4444);
+  }
   .btn-success { color: var(--green, #22c55e); border-color: var(--green, #22c55e); }
   .btn-success:hover { background: var(--green-subtle, #f0fdf4); }
 
