@@ -45,6 +45,7 @@ export class ToolRegistry {
     userRole?: string;
     db?: DatabaseAdapter;
     tenantId?: string;
+    elevated?: boolean;
   }): Promise<ToolDefinition[]> {
     const definitions: ToolDefinition[] = [];
 
@@ -55,6 +56,7 @@ export class ToolRegistry {
           opts.userRole,
           opts.db,
           opts.tenantId,
+          opts.elevated ?? false,
         );
         if (perm === 'deny') continue;
       }
@@ -85,9 +87,8 @@ export class ToolRegistry {
     let permission: ToolPermissionLevel = 'allow';
     const db = context.db as DatabaseAdapter | undefined;
     const tenantId = context.tenant || 'default';
-    const userObj = context.user as Record<string, unknown> | undefined;
-    const userRole = (userObj?.role as string) || 'user';
-    const userElevated = !!(userObj?.elevated);
+    const userRole = context.user?.role || 'user';
+    const userElevated = !!context.user?.elevated;
 
     if (db) {
       permission = await checkToolPermission(name, userRole, db, tenantId, userElevated);

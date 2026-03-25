@@ -128,7 +128,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
 
     // Set elevated if requested
     if (elevated) {
-      await userRepo.update(user.id, { elevated: 1 });
+      await userRepo.update(user.id, tenantId, { elevated: 1 });
     }
 
     return {
@@ -209,7 +209,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     if (body.elevated !== undefined) updates.elevated = body.elevated ? 1 : 0;
 
     if (Object.keys(updates).length > 0) {
-      await userRepo.update(id, updates as any);
+      await userRepo.update(id, tenantId, updates as any);
     }
 
     return { success: true };
@@ -286,7 +286,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
 
     const apiKey = generateApiKey();
     const apiKeyHash = hashApiKey(apiKey);
-    await userRepo.update(id, { apiKeyHash });
+    await userRepo.update(id, tenantId, { apiKeyHash });
 
     return { api_key: apiKey }; // Returned ONCE
   });

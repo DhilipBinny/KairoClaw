@@ -242,7 +242,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       apiKeyHash,
     });
     if (elevated) {
-      await userRepo.update(user.id, { elevated: 1 });
+      await userRepo.update(user.id, tenantId, { elevated: 1 });
     }
 
     // 2. Create sender_link

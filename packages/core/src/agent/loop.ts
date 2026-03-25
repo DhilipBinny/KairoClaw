@@ -379,7 +379,7 @@ export async function runAgent(
 
       try {
         if (context.executeTool) {
-          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry } as any);
+          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry, user: context.user, scopeKey: context.scopeKey } as any);
         } else {
           result = { error: 'No tool executor configured' };
           toolStatus = 'error';

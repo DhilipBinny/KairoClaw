@@ -3,9 +3,10 @@
   import {
     getUsers, createUser, updateUser, deactivateUser, reactivateUser,
     permanentDeleteUser, regenerateApiKey, linkSender, unlinkSender,
-    getPendingSenders, getUnlinkedSessions,
+    getPendingSenders, getUnlinkedSessions, setApiKey,
     type UserInfo, type UnlinkedSession,
   } from '$lib/api';
+  import { getUser } from '$lib/stores/auth.svelte';
 
   let users: UserInfo[] = $state([]);
   let loading = $state(true);
@@ -154,6 +155,11 @@
       const result = await regenerateApiKey(regenUserId);
       newApiKey = result.api_key;
       newApiKeyUserId = regenUserId;
+      // If regenerating own key, update localStorage so we don't get locked out
+      const currentUser = getUser();
+      if (currentUser && regenUserId === currentUser.id) {
+        setApiKey(result.api_key);
+      }
       regenUserId = '';
       regenConfirmText = '';
     } catch (e: any) {
@@ -241,6 +247,7 @@
           </thead>
           <tbody>
             {#each users as u}
+              {@const isSelf = getUser()?.id === u.id}
               <tr class:inactive={!u.active}>
                 <td>
                   <div class="user-name">{u.name}</div>
@@ -278,12 +285,14 @@
                 <td class="actions-cell">
                   <button class="btn-sm" onclick={() => startEdit(u)}>Edit</button>
                   <button class="btn-sm" onclick={() => startRegenKey(u)}>Key</button>
-                  <button class="btn-sm" onclick={() => { linkUserId = u.id; }}>Link</button>
-                  {#if u.active}
-                    <button class="btn-sm btn-danger" onclick={() => handleDeactivate(u.id)}>Deactivate</button>
-                  {:else}
-                    <button class="btn-sm btn-success" onclick={() => handleReactivate(u.id)}>Reactivate</button>
-                    <button class="btn-sm btn-danger" onclick={() => handlePermanentDelete(u.id)}>Delete</button>
+                  <button class="btn-sm" onclick={() => { linkUserId = u.id; linkChannel = 'telegram'; linkSenderId = ''; }}>Link</button>
+                  {#if !isSelf}
+                    {#if u.active}
+                      <button class="btn-sm btn-danger" onclick={() => handleDeactivate(u.id)}>Deactivate</button>
+                    {:else}
+                      <button class="btn-sm btn-success" onclick={() => handleReactivate(u.id)}>Reactivate</button>
+                      <button class="btn-sm btn-danger" onclick={() => handlePermanentDelete(u.id)}>Delete</button>
+                    {/if}
                   {/if}
                 </td>
               </tr>

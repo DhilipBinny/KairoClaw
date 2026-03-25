@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
-import { safePath } from './files.js';
+import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 import type { MemorySystem } from '../../memory/index.js';
 
@@ -28,7 +28,7 @@ export const memoryTools: ToolRegistration[] = [
         required: ['query'],
       },
     },
-    executor: async (args) => {
+    executor: async (args, context) => {
       const query = args.query as string;
       if (!query) return { error: 'query is required' };
       const topN = (args.topN as number) || 5;
@@ -37,7 +37,9 @@ export const memoryTools: ToolRegistration[] = [
         return { results: [], error: 'Memory system not initialized' };
       }
 
-      const results = await memorySystem.search(query, topN);
+      // Scope isolation: non-admin users only see own scope + global memory
+      const scopeFilter = context.user?.role === 'admin' ? undefined : context.scopeKey;
+      const results = await memorySystem.search(query, topN, scopeFilter);
       const stats = await memorySystem.getStats();
 
       return {
@@ -71,7 +73,7 @@ export const memoryTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const filePath = safePath(args.path as string, workspace);
+      const filePath = scopedSafePath(args.path as string, workspace, context);
       if (!fs.existsSync(filePath)) return { text: '', path: args.path, note: 'File does not exist yet' };
       let content = fs.readFileSync(filePath, 'utf8');
       if (args.from || args.lines) {
@@ -100,7 +102,7 @@ export const memoryTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const filePath = safePath(args.path as string, workspace);
+      const filePath = scopedSafePath(args.path as string, workspace, context);
       if (!fs.existsSync(filePath)) return { error: `Image not found: ${args.path}` };
       const ext = path.extname(filePath).toLowerCase();
       const supported = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];

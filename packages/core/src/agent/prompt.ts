@@ -58,16 +58,28 @@ export function buildSystemPrompt(
   // Safety — product-level guardrails from constants.ts (not user-editable)
   sections.push(`## Safety\n${SAFETY_RULES.map(r => `- ${r}`).join('\n')}`);
 
-  // Workspace
-  sections.push(`## Workspace
-Your working directory is: ${workspace}
+  // Workspace — do NOT expose absolute server path or other users' scopes
+  const workspaceSection = scopeKey
+    ? `## Workspace
+Your files are in your personal scope directory.
 
 File organization rules:
 - **documents/** — save any generated documents, research, reports, plans, or exports here
 - **media/** — images and media files (managed by the system)
-- **scopes/** — per-user memory (managed by the system, do not write here directly)
+- Your memory files are managed by the system in your scope directory
 - Do NOT create .md files in the workspace root — the root is reserved for system persona files
-- When the user asks you to create a file, save it to documents/ unless they specify a different path`);
+- When the user asks you to create a file, save it to documents/ unless they specify a different path
+
+SCOPE BOUNDARY: You are serving a single user. Do not attempt to access, list, or reference other users' directories. The scopes/ directory is restricted.`
+    : `## Workspace
+Your files are organized in the workspace directory.
+
+File organization rules:
+- **documents/** — save any generated documents, research, reports, plans, or exports here
+- **media/** — images and media files (managed by the system)
+- Do NOT create .md files in the workspace root — the root is reserved for system persona files
+- When the user asks you to create a file, save it to documents/ unless they specify a different path`;
+  sections.push(workspaceSection);
 
   // Time
   sections.push(`## Current Date & Time
