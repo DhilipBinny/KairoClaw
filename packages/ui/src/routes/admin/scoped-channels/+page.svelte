@@ -76,7 +76,7 @@
                 <span class="scope-badge group">Group</span>
                 <span class="channel-badge" style="color: {channelColor(scope.channel)}">{scope.channel}</span>
               {:else if scope.userName}
-                <strong>{scope.userName}</strong>
+                <span class="scope-user-name">{scope.userName}</span>
               {:else}
                 <span class="channel-badge" style="color: {channelColor(scope.channel)}">
                   {scope.channel}
@@ -232,6 +232,11 @@
   .scope-badge.group {
     background: #dbeafe;
     color: #2563eb;
+  }
+  .scope-user-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
   }
   .user-id {
     font-size: 13px;
