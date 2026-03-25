@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, getExportUrl, importState } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, getExportUrl, importState, getToolList, getToolPermissions, saveToolPermissions } from '$lib/api';
   import type { ToolMeta } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
@@ -11,6 +11,55 @@
   let system: Record<string, unknown> | null = $state(null);
   let loading = $state(true);
   let toolsMeta: ToolMeta[] = $state([]);
+
+  // Tool Permissions
+  const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file', 'delete_file'];
+  let allTools: Array<{ name: string; description: string }> = $state([]);
+  let permRole = $state('user');
+  let permMap: Record<string, string> = $state({}); // toolName → 'allow'|'deny'
+  let permLoading = $state(false);
+  let permSaving = $state(false);
+  let permMsg = $state('');
+
+  async function loadToolPerms() {
+    permLoading = true;
+    permMsg = '';
+    try {
+      if (allTools.length === 0) {
+        allTools = await getToolList();
+      }
+      const data = await getToolPermissions(permRole);
+      // Build map: start with all allowed, then override from DB rules
+      const map: Record<string, string> = {};
+      for (const t of allTools) map[t.name] = 'allow';
+      for (const rule of data.rules) {
+        // Apply rules to matching tools
+        for (const t of allTools) {
+          const pat = rule.tool_pattern;
+          if (pat === t.name || pat === '*' || (pat.endsWith('*') && t.name.startsWith(pat.slice(0, -1)))) {
+            map[t.name] = rule.permission;
+          }
+        }
+      }
+      permMap = map;
+    } catch { permMsg = 'Failed to load'; }
+    finally { permLoading = false; }
+  }
+
+  async function savePerms() {
+    permSaving = true;
+    permMsg = '';
+    try {
+      // Only save tools that are explicitly set to deny (allow is the default)
+      const permissions = Object.entries(permMap)
+        .filter(([, perm]) => perm === 'deny')
+        .map(([toolPattern, permission]) => ({ toolPattern, permission }));
+      await saveToolPermissions(permRole, permissions);
+      permMsg = 'Saved';
+      setTimeout(() => permMsg = '', 2000);
+    } catch { permMsg = 'Save failed'; }
+    finally { permSaving = false; }
+  }
 
   // Export/Import
   let importing = $state(false);
@@ -739,6 +788,61 @@
       </div>
     </div>
 
+    <!-- Tool Permissions -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--orange)">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Tool Permissions
+      </h2>
+      <div class="card settings-card">
+        <p class="field-hint" style="margin-bottom: 12px;">Control which tools each role can use. Changes apply to all users with this role. Dangerous tools (exec, cron, write_file, delete_file) require Power User.</p>
+        <div class="form-row" style="margin-bottom: 12px;">
+          <label class="field-label">Role</label>
+          <select class="input" style="max-width: 200px;" bind:value={permRole} onchange={() => loadToolPerms()}>
+            <option value="user">User</option>
+          </select>
+          {#if permMsg}<span class="field-hint" style="margin-left: 8px;">{permMsg}</span>{/if}
+        </div>
+        {#if permLoading}
+          <span class="spinner"></span>
+        {:else if allTools.length > 0}
+          <div class="perm-grid">
+            {#each allTools as tool}
+              {@const isDangerous = DANGEROUS_TOOLS.includes(tool.name)}
+              {@const isMcp = tool.name.startsWith('mcp__')}
+              <div class="perm-row" class:dangerous={isDangerous} class:mcp={isMcp}>
+                <div class="perm-tool">
+                  <span class="perm-name">{tool.name}</span>
+                  {#if isDangerous}<span class="perm-badge danger">dangerous</span>{/if}
+                  {#if isMcp}<span class="perm-badge mcp">MCP</span>{/if}
+                </div>
+                <div class="perm-toggle">
+                  {#if isDangerous}
+                    <span class="perm-locked">Requires Power User</span>
+                  {:else}
+                    <select class="input input-sm" bind:value={permMap[tool.name]}>
+                      <option value="allow">Allow</option>
+                      <option value="deny">Deny</option>
+                    </select>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+          <div style="margin-top: 12px;">
+            <button class="btn btn-primary" onclick={savePerms} disabled={permSaving}>
+              {permSaving ? 'Saving...' : 'Save Permissions'}
+            </button>
+          </div>
+        {:else}
+          <button class="btn btn-sm" onclick={loadToolPerms}>Load Tool Permissions</button>
+        {/if}
+      </div>
+    </div>
+
     <!-- Full Configuration -->
     <div class="section">
       <button class="collapse-toggle" onclick={() => { showRawJson = !showRawJson; if (showRawJson) { refreshRawJson(); configViewMode = 'view'; } }}>
@@ -1325,4 +1429,21 @@
     .raw-editor-textarea { min-height: 200px; }
     .section-title { font-size: 14px; }
   }
+
+  /* Tool Permissions */
+  .perm-grid { display: flex; flex-direction: column; gap: 2px; }
+  .perm-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: var(--radius);
+    background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  }
+  .perm-row.dangerous { opacity: 0.6; }
+  .perm-tool { display: flex; align-items: center; gap: 8px; }
+  .perm-name { font-size: 13px; font-family: var(--font-mono, monospace); }
+  .perm-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .perm-badge.danger { background: #fef3c7; color: #d97706; }
+  .perm-badge.mcp { background: #dbeafe; color: #2563eb; }
+  .perm-toggle { min-width: 140px; text-align: right; }
+  .perm-locked { font-size: 11px; color: var(--text-muted); font-style: italic; }
+  .input-sm { padding: 3px 8px; font-size: 12px; }
 </style>

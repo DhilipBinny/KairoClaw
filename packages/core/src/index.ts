@@ -9,7 +9,7 @@ import { runMigrations } from './db/migrate.js';
 import { seedDatabase } from './db/seed.js';
 import { migrateV1Data, migrateDbMcpToConfig } from './db/migrate-v1.js';
 import { createServer } from './server.js';
-import { authPlugin } from './auth/middleware.js';
+import { authPlugin, requireRole } from './auth/middleware.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
 import { builtinTools } from './tools/builtin/index.js';
@@ -455,6 +455,12 @@ async function main(): Promise<void> {
       }
     }
   };
+
+  // Admin endpoint: list all registered tools (for permission management UI)
+  server.get('/api/v1/admin/tools', { preHandler: [requireRole('admin')] }, async () => {
+    const allTools = await toolRegistry.getDefinitions();
+    return allTools.map(t => ({ name: t.name, description: t.description }));
+  });
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
   await server.register(registerUsageRoutes);

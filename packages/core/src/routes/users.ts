@@ -4,6 +4,7 @@ import { UserRepository } from '../db/repositories/user.js';
 import { SenderLinkRepository } from '../db/repositories/sender-link.js';
 import { UsageRepository } from '../db/repositories/usage.js';
 import { SessionRepository } from '../db/repositories/session.js';
+import { ToolPermissionRepository } from '../db/repositories/tool-permission.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateApiKey, hashApiKey } from '../auth/keys.js';
 
@@ -348,5 +349,45 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
 
     await senderLinkRepo.unlink(Number(linkId), tenantId);
     return { success: true };
+  });
+
+  // GET /api/v1/admin/tool-permissions/:role — get tool permissions for a role
+  app.get('/api/v1/admin/tool-permissions/:role', { preHandler: [requireRole('admin')] }, async (request) => {
+    const db = getDb(request);
+    const tenantId = request.tenantId || 'default';
+    const { role } = request.params as { role: string };
+
+    const repo = new ToolPermissionRepository(db);
+    const rules = await repo.listByTenantAndRole(tenantId, role);
+
+    return { role, rules };
+  });
+
+  // PUT /api/v1/admin/tool-permissions/:role — replace all permissions for a role
+  app.put('/api/v1/admin/tool-permissions/:role', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const db = getDb(request);
+    const tenantId = request.tenantId || 'default';
+    const { role } = request.params as { role: string };
+    const { permissions } = (request.body as { permissions: Array<{ toolPattern: string; permission: string }> }) || {};
+
+    if (!Array.isArray(permissions)) {
+      return reply.code(400).send({ error: 'permissions array is required' });
+    }
+
+    const validPerms = ['allow', 'deny', 'confirm'];
+
+    // Delete existing rules for this role, then insert new ones
+    const repo = new ToolPermissionRepository(db);
+    const existing = await repo.listByTenantAndRole(tenantId, role);
+    for (const rule of existing) {
+      await repo.delete(rule.id);
+    }
+
+    for (const p of permissions) {
+      if (!p.toolPattern || !validPerms.includes(p.permission)) continue;
+      await repo.create({ tenantId, role, toolPattern: p.toolPattern, permission: p.permission });
+    }
+
+    return { success: true, count: permissions.length };
   });
 };
