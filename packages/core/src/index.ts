@@ -26,7 +26,7 @@ import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
-import { deriveScopeKey, ensureScopeDir, migrateScopesToUserUUID } from './agent/scope.js';
+import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -339,9 +339,12 @@ async function main(): Promise<void> {
       } catch { /* audit should not break session creation */ }
     }
 
-    // Derive scope key for per-user memory isolation
-    // Use resolved user UUID when available — one scope per user across all channels
-    const scopeKey = deriveScopeKey(inbound.channel, inbound.userId, resolvedUser?.id);
+    // Derive scope key for memory isolation:
+    // - Group chats → group scope (shared group memory)
+    // - Individual chats → user scope (personal memory by UUID)
+    const scopeKey = isGroupChat
+      ? deriveGroupScopeKey(inbound.channel, chatIdStr)
+      : deriveScopeKey(inbound.channel, inbound.userId, resolvedUser?.id);
     if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey, {
       name: inbound.senderName,
       channel: inbound.channel,
@@ -354,14 +357,20 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
-      // System/cron/unlinked sessions get admin context so they can use all tools + access all paths
+      // User context for tool permissions + scope isolation:
+      // - Resolved user → their actual role from DB
+      // - Cron/internal/system → admin (needs all tools)
+      // - Unlinked real channel sender → restricted user (safe default)
       user: resolvedUser
         ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated }
-        : { id: 'system', role: 'admin', elevated: true },
+        : (['cron', 'internal', 'heartbeat'].includes(inbound.channel)
+          ? { id: 'system', role: 'admin', elevated: true }
+          : { id: 'anonymous', role: 'user', elevated: false }),
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: await toolRegistry.getDefinitions({
-        userRole: resolvedUser?.role || 'admin', // unlinked/cron/system → admin; resolved users → their actual role
+        userRole: resolvedUser?.role
+          || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),
         db,
         tenantId,
         elevated: !!resolvedUser?.elevated,
