@@ -36,19 +36,28 @@ How KairoClaw isolates users, scopes workspace access, and enforces permissions.
 | **admin** | Full access | Yes | Yes | Yes |
 | **user** | Blocked (redirect to /) | Safe only | No | Own only |
 | **user + power** | Blocked | Yes | Yes (elevated flag) | Own only |
+| **unlinked sender** | No access | Safe only | No | N/A |
 
 ### Dangerous Tools (require admin or power user)
 
 ```
-exec, manage_cron, write_file, delete_file
+exec, manage_cron, write_file
 ```
 
-### Safe Tools (available to all users)
+### Safe Tools (available to all users including unlinked senders)
 
 ```
 read_file, edit_file, list_directory, memory_search, memory_read,
 inspect_image, web_fetch, web_search, send_message, send_file, session_status
 ```
+
+### Tool Permission Admin (Settings page)
+
+Admin can further restrict safe tools per role via the Settings page:
+- Toggle any tool to Deny for the "user" role
+- Dangerous tools shown as locked (requires Power User flag per user)
+- MCP tools auto-listed and toggleable
+- Changes write to `tool_permissions` table, apply immediately to all users with that role
 
 ---
 
@@ -70,7 +79,7 @@ inspect_image, web_fetch, web_search, send_message, send_file, session_status
                           |
                     +-----+-----+
                     |   users   |
-                    | "Sruthi"  |  <-- same user, two channels
+                    | "Sruthi"  |  <-- same user, two channels, ONE scope
                     +-----------+
 ```
 
@@ -88,27 +97,47 @@ Message arrives from Telegram/WhatsApp
         |
         +-- found --> get user by link.user_id --> user found
         |
-        +-- not found --> user_id = NULL (unlinked sender)
+        +-- not found --> unlinked sender (role=user, restricted)
+```
 
+### User context assignment
 
-  For GROUP messages:
-        |
-        v
+```
+  Resolved user (linked via sender_links or API key):
+    → context.user = { id: UUID, role: from DB, elevated: from DB }
+
+  Unlinked sender (real channel, no user account):
+    → context.user = { id: 'anonymous', role: 'user', elevated: false }
+
+  Cron / internal / heartbeat (system channels):
+    → context.user = { id: 'system', role: 'admin', elevated: true }
+```
+
+### Group messages
+
+```
   chat_id starts with "telegram:-" or contains "@g.us"?
         |
        (yes)
         v
-  user_id = NULL always (groups are shared, not owned)
+  Session user_id = NULL always (groups are shared, not owned)
+  Tool permissions = per the INDIVIDUAL SENDER (not the group)
+  Memory scope = GROUP scope (shared group memory, not sender's personal memory)
 ```
 
 ---
 
 ## 3. Workspace & Scope Isolation
 
-### Directory Structure
+### Three scope types
 
-Scopes are keyed by **user UUID** — one directory per user, shared across all channels.
-When a user messages via Telegram, WhatsApp, or web, they all use the same scope.
+| Scope Type | Key Format | Created When | Memory | Tools |
+|---|---|---|---|---|
+| **User (UUID)** | `675390be-...` | Linked user messages | Personal PROFILE.md + sessions | Scoped to own dir |
+| **Group** | `group_telegram_-100332...` | Group message arrives | Shared group PROFILE.md + sessions | Per-sender permissions |
+| **Unlinked sender** | `telegram:9876543` | Unlinked person messages | Temporary isolated memory | Restricted (user role) |
+
+### Directory Structure
 
 ```
 /data/                                    <-- state directory (AGW_STATE_DIR)
@@ -124,46 +153,52 @@ When a user messages via Telegram, WhatsApp, or web, they all use the same scope
   |
   +-- workspace/                          <-- agent workspace (config.agent.workspace)
         |
-        +-- IDENTITY.md                   <-- shared persona (protected, read-only for agent)
+        +-- IDENTITY.md                   <-- shared persona (protected, read-only)
         +-- SOUL.md                       <-- shared persona (protected)
         +-- RULES.md                      <-- shared rules (protected)
-        +-- USER.md                       <-- global user profile (fallback for unscoped)
+        +-- USER.md                       <-- global user profile (fallback)
         |
-        +-- documents/                    <-- shared writable space for all users
-        |     +-- report.pdf
-        |     +-- analysis.md
-        |
+        +-- documents/                    <-- shared writable space (all users)
         +-- media/                        <-- agent-generated images
         |
-        +-- memory/                       <-- global memory (cron/system sessions only)
+        +-- memory/                       <-- global memory (cron/system only)
         |     +-- PROFILE.md
         |     +-- sessions/
         |
-        +-- scopes/                       <-- PER-USER scope directories (by UUID)
+        +-- scopes/                       <-- ISOLATED scope directories
+              |
+              |  --- USER SCOPES (by UUID) ---
               |
               +-- 675390be-.../           <-- Admin (Binny)
               |     +-- USER.md           <-- personal profile
               |     +-- memory/
-              |           +-- PROFILE.md  <-- long-term memory (all channels merged)
+              |           +-- PROFILE.md  <-- merged from ALL channels
               |           +-- sessions/
               |                 +-- 2026-03-21.md
               |                 +-- 2026-03-22.md
-              |                 +-- 2026-03-23.md
               |
               +-- 0ccce21b-.../           <-- Sruthi
               |     +-- memory/
-              |           +-- PROFILE.md  <-- her memory (WhatsApp + any future channel)
+              |           +-- PROFILE.md
               |           +-- sessions/
               |
-              +-- 85bd5d75-.../           <-- Bala
-              |     +-- USER.md
+              |  --- GROUP SCOPES ---
+              |
+              +-- group_telegram_-100332../ <-- Telegram group
               |     +-- memory/
-              |           +-- PROFILE.md  <-- merged from Telegram + WhatsApp
+              |           +-- PROFILE.md  <-- group context memory
               |           +-- sessions/
               |
-              +-- telegram:9876543/       <-- unlinked sender (no user account yet)
-                    +-- USER.md           <-- auto-seeded on first message
-                    +-- memory/           <-- isolated until onboarded
+              +-- group_whatsapp_12036.../ <-- WhatsApp group
+              |     +-- memory/
+              |           +-- PROFILE.md
+              |           +-- sessions/
+              |
+              |  --- UNLINKED SENDER SCOPES (temporary) ---
+              |
+              +-- telegram:9876543/       <-- unlinked sender
+                    +-- USER.md           <-- auto-seeded
+                    +-- memory/
 ```
 
 ### How scope key is derived
@@ -172,14 +207,18 @@ When a user messages via Telegram, WhatsApp, or web, they all use the same scope
 Message arrives
         |
         v
-  User resolved via sender_links?
+  Is it a GROUP message?  (telegram:- or @g.us)
         |
-        +-- YES: scopeKey = user UUID (e.g. "675390be-...")
-        |        One scope shared across all their channels.
+        +-- YES: scopeKey = group_{channel}_{sanitized_chatId}
+        |        Shared group memory. No USER.md seeded.
         |
-        +-- NO:  scopeKey = channel:senderId (e.g. "telegram:9876543")
-                 Temporary scope until they are onboarded as a user.
-                 On onboard: old channel:sender scope is merged into user UUID scope.
+        +-- NO: Is user resolved via sender_links?
+              |
+              +-- YES: scopeKey = user UUID (e.g. "675390be-...")
+              |        One scope shared across all their channels.
+              |
+              +-- NO:  scopeKey = channel:senderId (e.g. "telegram:9876543")
+                       Temporary scope until onboarded as a user.
 ```
 
 ### Scope migration (automatic on startup)
@@ -187,17 +226,18 @@ Message arrives
 When a sender is linked to a user account, any existing `channel:senderId` scope
 directory is automatically merged into the user's UUID scope directory:
 
+- Session files (2026-03-21.md): always appended (never overwrites)
 - Memory PROFILE.md: newer file wins
-- Session files (2026-03-21.md): appended if different content
 - USER.md: newer wins
-- Old channel:sender directory is removed after merge
+- Old channel:sender directory removed after merge
+- Orphaned memory_chunks in DB cleaned up (files that no longer exist on disk)
 
-This runs once on startup and is safe to run repeatedly (skips already-migrated dirs).
+Safe to run repeatedly — skips already-migrated dirs.
 
 ### Access Rules (scopedSafePath)
 
 ```
-+---------------------------+-------------------------------------------+
++---------------------------+---------+--------------------+---------------+
 |      Path                 |  Admin  |  User (own scope)  |  User (other) |
 +---------------------------+---------+--------------------+---------------+
 | IDENTITY.md               |  read   |  read              |  read         |
@@ -207,17 +247,17 @@ This runs once on startup and is safe to run repeatedly (skips already-migrated 
 | scopes/{MY_SCOPE}/*       |  r/w    |  r/w               |  --           |
 | scopes/{OTHER_SCOPE}/*    |  r/w    |  BLOCKED           |  BLOCKED      |
 | scopes/ (listing)         |  r/w    |  BLOCKED           |  BLOCKED      |
-| /tmp/kairo/*              |  r/w    |  r/w               |  r/w          |
+| /tmp/*                    |  r/w    |  r/w               |  r/w          |
 +---------------------------+---------+--------------------+---------------+
 ```
 
-### How scopedSafePath works
+### scopedSafePath decision flow
 
 ```
 scopedSafePath(path, workspace, context)
         |
         v
-  Run safePath(path, workspace)  -- basic traversal/symlink check
+  Run safePath(path, workspace)  -- traversal/symlink/null-byte check
         |
         v
   Is user admin?  --(yes)--> ALLOW (unrestricted)
@@ -226,7 +266,7 @@ scopedSafePath(path, workspace, context)
         v
   Is path inside scopes/ directory?
         |
-        +-- (no) --> ALLOW (documents/, media/, persona files, /tmp/kairo)
+        +-- (no) --> ALLOW (documents/, media/, persona files, /tmp)
         |
         +-- (yes) -->  Is it scopes/ root?
                           |
@@ -237,76 +277,77 @@ scopedSafePath(path, workspace, context)
                                         Is it MY scope?
                                           |
                                           +-- (yes) --> ALLOW
-                                          +-- (no)  --> DENY ("cannot access other users' files")
+                                          +-- (no)  --> DENY
 ```
 
 ---
 
 ## 4. Tool Permission Pipeline
 
-### What the LLM sees (getDefinitions)
+### Layer 1: Hardcoded dangerous tools gate
 
 ```
-getDefinitions({ userRole, db, tenantId, elevated })
-        |
-        v
-  For each registered tool:
-        |
-        v
-  checkToolPermission(toolName, role, db, tenantId, elevated)
-        |
-        +-- admin?              --> ALLOW (always)
-        |
-        +-- dangerous + !elevated --> DENY (hidden from LLM)
-        |
-        +-- DB permission rules  --> allow/deny/confirm
-        |
-        +-- no rules             --> ALLOW (default open)
+DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file']
 
-  Result: LLM only sees tools the user is allowed to use
+admin?              → always ALLOW
+dangerous + !elevated → DENY (hidden from LLM + blocked at execution)
 ```
 
-### What happens at execution time
+### Layer 2: DB permission rules (admin-configurable)
 
 ```
-User asks agent to use a tool
-        |
-        v
-  registry.execute(toolName, args, context)
-        |
-        v
-  1. RBAC check (same as above)
-     +-- deny --> return error, audit log "tool.denied"
-        |
-  2. Tool executor runs with context (includes scopeKey, user)
-     +-- scopedSafePath enforces file boundaries
-     +-- exec tool enforces cwd + command pattern checks
-     +-- memory_search filters by scope
-        |
-  3. Audit log: tool.execute with name, args, result, duration
+tool_permissions table:
+  (tenant_id, role, tool_pattern, permission)
+
+  tool_pattern supports glob: "mcp__*", "web_*", exact match
+  permission: allow | deny | confirm
+  No matching rule → ALLOW (tools allowed unless explicitly denied)
 ```
 
-### Tool access matrix
+### Layer 3: Scope enforcement at execution
 
 ```
-                    | admin | user | user+power |
-  ------------------+-------+------+------------+
-  read_file         |  all  | scoped| scoped    |  <-- scopedSafePath enforced
-  write_file        |  all  | DENIED| scoped    |  <-- dangerous tool
-  edit_file         |  all  | scoped| scoped    |
-  delete_file       |  all  | DENIED| scoped    |  <-- dangerous tool
-  list_directory    |  all  | scoped| scoped    |
-  exec              |  all  | DENIED| scoped    |  <-- dangerous tool, cwd=own scope
-  manage_cron       |  all  | DENIED| scoped    |  <-- dangerous tool
-  memory_search     |  all  | scoped| scoped    |  <-- SQL scope filter
-  memory_read       |  all  | scoped| scoped    |  <-- scopedSafePath enforced
-  web_fetch         |  all  | all   | all       |
-  web_search        |  all  | all   | all       |
-  send_message      |  all  | all   | all       |
-  send_file         |  all  | all   | all       |
-  session_status    |  all  | all   | all       |
-  inspect_image     |  all  | scoped| scoped    |  <-- scopedSafePath enforced
-  MCP tools         |  all  | per DB rules       |
+Tool executes with context (scopeKey, user.role)
+  |
+  +-- File tools: scopedSafePath blocks cross-scope access
+  +-- Exec tool: cwd = user's scope dir, command checked for scope references
+  +-- Memory search: SQL filter restricts to own scope + global
+```
+
+### Double enforcement
+
+Both applied at **prompt time** (what LLM sees) AND **execution time** (when tool runs):
+
+```
+getDefinitions()  →  checkToolPermission()  →  denied tools hidden from LLM
+registry.execute() → checkToolPermission() → denied tools return error + audit log
+```
+
+### Full tool access matrix
+
+```
+                    | admin | user | user+power | unlinked sender |
+  ------------------+-------+------+------------+-----------------+
+  read_file         |  all  |scoped| scoped     | scoped          |
+  write_file        |  all  |DENIED| scoped     | DENIED          |
+  edit_file         |  all  |scoped| scoped     | scoped          |
+  list_directory    |  all  |scoped| scoped     | scoped          |
+  exec              |  all  |DENIED| scoped     | DENIED          |
+  manage_cron       |  all  |DENIED| scoped     | DENIED          |
+  memory_search     |  all  |scoped| scoped     | scoped          |
+  memory_read       |  all  |scoped| scoped     | scoped          |
+  web_fetch         |  all  | all  | all        | all             |
+  web_search        |  all  | all  | all        | all             |
+  send_message      |  all  | all  | all        | all             |
+  send_file         |  all  | all  | all        | all             |
+  session_status    |  all  | all  | all        | all             |
+  inspect_image     |  all  |scoped| scoped     | scoped          |
+  MCP tools         |  all  | per DB rules      | per DB rules    |
+  ------------------+-------+------+------------+-----------------+
+
+  "scoped" = scopedSafePath enforced (own scope + shared globals only)
+  "all"    = no path restriction (web/messaging tools don't access filesystem)
+  "DENIED" = tool hidden from LLM prompt AND blocked at execution
 ```
 
 ---
@@ -345,6 +386,15 @@ User asks agent to use a tool
                   channel_type,               |   tool_calls  |
                   sender_id)                  |   usage_records|
                                               +---------------+
+
+                +-------------------+
+                | tool_permissions  |  <-- admin-configurable per role
+                |-------------------|
+                | tenant_id         |
+                | role              |
+                | tool_pattern      |  (glob: "mcp__*", "exec", "*")
+                | permission        |  (allow / deny / confirm)
+                +-------------------+
 ```
 
 ---
@@ -370,21 +420,26 @@ API Request with Bearer token
               elevated: true|false
             }
 
+  WebSocket auth (webchat.ts):
+        |
+        v
+  Same API key lookup + active check
+  Sets clientId = user UUID (stable scope, not ephemeral per-tab)
+  auth.error → client stops reconnecting (no rate limit loop)
+
   Admin routes (/api/v1/admin/*):
         |
         v
-  requireRole('admin') preHandler
-        |
-        +-- role !== admin --> 401
-        +-- admin --> proceed
+  requireRole('admin') preHandler → 403 if not admin
 
   Admin UI (/admin/*):
         |
         v
-  +layout.svelte checks getIsAuthenticated() + getUser().role
+  +layout.svelte checks role on mount
         |
-        +-- not admin --> goto('/') redirect
-        +-- admin --> render admin content
+        +-- already authenticated as admin → show immediately (no flash)
+        +-- not authenticated → checkAuth() → spinner while loading
+        +-- not admin → redirect to /
 ```
 
 ---
@@ -395,7 +450,8 @@ API Request with Bearer token
   New person messages bot via Telegram
         |
         v
-  Not in allowFrom --> recorded in pending_senders (status=pending)
+  Not in allowFrom → recorded in pending_senders (status=pending)
+  Agent does NOT respond (sender is blocked)
         |
         v
   Admin sees in Channels page:
@@ -406,7 +462,7 @@ API Request with Bearer token
   (Groups show [Approve] [Dismiss] instead)
         |
         v
-  Admin clicks "Add as User" --> modal:
+  Admin clicks "Add as User" → modal:
   +--------------------------------------------------+
   |  Add as User                                      |
   |  [telegram] Bala  8523037700                      |
@@ -421,19 +477,16 @@ API Request with Bearer token
         |
         v
   Backend (POST /onboard):
-  1. Create user account --> API key generated
-  2. Create sender_link (telegram:8523037700 --> user UUID)
+  1. Create user account → API key generated (shown ONCE)
+  2. Create sender_link (telegram:8523037700 → user UUID)
   3. Add 8523037700 to config.channels.telegram.allowFrom
   4. Mark pending_sender as approved
-  5. Backfill existing sessions: UPDATE sessions SET user_id = ?
-     WHERE chat_id = 'telegram:8523037700' AND user_id IS NULL
+  5. Backfill existing sessions with user_id
+  6. On next startup: channel:sender scope merged into UUID scope
         |
         v
-  Admin sees API key once --> copies to share with user
-  Bala's future messages are now tracked under their user account
-
-  Alternatively: Admin --> Users page --> Create User --> Link Sender
-  (Link modal shows existing unlinked sessions to click)
+  Alternatively: Admin → Users → Create User → Link Sender
+  (Link modal shows existing unlinked sessions as clickable list)
 ```
 
 ---
@@ -445,50 +498,95 @@ API Request with Bearer token
     Only shows sessions WHERE user_id = current_user.id
 
   Sessions page (admin):
-    Shows all sessions, with user_name column
+    Shows all sessions with user_name column
 
   Session detail/delete (non-admin):
-    Checks session.user_id === current_user.id
-    403 if mismatch
+    Checks session.user_id === current_user.id → 403 if mismatch
 
   Group sessions:
     user_id = NULL always
     Only visible to admin in sessions list
+    Have their own group memory scope
 ```
 
 ---
 
-## 9. System Prompt (what the agent knows)
+## 9. Memory Scoping
+
+### Per-user memory (individual chats)
+
+```
+  Agent builds system prompt:
+    1. Load shared persona (IDENTITY.md, SOUL.md, RULES.md) — global
+    2. Load USER.md — cascaded (scope first, then global fallback)
+    3. Load PROFILE.md — from scopes/{userUUID}/memory/
+    4. Load recent sessions — from scopes/{userUUID}/memory/sessions/
+
+  After conversation (5+ turns):
+    Auto-summarize → write to scopes/{userUUID}/memory/sessions/YYYY-MM-DD.md
+    Consolidation → merge sessions into PROFILE.md (periodic)
+```
+
+### Per-group memory (group chats)
+
+```
+  Agent builds system prompt:
+    1. Load shared persona — global
+    2. Load PROFILE.md — from scopes/group_{channel}_{chatId}/memory/
+    3. Load recent sessions — from group scope
+
+  After conversation (5+ turns):
+    Auto-summarize → write to group scope's sessions/
+    Group memory accumulates context: "this group discusses X, decided Y"
+```
+
+### Global memory (cron/system)
+
+```
+  Cron and internal channels use workspace/memory/ (no scope)
+```
+
+### Memory search isolation
+
+```
+  Admin: sees ALL memory chunks (no filter)
+  User:  sees own scope + global only (SQL: file_path LIKE 'scopes/{key}/%' OR NOT LIKE 'scopes/%')
+  Orphaned chunks (stale file paths) cleaned up on startup
+```
+
+---
+
+## 10. System Prompt Security
 
 ```
   Scoped user (Telegram/WhatsApp/Web):
     "Your files are in your personal scope directory."
     "SCOPE BOUNDARY: You are serving a single user.
      Do not attempt to access other users' directories."
-    Memory paths: scopes/{scopeKey}/memory/PROFILE.md
+    Does NOT expose: absolute workspace path, scopes/ structure, other users' keys
 
-  Unscoped (cron, system):
+  Group chat:
+    Same scope boundary instruction, but memory loads from group scope
+
+  Cron/system:
     "Your files are organized in the workspace directory."
-    Memory paths: memory/PROFILE.md
-
-  Neither version exposes:
-    - Absolute workspace path (was: /data/workspace)
-    - The scopes/ directory structure
-    - Other users' scope keys
+    No scope restrictions (admin context)
 ```
 
 ---
 
-## 10. Deactivation & Deletion
+## 11. Deactivation & Deletion
 
 ```
   Deactivate user (soft delete):
     1. Set active=0, deactivated_at=now
     2. Remove all sender_links (can't message via channels)
-    3. All API calls return 403
-    4. WebSocket auth fails, no reconnect loop
-    5. Sessions preserved (for audit)
-    6. Reversible: Reactivate sets active=1
+    3. All API calls return 403 (middleware check)
+    4. Login returns 403 (not 401 — key is valid but account disabled)
+    5. WebSocket auth rejects with "Account deactivated"
+    6. WebSocket client stops reconnecting (authFailed flag)
+    7. Sessions preserved (for audit)
+    8. Reversible: Reactivate sets active=1
 
   Hard delete:
     1. Delete sender_links
@@ -496,4 +594,37 @@ API Request with Bearer token
     3. Nullify user_id on sessions (preserve for audit)
     4. Delete user row
     5. Irreversible
+    6. Scope directory remains on disk (manual cleanup)
 ```
+
+---
+
+## 12. Admin Pages
+
+| Page | What it shows |
+|------|--------------|
+| **Dashboard** | Health, user count (total + active), model |
+| **Users** | All users with roles, links, sessions, usage. Create/edit/deactivate/delete. Link senders (shows unlinked sessions). Regenerate API keys. Self-protection (can't delete yourself). |
+| **Channels** | Telegram + WhatsApp config. Pending senders: "Add as User" for individuals, "Approve" for groups. |
+| **Sessions** | All sessions with user names. Filter by channel. View messages. |
+| **Scoped Channels** | Memory scopes: user names (UUID scopes), group badge (group scopes). Click to view PROFILE.md and session notes. |
+| **Settings** | Tool Permissions section: per-role allow/deny toggles for all tools. Dangerous tools shown as locked. |
+| **MCP Servers** | Installed MCP tool servers. Tools auto-appear in permissions. |
+
+---
+
+## 13. Design Decisions & Rationale
+
+| Decision | Rationale |
+|----------|-----------|
+| Single org per deployment | Simple. Multi-org = redeploy Docker. |
+| Two roles (admin/user) + elevated flag | Viewer role dropped (unnecessary). Power user via toggle, not a third role. |
+| Scope by user UUID, not channel:sender | One person = one memory across all channels. No split brain. |
+| Groups get shared scope, not per-sender | Group memory is shared context. Individual permissions still enforced per sender. |
+| Unlinked senders get user role (restricted) | Safe default. No admin escalation for unknown people in approved groups. |
+| Cron/system gets admin context | Cron needs exec, file tools, etc. Intentional. |
+| Tool permissions default to allow | Open by default for simplicity. Admin explicitly denies what they want blocked. |
+| Session files append, never overwrite on merge | Prevents data loss when merging scopes from multiple channels. |
+| API key shown once, stored as SHA-256 hash | Can't be recovered. Self-regen updates localStorage automatically. |
+| scopedSafePath as single enforcement point | All file tools funnel through one function. Can't be bypassed. |
+| Exec scope check is text-based (not sandbox) | Interim. Container sandbox is the proper long-term fix (backlog). |
