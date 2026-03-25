@@ -87,10 +87,9 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
       };
     });
 
-    // Enrich with sender names from pending_senders
+    // Enrich with sender names from pending_senders (table has no tenant_id column)
     const pending = await db.query<{ sender_id: string; channel: string; sender_name: string }>(
-      `SELECT sender_id, channel, sender_name FROM pending_senders WHERE tenant_id = ?`,
-      [tenantId],
+      `SELECT sender_id, channel, sender_name FROM pending_senders`,
     );
     const nameMap = new Map(pending.map(p => [`${p.channel}:${p.sender_id}`, p.sender_name]));
 
