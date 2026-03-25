@@ -26,7 +26,7 @@ import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
-import { deriveScopeKey, ensureScopeDir } from './agent/scope.js';
+import { deriveScopeKey, ensureScopeDir, migrateScopesToUserUUID } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -238,7 +238,17 @@ async function main(): Promise<void> {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
 
-  // 7b. Initialize memory system
+  // 7b. Migrate old channel-based scopes to user UUID scopes (one-time)
+  try {
+    const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
+    if (scopeResult.migrated > 0) {
+      console.log(`[scope] Migrated ${scopeResult.migrated} scope dirs from channel:sender to user UUID`);
+    }
+  } catch (e) {
+    console.error('[scope] Scope migration failed:', e instanceof Error ? e.message : e);
+  }
+
+  // 7c. Initialize memory system
   const memorySystem = new MemorySystem(db, config.agent.workspace);
   await memorySystem.init();
   setMemorySystem(memorySystem);
@@ -330,7 +340,8 @@ async function main(): Promise<void> {
     }
 
     // Derive scope key for per-user memory isolation
-    const scopeKey = deriveScopeKey(inbound.channel, inbound.userId);
+    // Use resolved user UUID when available — one scope per user across all channels
+    const scopeKey = deriveScopeKey(inbound.channel, inbound.userId, resolvedUser?.id);
     if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey, {
       name: inbound.senderName,
       channel: inbound.channel,

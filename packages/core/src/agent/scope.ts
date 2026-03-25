@@ -16,22 +16,36 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { SCOPE_DIR_NAME, GLOBAL_ONLY_FILES, SCOPED_CHANNELS } from '../constants.js';
+import type { DatabaseAdapter } from '../db/index.js';
 
 /**
- * Derive the scope key from channel + userId.
+ * Derive the scope key for per-user isolation.
+ *
+ * Priority:
+ *   1. resolvedUserId (user UUID from DB) — one scope per user, all channels share it
+ *   2. channel:senderId fallback — for unlinked senders before they get a user account
+ *
  * Returns null for channels that should use global scope.
  */
 export function deriveScopeKey(
   channel: string,
   userId?: string | number,
+  resolvedUserId?: string,
 ): string | null {
-  if (!userId) return null;
+  if (!userId && !resolvedUserId) return null;
   if (!SCOPED_CHANNELS.includes(channel)) return null;
 
+  // Prefer resolved user UUID — one scope across all channels
+  if (resolvedUserId) {
+    const uid = resolvedUserId.trim();
+    if (uid && uid !== 'system' && uid !== 'anonymous' && !/[/\\]|\.\./.test(uid)) {
+      return uid;
+    }
+  }
+
+  // Fallback to channel:senderId for unlinked senders
   const id = String(userId).trim();
   if (!id || id === 'system' || id === 'anonymous') return null;
-
-  // Prevent path traversal — reject any id containing path separators or traversal sequences
   if (/[/\\]|\.\./.test(id) || /[/\\]|\.\./.test(channel)) return null;
 
   return `${channel}:${id}`;
@@ -113,5 +127,87 @@ export function ensureScopeDir(
       `_This is a new user. Learn their preferences as you chat._\n`;
 
     fs.writeFileSync(userMd, content, 'utf8');
+  }
+}
+
+/**
+ * Migrate old channel-based scopes (telegram:123, whatsapp:456) to user UUID scopes.
+ * For each sender_link in DB, if old scope dir exists, merge into user UUID scope.
+ * Merges memory files (keeps newest), then removes old dir.
+ * Safe to run multiple times — skips already-migrated dirs.
+ */
+export async function migrateScopesToUserUUID(
+  workspace: string,
+  db: DatabaseAdapter,
+): Promise<{ migrated: number; skipped: number }> {
+  const scopesDir = path.join(workspace, SCOPE_DIR_NAME);
+  if (!fs.existsSync(scopesDir)) return { migrated: 0, skipped: 0 };
+
+  // Get all sender_links to know which channel:sender maps to which user
+  const links = await db.query<{ channel_type: string; sender_id: string; user_id: string }>(
+    'SELECT channel_type, sender_id, user_id FROM sender_links',
+  );
+
+  let migrated = 0;
+  let skipped = 0;
+
+  for (const link of links) {
+    const oldKey = `${link.channel_type}:${link.sender_id}`;
+    const newKey = link.user_id;
+    const oldDir = path.join(scopesDir, oldKey);
+    const newDir = path.join(scopesDir, newKey);
+
+    // Skip if old dir doesn't exist (already migrated or never created)
+    if (!fs.existsSync(oldDir)) { skipped++; continue; }
+
+    // Skip if old and new are the same (shouldn't happen)
+    if (oldKey === newKey) { skipped++; continue; }
+
+    // Create new scope dir
+    fs.mkdirSync(path.join(newDir, 'memory', 'sessions'), { recursive: true });
+
+    // Merge files: copy from old to new, newer file wins
+    mergeDir(oldDir, newDir);
+
+    // Remove old dir
+    fs.rmSync(oldDir, { recursive: true, force: true });
+    migrated++;
+  }
+
+  return { migrated, skipped };
+}
+
+/** Recursively merge srcDir into destDir. Newer files win on conflict. */
+function mergeDir(srcDir: string, destDir: string): void {
+  if (!fs.existsSync(srcDir)) return;
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+
+    if (entry.isDirectory()) {
+      fs.mkdirSync(destPath, { recursive: true });
+      mergeDir(srcPath, destPath);
+    } else {
+      // If dest exists, keep the newer file; otherwise just copy
+      if (fs.existsSync(destPath)) {
+        const srcStat = fs.statSync(srcPath);
+        const destStat = fs.statSync(destPath);
+        if (srcStat.mtimeMs > destStat.mtimeMs) {
+          fs.copyFileSync(srcPath, destPath);
+        }
+        // For session files, append instead of overwrite (they're daily notes)
+        if (entry.name.match(/^\d{4}-\d{2}-\d{2}\.md$/) && srcStat.mtimeMs <= destStat.mtimeMs) {
+          const srcContent = fs.readFileSync(srcPath, 'utf8');
+          const destContent = fs.readFileSync(destPath, 'utf8');
+          if (!destContent.includes(srcContent.trim())) {
+            fs.appendFileSync(destPath, '\n\n' + srcContent);
+          }
+        }
+      } else {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
   }
 }
