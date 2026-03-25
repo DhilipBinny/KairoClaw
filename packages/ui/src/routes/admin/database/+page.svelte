@@ -105,13 +105,14 @@
       </div>
     </div>
 
-    <!-- Migration section (only when PG + SQLite exists) -->
+    <!-- Migration available (shouldn't normally show — auto-migration handles it on startup) -->
     {#if status.migration?.available}
       <div class="section">
-        <h2 class="section-title">Migrate from SQLite</h2>
+        <h2 class="section-title">SQLite Data Available</h2>
         <div class="card migrate-card">
           <p class="migrate-desc">
-            A SQLite database was found. You can migrate all data to PostgreSQL.
+            A SQLite database was found but hasn't been migrated yet.
+            This usually migrates automatically on startup. You can trigger it manually.
           </p>
 
           {#if status.migration.sqliteCounts}
@@ -136,17 +137,10 @@
             </div>
           {/if}
 
-          <p class="migrate-note">
-            After migration, <code>gateway.db</code> will be renamed to <code>gateway.db.migrated</code> as a backup.
-          </p>
-
           {#if migrateResult}
             {#if migrateResult.success}
               <div class="result success">
-                Migration complete!
-                {#if migrateResult.migrated}
-                  Migrated: {Object.entries(migrateResult.migrated).filter(([,v]) => v > 0).map(([k,v]) => `${k}: ${v}`).join(', ')}
-                {/if}
+                Migration complete! Restart the server to apply.
               </div>
             {:else}
               <div class="result error">{migrateResult.error}</div>
@@ -158,7 +152,7 @@
             onclick={handleMigrate}
             disabled={migrating}
           >
-            {migrating ? 'Migrating...' : 'Migrate to PostgreSQL'}
+            {migrating ? 'Migrating...' : 'Migrate Now'}
           </button>
         </div>
       </div>
