@@ -459,8 +459,8 @@ async function main(): Promise<void> {
     }
   };
 
-  // Admin endpoint: list all registered tools (for permission management UI)
-  server.get('/api/v1/admin/tools', { preHandler: [requireRole('admin')] }, async () => {
+  // Admin endpoint: list all registered tool definitions (for permission management UI)
+  server.get('/api/v1/admin/tool-definitions', { preHandler: [requireRole('admin')] }, async () => {
     const allTools = await toolRegistry.getDefinitions();
     return allTools.map(t => ({ name: t.name, description: t.description }));
   });

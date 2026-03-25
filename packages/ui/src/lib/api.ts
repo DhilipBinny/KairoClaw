@@ -595,7 +595,7 @@ export async function unlinkSender(userId: string, linkId: number): Promise<{ su
 
 // Tool permissions
 export async function getToolList(): Promise<Array<{ name: string; description: string }>> {
-  return request('/admin/tools');
+  return request('/admin/tool-definitions');
 }
 
 export interface ToolPermRule { id?: number; tool_pattern: string; permission: string }
