@@ -32,12 +32,20 @@ export class SenderLinkRepository {
       [data.tenantId, data.channelType, data.senderId, data.userId, now, data.linkedBy ?? null],
     );
 
-    // Backfill existing sessions: set user_id on unowned sessions from this sender
-    const chatIdPrefix = `${data.channelType}:${data.senderId}`;
-    await this.db.run(
-      `UPDATE sessions SET user_id = ? WHERE tenant_id = ? AND chat_id = ? AND user_id IS NULL`,
-      [data.userId, data.tenantId, chatIdPrefix],
-    );
+    // Backfill existing sessions: set user_id on unowned sessions from this sender.
+    // Telegram: chat_id = "telegram:98765432" — exact match works.
+    // WhatsApp: chat_id = "whatsapp:6591234567@s.whatsapp.net" but sender_id is phone-only ("6591234567") — use LIKE.
+    if (data.channelType === 'whatsapp') {
+      await this.db.run(
+        `UPDATE sessions SET user_id = ? WHERE tenant_id = ? AND chat_id LIKE ? AND user_id IS NULL`,
+        [data.userId, data.tenantId, `whatsapp:${data.senderId}%`],
+      );
+    } else {
+      await this.db.run(
+        `UPDATE sessions SET user_id = ? WHERE tenant_id = ? AND chat_id = ? AND user_id IS NULL`,
+        [data.userId, data.tenantId, `${data.channelType}:${data.senderId}`],
+      );
+    }
 
     const row = await this.db.get<SenderLinkRow>(
       `SELECT * FROM sender_links WHERE tenant_id = ? AND channel_type = ? AND sender_id = ?`,

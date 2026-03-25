@@ -298,7 +298,10 @@ async function main(): Promise<void> {
         );
       }
     }
-    validUserId = resolvedUser?.id;
+    // Group sessions must never be owned by a single user — multiple people share them.
+    // resolvedUser is still used for per-request permission checking (AgentContext.user).
+    const isGroupChat = chatIdStr.includes(':-') || chatIdStr.includes('@g.us');
+    validUserId = isGroupChat ? undefined : resolvedUser?.id;
 
     const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
     let sessionRow = existingSessions.find(
