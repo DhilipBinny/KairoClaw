@@ -571,6 +571,20 @@ export async function regenerateApiKey(id: string): Promise<{ api_key: string }>
   return request(`/admin/users/${id}/api-key`, { method: 'POST' });
 }
 
+export interface UnlinkedSession {
+  chat_id: string;
+  channel: string;
+  sender_id: string;
+  sender_name: string | null;
+  turns: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getUnlinkedSessions(): Promise<UnlinkedSession[]> {
+  return request('/admin/users/unlinked-sessions');
+}
+
 export async function linkSender(userId: string, channelType: string, senderId: string): Promise<Record<string, unknown>> {
   return request(`/admin/users/${userId}/sender-links`, { method: 'POST', body: { channelType, senderId } });
 }

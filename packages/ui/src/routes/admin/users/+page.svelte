@@ -3,8 +3,8 @@
   import {
     getUsers, createUser, updateUser, deactivateUser, reactivateUser,
     permanentDeleteUser, regenerateApiKey, linkSender, unlinkSender,
-    getPendingSenders,
-    type UserInfo,
+    getPendingSenders, getUnlinkedSessions,
+    type UserInfo, type UnlinkedSession,
   } from '$lib/api';
 
   let users: UserInfo[] = $state([]);
@@ -34,6 +34,9 @@
   // Pending senders for quick-link
   let pendingSenders: Array<{ id: number; channel: string; sender_id: string; sender_name: string; status: string }> = $state([]);
 
+  // Unlinked sessions for link modal
+  let unlinkedSessions: UnlinkedSession[] = $state([]);
+
   // Regenerated key display
   let newApiKey = $state('');
   let newApiKeyUserId = $state('');
@@ -59,6 +62,12 @@
     try {
       const data = await getPendingSenders();
       pendingSenders = (data.senders || []).filter((s: any) => s.status === 'pending' || s.status === 'approved');
+    } catch { /* ignore */ }
+  }
+
+  async function loadUnlinkedSessions() {
+    try {
+      unlinkedSessions = await getUnlinkedSessions();
     } catch { /* ignore */ }
   }
 
@@ -160,6 +169,7 @@
       linkSenderId = '';
       linkUserId = '';
       await loadUsers();
+      await loadUnlinkedSessions();
     } catch (e: any) {
       error = e.message;
     }
@@ -187,6 +197,7 @@
   onMount(() => {
     loadUsers();
     loadPendingSenders();
+    loadUnlinkedSessions();
   });
 </script>
 
@@ -379,21 +390,30 @@
     <div class="modal-overlay" onclick={() => linkUserId = ''} role="presentation">
       <div class="modal card" onclick={(e) => e.stopPropagation()} role="dialog">
         <h2 class="modal-title">Link Channel Sender</h2>
-        <p class="text-muted" style="margin-bottom: 16px;">Link a Telegram user ID or WhatsApp phone number to this user account.</p>
 
-        {#if pendingSenders.length > 0}
+        {#if unlinkedSessions.length > 0}
           <div class="form-group">
-            <label class="label">Quick link from pending senders</label>
-            <div class="pending-list">
-              {#each pendingSenders as ps}
-                <button class="pending-item" onclick={() => { linkChannel = ps.channel; linkSenderId = ps.sender_id; }}>
-                  <span class="badge badge-{ps.channel}">{ps.channel}</span>
-                  {ps.sender_name || ps.sender_id}
-                  <span class="text-muted">({ps.sender_id})</span>
+            <label class="label">Existing sessions without a user</label>
+            <div class="unlinked-list">
+              {#each unlinkedSessions as s}
+                <button class="unlinked-item" onclick={() => { linkChannel = s.channel; linkSenderId = s.sender_id; }}>
+                  <div class="unlinked-main">
+                    <span class="badge badge-{s.channel}">{s.channel}</span>
+                    <strong>{s.sender_name || s.sender_id}</strong>
+                    {#if s.sender_name}
+                      <span class="text-muted">({s.sender_id})</span>
+                    {/if}
+                  </div>
+                  <div class="unlinked-meta">
+                    {s.turns} turn{s.turns !== 1 ? 's' : ''} &middot; last active {new Date(s.updated_at).toLocaleDateString()}
+                  </div>
                 </button>
               {/each}
             </div>
           </div>
+          <div class="divider-or"><span>or enter manually</span></div>
+        {:else}
+          <p class="text-muted" style="margin-bottom: 16px;">No unlinked sessions found. Enter sender details manually.</p>
         {/if}
 
         <div class="form-group">
@@ -550,6 +570,23 @@
     background: var(--bg-surface); cursor: pointer; font-size: 12px; text-align: left;
   }
   .pending-item:hover { background: var(--bg-raised); }
+
+  .unlinked-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; max-height: 220px; overflow-y: auto; }
+  .unlinked-item {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-surface); cursor: pointer; text-align: left; width: 100%;
+  }
+  .unlinked-item:hover { background: var(--bg-raised); border-color: var(--accent); }
+  .unlinked-main { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .unlinked-meta { font-size: 11px; color: var(--text-muted); margin-left: 2px; }
+  .divider-or {
+    display: flex; align-items: center; gap: 12px; margin: 16px 0 12px;
+    color: var(--text-muted); font-size: 12px;
+  }
+  .divider-or::before, .divider-or::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
 
   @media (max-width: 768px) {
     .page-title { font-size: 20px; }

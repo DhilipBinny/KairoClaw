@@ -54,6 +54,51 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     }));
   });
 
+  // GET /api/v1/admin/users/unlinked-sessions — sessions without a user, for linking
+  app.get('/api/v1/admin/users/unlinked-sessions', { preHandler: [requireRole('admin')] }, async (request) => {
+    const db = getDb(request);
+    const tenantId = request.tenantId || 'default';
+
+    // Get sessions with no user_id, excluding groups and cron/internal
+    const sessions = await db.query<{
+      chat_id: string; channel: string; turns: number; created_at: string; updated_at: string;
+    }>(
+      `SELECT chat_id, channel, turns, created_at, updated_at FROM sessions
+       WHERE tenant_id = ? AND user_id IS NULL
+         AND channel IN ('telegram', 'whatsapp')
+         AND chat_id NOT LIKE '%@g.us%'
+         AND chat_id NOT LIKE 'telegram:-%'
+       ORDER BY updated_at DESC`,
+      [tenantId],
+    );
+
+    // Extract sender_id from chat_id format ("telegram:123" → "123", "whatsapp:6590890177@s.whatsapp.net" → "6590890177")
+    const result = sessions.map(s => {
+      const raw = s.chat_id.replace(/^(telegram|whatsapp):/, '');
+      const senderId = raw.replace(/@s\.whatsapp\.net$/, '');
+      return {
+        chat_id: s.chat_id,
+        channel: s.channel,
+        sender_id: senderId,
+        turns: s.turns,
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+      };
+    });
+
+    // Enrich with sender names from pending_senders
+    const pending = await db.query<{ sender_id: string; channel: string; sender_name: string }>(
+      `SELECT sender_id, channel, sender_name FROM pending_senders WHERE tenant_id = ?`,
+      [tenantId],
+    );
+    const nameMap = new Map(pending.map(p => [`${p.channel}:${p.sender_id}`, p.sender_name]));
+
+    return result.map(s => ({
+      ...s,
+      sender_name: nameMap.get(`${s.channel}:${s.sender_id}`) || null,
+    }));
+  });
+
   // POST /api/v1/admin/users — create user (returns API key ONCE)
   app.post('/api/v1/admin/users', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
