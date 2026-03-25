@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
+import type { DatabaseAdapter } from '../db/index.js';
 import { requireRole } from '../auth/middleware.js';
 import { WORKSPACE_MAX_FILE_SIZE } from '../constants.js';
 import { SCOPE_DIR_NAME } from '../constants.js';
@@ -92,20 +93,38 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/workspace/scopes — list all scoped users
   app.get('/api/v1/workspace/scopes', { preHandler: [requireRole('admin')] }, async (request) => {
     const config = (request as any).ctx.config as GatewayConfig;
+    const db = (request as any).ctx.db as DatabaseAdapter;
     const scopesDir = path.join(config.agent.workspace, SCOPE_DIR_NAME);
 
     if (!fs.existsSync(scopesDir)) {
       return { scopes: [] };
     }
 
+    // Preload user names for UUID-based scopes
+    const users = await db.query<{ id: string; name: string }>('SELECT id, name FROM users');
+    const userNameMap = new Map(users.map(u => [u.id, u.name]));
+
     const entries = fs.readdirSync(scopesDir, { withFileTypes: true })
       .filter(d => d.isDirectory())
       .map(d => {
         const scopeKey = d.name;
         const scopePath = path.join(scopesDir, scopeKey);
-        const parts = scopeKey.split(':');
-        const channel = parts[0] || 'unknown';
-        const userId = parts.slice(1).join(':') || 'unknown';
+
+        // UUID scope (no colon) → look up user name; channel:sender scope → parse
+        const isUUID = !scopeKey.includes(':');
+        let channel: string;
+        let userId: string;
+        let userName: string | null = null;
+
+        if (isUUID) {
+          channel = 'user';
+          userId = scopeKey;
+          userName = userNameMap.get(scopeKey) || null;
+        } else {
+          const parts = scopeKey.split(':');
+          channel = parts[0] || 'unknown';
+          userId = parts.slice(1).join(':') || 'unknown';
+        }
 
         // Read USER.md if exists
         const userMdPath = path.join(scopePath, 'USER.md');
@@ -129,6 +148,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
           scopeKey,
           channel,
           userId,
+          userName,
           hasUserMd,
           hasProfile,
           sessionCount,
