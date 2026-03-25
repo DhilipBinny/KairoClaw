@@ -37,8 +37,8 @@ export class SenderLinkRepository {
     // WhatsApp: chat_id = "whatsapp:6591234567@s.whatsapp.net" but sender_id is phone-only ("6591234567") — use LIKE.
     if (data.channelType === 'whatsapp') {
       await this.db.run(
-        `UPDATE sessions SET user_id = ? WHERE tenant_id = ? AND chat_id LIKE ? AND user_id IS NULL`,
-        [data.userId, data.tenantId, `whatsapp:${data.senderId}%`],
+        `UPDATE sessions SET user_id = ? WHERE tenant_id = ? AND chat_id LIKE ? AND chat_id NOT LIKE ? AND user_id IS NULL`,
+        [data.userId, data.tenantId, `whatsapp:${data.senderId}@%`, '%@g.us%'],
       );
     } else {
       await this.db.run(

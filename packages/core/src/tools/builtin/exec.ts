@@ -1,8 +1,9 @@
-import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAULT_TIMEOUT_SECONDS } from '../../constants.js';
+import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAULT_TIMEOUT_SECONDS, SCOPE_DIR_NAME } from '../../constants.js';
 import { execFile as execFileCb } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
-import { safePath } from './files.js';
+import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 
 const execFileAsync = promisify(execFileCb);
@@ -137,13 +138,30 @@ export const execTools: ToolRegistration[] = [
       }
 
       const workspace = getWorkspace(context as Record<string, unknown>);
+      const isAdmin = context.user?.role === 'admin';
+      const scopeKey = context.scopeKey;
+
+      // For non-admin users, block commands that reference other users' scopes
+      if (!isAdmin && scopeKey) {
+        const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
+        if (scopesRef.test(command)) {
+          return { error: 'Access denied: cannot access other users\' directories via exec' };
+        }
+      }
+
       const ctx = context as Record<string, unknown>;
       const configTimeout = (ctx.config as Record<string, unknown>)?.tools
         ? ((ctx.config as Record<string, Record<string, Record<string, unknown>>>).tools?.exec?.timeout as number)
         : undefined;
       const defaultTimeout = typeof configTimeout === 'number' && configTimeout > 0 ? configTimeout : EXEC_DEFAULT_TIMEOUT_SECONDS;
       const timeout = Math.min((args.timeout as number) || defaultTimeout, EXEC_MAX_TIMEOUT_SECONDS) * 1000;
-      const cwd = args.workdir ? safePath(args.workdir as string, workspace) : workspace;
+
+      // Default cwd: user's own scope dir for non-admin, workspace root for admin
+      let defaultCwd = workspace;
+      if (!isAdmin && scopeKey) {
+        defaultCwd = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
+      }
+      const cwd = args.workdir ? scopedSafePath(args.workdir as string, workspace, context) : defaultCwd;
 
       // Only pass safe env vars to child process (allowlist, not denylist)
       const safeEnv: Record<string, string> = {};

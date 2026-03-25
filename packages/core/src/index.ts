@@ -346,7 +346,12 @@ async function main(): Promise<void> {
       user: resolvedUser ? { id: resolvedUser.id, role: 'user', elevated: !!resolvedUser.elevated } : undefined,
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
-      tools: await toolRegistry.getDefinitions(),
+      tools: await toolRegistry.getDefinitions({
+        userRole: resolvedUser ? 'user' : 'admin',
+        db,
+        tenantId,
+        elevated: !!resolvedUser?.elevated,
+      }),
       executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
@@ -355,7 +360,12 @@ async function main(): Promise<void> {
           config,
           tenantId,
           callLLM: (llmArgs: any) => providerRegistry.callWithFailover(llmArgs),
-          tools: await toolRegistry.getDefinitions(),
+          tools: await toolRegistry.getDefinitions({
+            userRole: (ctx as any).user?.role || 'user',
+            db,
+            tenantId,
+            elevated: !!(ctx as any).user?.elevated,
+          }),
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },

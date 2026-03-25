@@ -62,7 +62,7 @@ export class UserRepository {
     return await this.db.query<UserRow>('SELECT * FROM users WHERE tenant_id = ?', [tenantId]);
   }
 
-  async update(id: string, data: Partial<{
+  async update(id: string, tenantId: string, data: Partial<{
     name: string; email: string; role: string; settings: string;
     elevated: number; apiKeyHash: string;
   }>): Promise<void> {
@@ -99,8 +99,9 @@ export class UserRepository {
     fields.push('updated_at = ?');
     values.push(new Date().toISOString());
     values.push(id);
+    values.push(tenantId);
 
-    await this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ? AND tenant_id = ?`, values);
   }
 
   async deactivate(id: string, tenantId: string): Promise<void> {
@@ -119,12 +120,8 @@ export class UserRepository {
     );
   }
 
-  async delete(id: string, tenantId?: string): Promise<void> {
-    if (tenantId) {
-      await this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
-    } else {
-      await this.db.run('DELETE FROM users WHERE id = ?', [id]);
-    }
+  async delete(id: string, tenantId: string): Promise<void> {
+    await this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
   }
 
   async hardDelete(id: string, tenantId: string): Promise<void> {
