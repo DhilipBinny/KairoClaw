@@ -59,13 +59,17 @@ export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
 
     const db = (request as any).ctx.db as DatabaseAdapter;
     const keyHash = hashApiKey(apiKey);
-    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; email: string }>(
-      'SELECT id, tenant_id, name, role, email FROM users WHERE api_key_hash = ?',
+    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; email: string; active: number }>(
+      'SELECT id, tenant_id, name, role, email, active FROM users WHERE api_key_hash = ?',
       [keyHash]
     );
 
     if (!user) {
       return reply.code(401).send({ error: 'Invalid API key' });
+    }
+
+    if (!user.active) {
+      return reply.code(403).send({ error: 'Account deactivated' });
     }
 
     return {
