@@ -2,24 +2,43 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import AdminNav from '$lib/components/AdminNav.svelte';
-  import { checkAuth, getUser } from '$lib/stores/auth.svelte';
+  import { checkAuth, getUser, getIsAuthenticated } from '$lib/stores/auth.svelte';
 
   let { children } = $props();
   let navOpen = $state(false);
-  let authorized = $state(false);
+  // 'loading' | 'authorized' | 'denied'
+  let authState = $state<'loading' | 'authorized' | 'denied'>('loading');
 
   onMount(async () => {
+    // If already authenticated in this session, check role immediately — no network call
+    if (getIsAuthenticated()) {
+      const user = getUser();
+      if (user?.role === 'admin') {
+        authState = 'authorized';
+        return;
+      } else {
+        authState = 'denied';
+        goto('/');
+        return;
+      }
+    }
+    // Not yet authenticated — do a single network check
     await checkAuth();
     const user = getUser();
-    if (!user || user.role !== 'admin') {
-      goto('/');
+    if (user?.role === 'admin') {
+      authState = 'authorized';
     } else {
-      authorized = true;
+      authState = 'denied';
+      goto('/');
     }
   });
 </script>
 
-{#if authorized}
+{#if authState === 'loading'}
+  <div class="auth-loading">
+    <span class="spinner"></span>
+  </div>
+{:else if authState === 'authorized'}
 <div class="admin-layout">
   <div class="admin-nav-wrapper" class:open={navOpen}>
     <AdminNav />
@@ -44,6 +63,13 @@
 {/if}
 
 <style>
+  .auth-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background: var(--bg-void);
+  }
   .admin-layout {
     display: flex;
     height: 100vh;
