@@ -592,3 +592,18 @@ export async function linkSender(userId: string, channelType: string, senderId: 
 export async function unlinkSender(userId: string, linkId: number): Promise<{ success: boolean }> {
   return request(`/admin/users/${userId}/sender-links/${linkId}`, { method: 'DELETE' });
 }
+
+// Tool permissions
+export async function getToolList(): Promise<Array<{ name: string; description: string }>> {
+  return request('/admin/tools');
+}
+
+export interface ToolPermRule { id?: number; tool_pattern: string; permission: string }
+
+export async function getToolPermissions(role: string): Promise<{ role: string; rules: ToolPermRule[] }> {
+  return request(`/admin/tool-permissions/${role}`);
+}
+
+export async function saveToolPermissions(role: string, permissions: Array<{ toolPattern: string; permission: string }>): Promise<{ success: boolean }> {
+  return request(`/admin/tool-permissions/${role}`, { method: 'PUT', body: { permissions } });
+}
