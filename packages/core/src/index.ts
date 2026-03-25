@@ -290,7 +290,7 @@ async function main(): Promise<void> {
     }
     if (!resolvedUser && inbound.userId && inbound.channel !== 'web' && inbound.channel !== 'api') {
       // Channel sender — look up sender_links
-      const link = await senderLinkRepo.findByChannelSender(inbound.channel, String(inbound.userId));
+      const link = await senderLinkRepo.findByChannelSender(tenantId, inbound.channel, String(inbound.userId));
       if (link) {
         resolvedUser = await db.get<{ id: string; elevated: number; active: number }>(
           'SELECT id, elevated, active FROM users WHERE id = ? AND active = 1',

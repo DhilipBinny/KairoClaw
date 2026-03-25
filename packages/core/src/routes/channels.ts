@@ -290,8 +290,8 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       // Config update failed, but user + link created — not critical
     }
 
-    // 4. Mark sender as approved
-    await pendingRepo.updateStatus(Number(id), 'approved');
+    // 4. Mark sender as approved (after DB operations succeed, before return)
+    try { await pendingRepo.updateStatus(Number(id), 'approved'); } catch { /* non-critical */ }
 
     return {
       user: {
