@@ -59,12 +59,14 @@ const MIGRATE_TABLES = [
   'tool_permissions',
   'memory_chunks',
   'pending_senders',
+  'sender_links',
 ];
 
 // Tables with SERIAL primary keys that need sequence resets
 const SERIAL_TABLES = [
   'messages', 'usage_records', 'audit_log',
   'tool_permissions', 'memory_chunks', 'pending_senders',
+  'sender_links',
 ];
 
 export interface MigrationResult {

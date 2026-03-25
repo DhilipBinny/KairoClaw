@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getConfig, getChannelsStatus, getWhatsAppQR, unpairWhatsApp, updateConfig, saveChannelCredentials, testTelegramBot, getPendingSenders, approveSender, rejectSender } from '$lib/api';
-  import type { PendingSender } from '$lib/api';
+  import { getConfig, getChannelsStatus, getWhatsAppQR, unpairWhatsApp, updateConfig, saveChannelCredentials, testTelegramBot, getPendingSenders, approveSender, rejectSender, onboardSender, getUsers } from '$lib/api';
+  import type { PendingSender, UserInfo } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
   import ChipInput from '$lib/components/ChipInput.svelte';
 
@@ -47,6 +47,17 @@
   let senderCounts = $state<{ pending: number; seen: number }>({ pending: 0, seen: 0 });
   let approvingId = $state<number | null>(null);
   let rejectingId = $state<number | null>(null);
+
+  // Onboard modal
+  let onboardSenderData = $state<PendingSender | null>(null);
+  let onboardName = $state('');
+  let onboardEmail = $state('');
+  let onboardRole = $state('user');
+  let onboardElevated = $state(false);
+  let onboardedApiKey = $state('');
+  let onboardMode = $state<'new' | 'existing'>('new');
+  let existingUsers = $state<UserInfo[]>([]);
+  let selectedUserId = $state('');
 
   // Per-field saving state
   let saving: Record<string, boolean> = $state({});
@@ -255,6 +266,58 @@
     rejectingId = null;
   }
 
+  async function startOnboard(sender: PendingSender) {
+    onboardSenderData = sender;
+    onboardName = sender.sender_name || '';
+    onboardEmail = '';
+    onboardRole = 'user';
+    onboardElevated = false;
+    onboardedApiKey = '';
+    onboardMode = 'new';
+    selectedUserId = '';
+    // Load existing users for "Link to existing" option
+    try { existingUsers = await getUsers(); } catch { existingUsers = []; }
+  }
+
+  async function handleOnboard() {
+    if (!onboardSenderData) return;
+
+    if (onboardMode === 'existing') {
+      // Link to existing user: approve + pass userId
+      if (!selectedUserId) return;
+      try {
+        await approveSender(onboardSenderData.id, selectedUserId);
+        pendingSenders = pendingSenders.filter(s => s.id !== onboardSenderData!.id);
+        const configData = await getConfig().catch(() => ({ config: null }));
+        if (configData.config) config = configData.config;
+        onboardSenderData = null;
+      } catch (e: any) {
+        error = e.message || 'Link failed';
+      }
+    } else {
+      // Create new user + approve + link
+      if (!onboardName.trim()) return;
+      try {
+        const result = await onboardSender(onboardSenderData.id, {
+          name: onboardName.trim(),
+          email: onboardEmail.trim() || undefined,
+          role: onboardRole,
+          elevated: onboardElevated,
+        });
+        onboardedApiKey = result.api_key;
+        pendingSenders = pendingSenders.filter(s => s.id !== onboardSenderData!.id);
+        const configData = await getConfig().catch(() => ({ config: null }));
+        if (configData.config) config = configData.config;
+      } catch (e: any) {
+        error = e.message || 'Onboard failed';
+      }
+    }
+  }
+
+  function copyToClipboard(text: string) {
+    navigator.clipboard.writeText(text);
+  }
+
   function startPolling() {
     pollInterval = setInterval(async () => {
       await loadStatus();
@@ -322,8 +385,11 @@
                 </span>
               </div>
               <div class="pending-actions">
+                <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
+                  Onboard
+                </button>
                 <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
-                  {approvingId === sender.id ? 'Adding...' : 'Approve'}
+                  {approvingId === sender.id ? 'Adding...' : 'Approve Only'}
                 </button>
                 <button class="btn btn-sm" disabled={rejectingId === sender.id} onclick={() => handleRejectSender(sender.id)}>
                   Dismiss
@@ -357,6 +423,9 @@
                 </span>
               </div>
               <div class="pending-actions">
+                <button class="btn btn-sm btn-accent" onclick={() => startOnboard(sender)}>
+                  Onboard
+                </button>
                 <button class="btn btn-sm btn-primary" disabled={approvingId === sender.id} onclick={() => handleApproveSender(sender.id)}>
                   {approvingId === sender.id ? 'Adding...' : 'Add to allowlist'}
                 </button>
@@ -366,6 +435,83 @@
               </div>
             </div>
           {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- ─── Onboard Modal ──────────── -->
+    {#if onboardSenderData}
+      <div class="modal-overlay" onclick={() => { if (!onboardedApiKey) onboardSenderData = null; }} role="presentation">
+        <div class="modal card" onclick={(e) => e.stopPropagation()} role="dialog">
+          {#if onboardedApiKey}
+            <h2 class="modal-title">User Onboarded</h2>
+            <p style="margin-bottom: 12px;">Save this API key now. It will not be shown again.</p>
+            <div class="key-display">
+              <code class="key-value">{onboardedApiKey}</code>
+            </div>
+            <div class="modal-actions">
+              <button class="btn btn-primary" onclick={() => copyToClipboard(onboardedApiKey)}>Copy</button>
+              <button class="btn" onclick={() => { onboardSenderData = null; onboardedApiKey = ''; }}>Done</button>
+            </div>
+          {:else}
+            <h2 class="modal-title">Onboard User</h2>
+            <p class="onboard-sender-info">
+              <span class="badge badge-{onboardSenderData.channel}">{onboardSenderData.channel}</span>
+              {onboardSenderData.sender_name || onboardSenderData.sender_id}
+              <code>{onboardSenderData.sender_id}</code>
+            </p>
+
+            <!-- Tab selector -->
+            <div class="onboard-tabs">
+              <button class="tab" class:active={onboardMode === 'new'} onclick={() => onboardMode = 'new'}>Create New User</button>
+              {#if existingUsers.length > 0}
+                <button class="tab" class:active={onboardMode === 'existing'} onclick={() => onboardMode = 'existing'}>Link to Existing</button>
+              {/if}
+            </div>
+
+            {#if onboardMode === 'new'}
+              <div class="form-group">
+                <label class="label">Name *</label>
+                <input class="input" type="text" bind:value={onboardName} placeholder="User name" />
+              </div>
+              <div class="form-group">
+                <label class="label">Email</label>
+                <input class="input" type="email" bind:value={onboardEmail} placeholder="Optional" />
+              </div>
+              <div class="form-group">
+                <label class="label">Role</label>
+                <select class="input" bind:value={onboardRole}>
+                  <option value="user">User</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="checkbox-label">
+                  <input type="checkbox" bind:checked={onboardElevated} />
+                  Elevated (access to exec, cron, file write/delete)
+                </label>
+              </div>
+              <div class="modal-actions">
+                <button class="btn" onclick={() => onboardSenderData = null}>Cancel</button>
+                <button class="btn btn-primary" onclick={handleOnboard} disabled={!onboardName.trim()}>Create & Approve</button>
+              </div>
+            {:else}
+              <div class="form-group">
+                <label class="label">Select User</label>
+                <select class="input" bind:value={selectedUserId}>
+                  <option value="">-- Select a user --</option>
+                  {#each existingUsers.filter(u => u.active) as u}
+                    <option value={u.id}>{u.name}{u.email ? ` (${u.email})` : ''} — {u.sender_links.map(l => `${l.channel_type}:${l.sender_id}`).join(', ') || 'no links'}</option>
+                  {/each}
+                </select>
+              </div>
+              <p class="text-muted" style="font-size: 12px;">This will link {onboardSenderData.channel} sender "{onboardSenderData.sender_name || onboardSenderData.sender_id}" to the selected user account and add to allowlist.</p>
+              <div class="modal-actions">
+                <button class="btn" onclick={() => onboardSenderData = null}>Cancel</button>
+                <button class="btn btn-primary" onclick={handleOnboard} disabled={!selectedUserId}>Link & Approve</button>
+              </div>
+            {/if}
+          {/if}
         </div>
       </div>
     {/if}
@@ -1080,4 +1226,43 @@
     .channel-header { flex-wrap: wrap; gap: 10px; }
     .input-action { flex-wrap: wrap; }
   }
+
+  /* Onboard modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal { padding: 24px; min-width: 400px; max-width: 500px; }
+  .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .form-group { margin-bottom: 14px; }
+  .label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+  .btn-accent { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-accent:hover { background: var(--accent-hover); }
+  .onboard-sender-info {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-raised); padding: 8px 12px; border-radius: var(--radius);
+    margin-bottom: 16px; font-size: 13px;
+  }
+  .key-display {
+    background: var(--bg-raised); padding: 12px 16px; border-radius: var(--radius);
+    margin: 12px 0;
+  }
+  .key-value {
+    font-family: var(--font-mono); font-size: 12px;
+    display: block; word-break: break-all; padding: 4px 0;
+  }
+  .onboard-tabs {
+    display: flex; gap: 0; margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 16px; border: none; background: none; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: var(--text-muted);
+    border-bottom: 2px solid transparent; transition: all var(--duration) var(--ease);
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .text-muted { color: var(--text-muted); }
 </style>

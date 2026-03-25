@@ -24,6 +24,8 @@ import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
+import { SenderLinkRepository } from './db/repositories/sender-link.js';
+import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, ensureScopeDir } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
@@ -53,6 +55,7 @@ import { registerDatabaseRoutes } from './routes/database.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerWhatsAppRoutes } from './routes/whatsapp.js';
 import { registerChannelRoutes } from './routes/channels.js';
+import { registerUserRoutes } from './routes/users.js';
 import { webchatPlugin } from './channels/webchat.js';
 import { AuditService } from './security/audit.js';
 
@@ -259,6 +262,8 @@ async function main(): Promise<void> {
 
   // 10. Create the agent runner factory — resolves sessions and builds AgentContext
   const sessionRepo = new SessionRepository(db);
+  const senderLinkRepo = new SenderLinkRepository(db);
+  const userRepo = new UserRepository(db);
 
   // Shared services — populated later, referenced by closures
   const sharedServices: {
@@ -273,11 +278,27 @@ async function main(): Promise<void> {
   ): Promise<AgentResult> => {
     // Resolve or create a session for this chat
     const chatIdStr = String(inbound.chatId);
-    // Only use userId if it's a real user ID from the users table, not a channel-generated ID
-    const userRow = inbound.userId
-      ? await db.get<{ id: string }>('SELECT id FROM users WHERE id = ?', [String(inbound.userId)])
-      : undefined;
-    const validUserId = userRow?.id ?? undefined;
+
+    // Resolve user: try direct lookup first (webchat/API), then sender_links (Telegram/WhatsApp)
+    let validUserId: string | undefined;
+    let resolvedUser: { id: string; elevated: number; active: number } | undefined;
+    if (inbound.userId) {
+      resolvedUser = await db.get<{ id: string; elevated: number; active: number }>(
+        'SELECT id, elevated, active FROM users WHERE id = ? AND active = 1',
+        [String(inbound.userId)],
+      );
+    }
+    if (!resolvedUser && inbound.userId && inbound.channel !== 'web' && inbound.channel !== 'api') {
+      // Channel sender — look up sender_links
+      const link = await senderLinkRepo.findByChannelSender(inbound.channel, String(inbound.userId));
+      if (link) {
+        resolvedUser = await db.get<{ id: string; elevated: number; active: number }>(
+          'SELECT id, elevated, active FROM users WHERE id = ? AND active = 1',
+          [link.user_id],
+        );
+      }
+    }
+    validUserId = resolvedUser?.id;
 
     const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
     let sessionRow = existingSessions.find(
@@ -319,6 +340,7 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
+      user: resolvedUser ? { id: resolvedUser.id, role: 'user', elevated: !!resolvedUser.elevated } : undefined,
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: await toolRegistry.getDefinitions(),
@@ -423,6 +445,7 @@ async function main(): Promise<void> {
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
   await server.register(registerUsageRoutes);
+  await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
   await server.register(registerAuditRoutes);
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
