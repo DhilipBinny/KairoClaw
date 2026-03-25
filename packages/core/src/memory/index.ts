@@ -329,6 +329,23 @@ export class MemorySystem {
     for (const file of files) {
       await this.indexFile(file);
     }
+
+    // Clean up orphaned chunks whose files no longer exist on disk (e.g., after scope migration)
+    try {
+      const indexed = await this.db.query<{ file_path: string }>(
+        'SELECT DISTINCT file_path FROM memory_chunks',
+      );
+      const fileSet = new Set(files);
+      let removed = 0;
+      for (const row of indexed) {
+        if (!fileSet.has(row.file_path)) {
+          await this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [row.file_path]);
+          removed++;
+        }
+      }
+      if (removed > 0) log.info({ removed }, 'Cleaned up orphaned memory chunks');
+    } catch { /* non-critical */ }
+
     log.info({ files: files.length }, 'Memory files indexed');
   }
 
