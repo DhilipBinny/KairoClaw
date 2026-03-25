@@ -13,7 +13,7 @@
   let toolsMeta: ToolMeta[] = $state([]);
 
   // Tool Permissions
-  const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file', 'delete_file'];
+  const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file'];
   let allTools: Array<{ name: string; description: string }> = $state([]);
   let permRole = $state('user');
   let permMap: Record<string, string> = $state({}); // toolName → 'allow'|'deny'
@@ -798,7 +798,7 @@
         Tool Permissions
       </h2>
       <div class="card settings-card">
-        <p class="field-hint" style="margin-bottom: 12px;">Control which tools each role can use. Changes apply to all users with this role. Dangerous tools (exec, cron, write_file, delete_file) require Power User.</p>
+        <p class="field-hint" style="margin-bottom: 12px;">Control which tools the "User" role can access. Changes apply to all users with this role immediately. Tools marked as restricted are only available to admin or users with the Power User flag (toggle per user on the <a href="/admin/users" style="color: var(--accent);">Users page</a>).</p>
         <div class="form-row" style="margin-bottom: 12px;">
           <label class="field-label">Role</label>
           <select class="input" style="max-width: 200px;" bind:value={permRole} onchange={() => loadToolPerms()}>
@@ -816,12 +816,12 @@
               <div class="perm-row" class:dangerous={isDangerous} class:mcp={isMcp}>
                 <div class="perm-tool">
                   <span class="perm-name">{tool.name}</span>
-                  {#if isDangerous}<span class="perm-badge danger">dangerous</span>{/if}
+                  {#if isDangerous}<span class="perm-badge danger">restricted</span>{/if}
                   {#if isMcp}<span class="perm-badge mcp">MCP</span>{/if}
                 </div>
                 <div class="perm-toggle">
                   {#if isDangerous}
-                    <span class="perm-locked">Requires Power User</span>
+                    <span class="perm-locked">Power User only</span>
                   {:else}
                     <select class="input input-sm" bind:value={permMap[tool.name]}>
                       <option value="allow">Allow</option>
