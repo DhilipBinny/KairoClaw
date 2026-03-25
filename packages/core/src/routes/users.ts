@@ -118,13 +118,21 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     const apiKeyHash = hashApiKey(apiKey);
 
     const userRepo = new UserRepository(db);
-    const user = await userRepo.create({
-      tenantId,
-      name: name.trim(),
-      email: email?.trim() || undefined,
-      role: userRole,
-      apiKeyHash,
-    });
+    let user;
+    try {
+      user = await userRepo.create({
+        tenantId,
+        name: name.trim(),
+        email: email?.trim() || undefined,
+        role: userRole,
+        apiKeyHash,
+      });
+    } catch (e: any) {
+      if (e.message?.includes('UNIQUE') || e.code === '23505') {
+        return reply.code(409).send({ error: 'A user with this email already exists' });
+      }
+      throw e;
+    }
 
     // Set elevated if requested
     if (elevated) {

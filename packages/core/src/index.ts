@@ -361,10 +361,10 @@ async function main(): Promise<void> {
           tenantId,
           callLLM: (llmArgs: any) => providerRegistry.callWithFailover(llmArgs),
           tools: await toolRegistry.getDefinitions({
-            userRole: (ctx as any).user?.role || 'user',
+            userRole: (ctx as Record<string, any>).user?.role || 'user',
             db,
             tenantId,
-            elevated: !!(ctx as any).user?.elevated,
+            elevated: !!(ctx as Record<string, any>).user?.elevated,
           }),
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
