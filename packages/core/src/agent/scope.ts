@@ -115,9 +115,9 @@ export function ensureScopeDir(
   // Seed USER.md on first creation
   if (isNew && senderInfo) {
     const userMd = path.join(scopeDir, 'USER.md');
-    const channel = senderInfo.channel || scopeKey.split(':')[0];
+    const channel = senderInfo.channel || (scopeKey.includes(':') ? scopeKey.split(':')[0] : 'web');
     const name = senderInfo.name || 'Unknown';
-    const userId = senderInfo.userId || scopeKey.split(':')[1];
+    const userId = senderInfo.userId || (scopeKey.includes(':') ? scopeKey.split(':')[1] : scopeKey);
 
     const content = `# User Profile\n\n` +
       `- **Name**: ${name}\n` +
@@ -190,19 +190,22 @@ function mergeDir(srcDir: string, destDir: string): void {
       fs.mkdirSync(destPath, { recursive: true });
       mergeDir(srcPath, destPath);
     } else {
-      // If dest exists, keep the newer file; otherwise just copy
+      // If dest exists: session files always merge, other files newer-wins
       if (fs.existsSync(destPath)) {
-        const srcStat = fs.statSync(srcPath);
-        const destStat = fs.statSync(destPath);
-        if (srcStat.mtimeMs > destStat.mtimeMs) {
-          fs.copyFileSync(srcPath, destPath);
-        }
-        // For session files, append instead of overwrite (they're daily notes)
-        if (entry.name.match(/^\d{4}-\d{2}-\d{2}\.md$/) && srcStat.mtimeMs <= destStat.mtimeMs) {
-          const srcContent = fs.readFileSync(srcPath, 'utf8');
+        const isSessionFile = /^\d{4}-\d{2}-\d{2}\.md$/.test(entry.name);
+        if (isSessionFile) {
+          // Session files (daily notes): append unique content from src
+          const srcContent = fs.readFileSync(srcPath, 'utf8').trim();
           const destContent = fs.readFileSync(destPath, 'utf8');
-          if (!destContent.includes(srcContent.trim())) {
+          if (srcContent && !destContent.includes(srcContent)) {
             fs.appendFileSync(destPath, '\n\n' + srcContent);
+          }
+        } else {
+          // Non-session files (PROFILE.md, USER.md): keep newer
+          const srcStat = fs.statSync(srcPath);
+          const destStat = fs.statSync(destPath);
+          if (srcStat.mtimeMs > destStat.mtimeMs) {
+            fs.copyFileSync(srcPath, destPath);
           }
         }
       } else {
