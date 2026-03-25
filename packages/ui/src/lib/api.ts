@@ -291,6 +291,15 @@ export async function searchMCPMarketplace(search: string, limit = 20): Promise<
   return request(`/mcp/marketplace?search=${encodeURIComponent(search)}&limit=${limit}`);
 }
 
+// ── Admin: Database ──────────────────────
+export async function getDatabaseStatus(): Promise<Record<string, unknown>> {
+  return request('/admin/database');
+}
+
+export async function migrateDatabase(): Promise<Record<string, unknown>> {
+  return request('/admin/database/migrate', { method: 'POST', body: {} });
+}
+
 // ── Admin: Cron ───────────────────────────
 export interface CronJobSchedule {
   type: 'at' | 'every' | 'cron';

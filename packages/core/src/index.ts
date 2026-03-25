@@ -49,6 +49,7 @@ import { chatRoutes } from './routes/chat.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
+import { registerDatabaseRoutes } from './routes/database.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerWhatsAppRoutes } from './routes/whatsapp.js';
 import { registerChannelRoutes } from './routes/channels.js';
@@ -91,6 +92,22 @@ async function main(): Promise<void> {
 
   if (dbDialect === 'postgres') {
     console.log('  Database: PostgreSQL');
+    // Validate PG connection before proceeding
+    try {
+      await db.get('SELECT 1 as ok');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('\n' + '='.repeat(60));
+      console.error('  POSTGRESQL CONNECTION FAILED');
+      console.error(`  ${msg}`);
+      console.error('');
+      console.error('  Check AGW_DATABASE_URL:');
+      console.error(`  ${dbUrl?.replace(/:[^:@]+@/, ':***@')}`);
+      console.error('');
+      console.error('  Ensure PostgreSQL is running and accessible.');
+      console.error('='.repeat(60) + '\n');
+      process.exit(1);
+    }
   }
 
   // Store stateDir in config for route access
@@ -100,7 +117,17 @@ async function main(): Promise<void> {
   const migrationsDir = path.join(__dirname, 'db', 'migrations');
   await runMigrations(db, migrationsDir, dbDialect);
 
-  // 3b. Clean up orphaned internal sessions (sub-agents that didn't clean up)
+  // 3b. Auto-migrate SQLite → PostgreSQL (if conditions met)
+  // Must run BEFORE seed so migrated tenants/users prevent seed from creating new ones
+  if (dbDialect === 'postgres') {
+    const { autoMigrateSqliteToPg } = await import('./db/migrate-to-pg.js');
+    const migResult = await autoMigrateSqliteToPg(db, stateDir);
+    if (migResult.migrated) {
+      console.log(`  Migrated SQLite → PostgreSQL (${migResult.totalRows} rows)`);
+    }
+  }
+
+  // 3c. Clean up orphaned internal sessions (sub-agents that didn't clean up)
   try {
     const sessionRepo = new SessionRepository(db);
     const cleaned = await sessionRepo.cleanupOrphans();
@@ -109,7 +136,7 @@ async function main(): Promise<void> {
     }
   } catch { /* non-critical */ }
 
-  // 4. Seed database (first run)
+  // 4. Seed database (first run — skipped if migration populated tenants)
   const { apiKey, isFirstRun } = await seedDatabase(db);
   if (isFirstRun && apiKey) {
     console.log('\n' + '='.repeat(60));
@@ -402,6 +429,7 @@ async function main(): Promise<void> {
   await server.register(chatRoutes, { runner: createRunner });
   await server.register(registerWorkspaceRoutes);
   await server.register(registerSystemRoutes, { providerRegistry, secretsStore });
+  await server.register(registerDatabaseRoutes);
   await server.register(registerMediaRoutes, { mediaStore });
 
   // 13. Start cron scheduler
