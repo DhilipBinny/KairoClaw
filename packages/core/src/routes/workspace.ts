@@ -110,16 +110,25 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
         const scopeKey = d.name;
         const scopePath = path.join(scopesDir, scopeKey);
 
-        // UUID scope (no colon) → look up user name; channel:sender scope → parse
-        const isUUID = !scopeKey.includes(':');
+        // Detect scope type: UUID (user), group_*, or legacy channel:sender
+        const isGroup = scopeKey.startsWith('group_');
+        const isUUID = !scopeKey.includes(':') && !isGroup;
         let channel: string;
         let userId: string;
         let userName: string | null = null;
+        let scopeType: 'user' | 'group' | 'sender' = 'sender';
 
         if (isUUID) {
+          scopeType = 'user';
           channel = 'user';
           userId = scopeKey;
           userName = userNameMap.get(scopeKey) || null;
+        } else if (isGroup) {
+          scopeType = 'group';
+          // group_telegram_-1003319503773 → channel=telegram, id=-1003319503773
+          const parts = scopeKey.replace(/^group_/, '').split('_');
+          channel = parts[0] || 'unknown';
+          userId = parts.slice(1).join('_');
         } else {
           const parts = scopeKey.split(':');
           channel = parts[0] || 'unknown';
@@ -146,6 +155,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
 
         return {
           scopeKey,
+          scopeType,
           channel,
           userId,
           userName,

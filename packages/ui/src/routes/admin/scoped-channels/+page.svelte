@@ -72,7 +72,10 @@
             onclick={() => viewScope(scope.scopeKey)}
           >
             <div class="user-card-header">
-              {#if scope.userName}
+              {#if scope.scopeType === 'group'}
+                <span class="scope-badge group">Group</span>
+                <span class="channel-badge" style="color: {channelColor(scope.channel)}">{scope.channel}</span>
+              {:else if scope.userName}
                 <strong>{scope.userName}</strong>
               {:else}
                 <span class="channel-badge" style="color: {channelColor(scope.channel)}">
@@ -219,6 +222,16 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  .scope-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .scope-badge.group {
+    background: #dbeafe;
+    color: #2563eb;
   }
   .user-id {
     font-size: 13px;

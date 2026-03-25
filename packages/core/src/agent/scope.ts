@@ -52,6 +52,22 @@ export function deriveScopeKey(
 }
 
 /**
+ * Derive scope key for a group chat.
+ * Groups get their own memory scope: group:{channel}:{chatId}
+ * Returns null for non-group or non-scoped channels.
+ */
+export function deriveGroupScopeKey(
+  channel: string,
+  chatId: string,
+): string | null {
+  if (!SCOPED_CHANNELS.includes(channel)) return null;
+  // Sanitize chatId — remove the channel: prefix if present, block traversal
+  const raw = chatId.replace(/^(telegram|whatsapp):/, '');
+  if (!raw || /[/\\]|\.\./.test(raw)) return null;
+  return `group_${channel}_${raw.replace(/[^a-zA-Z0-9@._-]/g, '_')}`;
+}
+
+/**
  * Resolve a workspace file with scope cascading.
  *
  * - Global-only files: always workspace/{file}
@@ -112,8 +128,8 @@ export function ensureScopeDir(
 
   fs.mkdirSync(memoryDir, { recursive: true });
 
-  // Seed USER.md on first creation
-  if (isNew && senderInfo) {
+  // Seed USER.md on first creation (skip for group scopes — groups aren't a person)
+  if (isNew && senderInfo && !scopeKey.startsWith('group_')) {
     const userMd = path.join(scopeDir, 'USER.md');
     const channel = senderInfo.channel || (scopeKey.includes(':') ? scopeKey.split(':')[0] : 'web');
     const name = senderInfo.name || 'Unknown';
