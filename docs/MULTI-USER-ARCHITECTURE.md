@@ -94,7 +94,7 @@ Message arrives from Telegram/WhatsApp
   For GROUP messages:
         |
         v
-  chat_id contains ":-" or "@g.us"?
+  chat_id starts with "telegram:-" or contains "@g.us"?
         |
        (yes)
         v
@@ -107,43 +107,92 @@ Message arrives from Telegram/WhatsApp
 
 ### Directory Structure
 
+Scopes are keyed by **user UUID** — one directory per user, shared across all channels.
+When a user messages via Telegram, WhatsApp, or web, they all use the same scope.
+
 ```
-workspace/                            <-- config.agent.workspace
+/data/                                    <-- state directory (AGW_STATE_DIR)
+  +-- config.json                         <-- all configuration
+  +-- secrets.enc                         <-- encrypted API keys (AES-256-GCM)
+  +-- master.key                          <-- encryption master key (BACK UP!)
+  +-- gateway.db                          <-- SQLite database
+  +-- cron-jobs.json                      <-- scheduled tasks
+  +-- plugins.json                        <-- plugin config
+  +-- logs/                               <-- server-YYYY-MM-DD.log (7-day retention)
+  +-- whatsapp/                           <-- WhatsApp session auth files
+  +-- media/                              <-- uploaded PDFs, voice messages, images
   |
-  +-- IDENTITY.md                     <-- shared persona (protected, read-only for agent)
-  +-- SOUL.md                         <-- shared persona (protected)
-  +-- RULES.md                        <-- shared rules (protected)
-  +-- USER.md                         <-- global user profile (fallback for unscoped)
-  |
-  +-- documents/                      <-- shared writable space for all users
-  |     +-- report.pdf
-  |     +-- analysis.md
-  |
-  +-- media/                          <-- shared media (images, generated files)
-  |
-  +-- memory/                         <-- global memory (unscoped sessions)
-  |     +-- PROFILE.md
-  |     +-- sessions/
-  |
-  +-- scopes/                         <-- PER-USER scope directories
+  +-- workspace/                          <-- agent workspace (config.agent.workspace)
         |
-        +-- telegram:8606526093/      <-- Binny's scope (via Telegram)
-        |     +-- USER.md             <-- Binny's personal profile
-        |     +-- memory/
-        |           +-- PROFILE.md    <-- Binny's long-term memory
-        |           +-- sessions/
-        |                 +-- 2026-03-25.md
+        +-- IDENTITY.md                   <-- shared persona (protected, read-only for agent)
+        +-- SOUL.md                       <-- shared persona (protected)
+        +-- RULES.md                      <-- shared rules (protected)
+        +-- USER.md                       <-- global user profile (fallback for unscoped)
         |
-        +-- whatsapp:6580961895/      <-- Sruthi's scope (via WhatsApp)
-        |     +-- USER.md
-        |     +-- memory/
-        |           +-- PROFILE.md    <-- Sruthi's long-term memory
-        |           +-- sessions/
+        +-- documents/                    <-- shared writable space for all users
+        |     +-- report.pdf
+        |     +-- analysis.md
         |
-        +-- web:uuid-here/            <-- Web user's scope
-              +-- USER.md
-              +-- memory/
+        +-- media/                        <-- agent-generated images
+        |
+        +-- memory/                       <-- global memory (cron/system sessions only)
+        |     +-- PROFILE.md
+        |     +-- sessions/
+        |
+        +-- scopes/                       <-- PER-USER scope directories (by UUID)
+              |
+              +-- 675390be-.../           <-- Admin (Binny)
+              |     +-- USER.md           <-- personal profile
+              |     +-- memory/
+              |           +-- PROFILE.md  <-- long-term memory (all channels merged)
+              |           +-- sessions/
+              |                 +-- 2026-03-21.md
+              |                 +-- 2026-03-22.md
+              |                 +-- 2026-03-23.md
+              |
+              +-- 0ccce21b-.../           <-- Sruthi
+              |     +-- memory/
+              |           +-- PROFILE.md  <-- her memory (WhatsApp + any future channel)
+              |           +-- sessions/
+              |
+              +-- 85bd5d75-.../           <-- Bala
+              |     +-- USER.md
+              |     +-- memory/
+              |           +-- PROFILE.md  <-- merged from Telegram + WhatsApp
+              |           +-- sessions/
+              |
+              +-- telegram:9876543/       <-- unlinked sender (no user account yet)
+                    +-- USER.md           <-- auto-seeded on first message
+                    +-- memory/           <-- isolated until onboarded
 ```
+
+### How scope key is derived
+
+```
+Message arrives
+        |
+        v
+  User resolved via sender_links?
+        |
+        +-- YES: scopeKey = user UUID (e.g. "675390be-...")
+        |        One scope shared across all their channels.
+        |
+        +-- NO:  scopeKey = channel:senderId (e.g. "telegram:9876543")
+                 Temporary scope until they are onboarded as a user.
+                 On onboard: old channel:sender scope is merged into user UUID scope.
+```
+
+### Scope migration (automatic on startup)
+
+When a sender is linked to a user account, any existing `channel:senderId` scope
+directory is automatically merged into the user's UUID scope directory:
+
+- Memory PROFILE.md: newer file wins
+- Session files (2026-03-21.md): appended if different content
+- USER.md: newer wins
+- Old channel:sender directory is removed after merge
+
+This runs once on startup and is safe to run repeatedly (skips already-migrated dirs).
 
 ### Access Rules (scopedSafePath)
 
