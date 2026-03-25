@@ -69,7 +69,7 @@ export class ToolPermissionRepository {
     }
   }
 
-  async checkPermission(tenantId: string, role: string, toolName: string): Promise<'allow' | 'deny' | 'confirm'> {
+  async checkPermission(tenantId: string, role: string, toolName: string): Promise<'allow' | 'deny' | 'confirm' | 'power_user'> {
     const permissions = await this.listByTenantAndRole(tenantId, role);
 
     // Find all matching permissions and pick the most specific
@@ -89,6 +89,6 @@ export class ToolPermissionRepository {
     // No matching rule → allow (tools are allowed unless explicitly denied)
     if (!bestMatch) return 'allow';
 
-    return bestMatch.permission as 'allow' | 'deny' | 'confirm';
+    return bestMatch.permission as 'allow' | 'deny' | 'confirm' | 'power_user';
   }
 }

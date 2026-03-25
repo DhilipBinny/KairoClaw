@@ -13,7 +13,7 @@
   let toolsMeta: ToolMeta[] = $state([]);
 
   // Tool Permissions
-  const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file'];
+  const DEFAULT_POWER_USER_TOOLS = ['exec', 'manage_cron', 'write_file'];
   let allTools: Array<{ name: string; description: string }> = $state([]);
   let permRole = $state('user');
   let permMap: Record<string, string> = $state({}); // toolName → 'allow'|'deny'
@@ -29,11 +29,12 @@
         allTools = await getToolList();
       }
       const data = await getToolPermissions(permRole);
-      // Build map: start with all allowed, then override from DB rules
+      // Build map: start with defaults, then override from DB rules
       const map: Record<string, string> = {};
-      for (const t of allTools) map[t.name] = 'allow';
+      for (const t of allTools) {
+        map[t.name] = DEFAULT_POWER_USER_TOOLS.includes(t.name) ? 'power_user' : 'allow';
+      }
       for (const rule of data.rules) {
-        // Apply rules to matching tools
         for (const t of allTools) {
           const pat = rule.tool_pattern;
           if (pat === t.name || pat === '*' || (pat.endsWith('*') && t.name.startsWith(pat.slice(0, -1)))) {
@@ -50,9 +51,9 @@
     permSaving = true;
     permMsg = '';
     try {
-      // Only save tools that are explicitly set to deny (allow is the default)
+      // Save all non-allow rules (deny + power_user)
       const permissions = Object.entries(permMap)
-        .filter(([, perm]) => perm === 'deny')
+        .filter(([, perm]) => perm !== 'allow')
         .map(([toolPattern, permission]) => ({ toolPattern, permission }));
       await saveToolPermissions(permRole, permissions);
       permMsg = 'Saved';
@@ -811,23 +812,18 @@
         {:else if allTools.length > 0}
           <div class="perm-grid">
             {#each allTools as tool}
-              {@const isDangerous = DANGEROUS_TOOLS.includes(tool.name)}
               {@const isMcp = tool.name.startsWith('mcp__')}
-              <div class="perm-row" class:dangerous={isDangerous} class:mcp={isMcp}>
+              <div class="perm-row" class:mcp={isMcp}>
                 <div class="perm-tool">
                   <span class="perm-name">{tool.name}</span>
-                  {#if isDangerous}<span class="perm-badge danger">restricted</span>{/if}
                   {#if isMcp}<span class="perm-badge mcp">MCP</span>{/if}
                 </div>
                 <div class="perm-toggle">
-                  {#if isDangerous}
-                    <span class="perm-locked">Power User only</span>
-                  {:else}
-                    <select class="input input-sm" bind:value={permMap[tool.name]}>
-                      <option value="allow">Allow</option>
-                      <option value="deny">Deny</option>
-                    </select>
-                  {/if}
+                  <select class="input input-sm" bind:value={permMap[tool.name]}>
+                    <option value="allow">Allow</option>
+                    <option value="power_user">Power User only</option>
+                    <option value="deny">Deny</option>
+                  </select>
                 </div>
               </div>
             {/each}
@@ -1437,13 +1433,10 @@
     padding: 6px 10px; border-radius: var(--radius);
     background: var(--bg-surface); border: 1px solid var(--border-subtle);
   }
-  .perm-row.dangerous { opacity: 0.6; }
   .perm-tool { display: flex; align-items: center; gap: 8px; }
   .perm-name { font-size: 13px; font-family: var(--font-mono, monospace); }
   .perm-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
-  .perm-badge.danger { background: #fef3c7; color: #d97706; }
   .perm-badge.mcp { background: #dbeafe; color: #2563eb; }
-  .perm-toggle { min-width: 140px; text-align: right; }
-  .perm-locked { font-size: 11px; color: var(--text-muted); font-style: italic; }
+  .perm-toggle { min-width: 160px; text-align: right; }
   .input-sm { padding: 3px 8px; font-size: 12px; }
 </style>

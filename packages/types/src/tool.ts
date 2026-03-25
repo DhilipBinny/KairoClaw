@@ -80,7 +80,7 @@ export interface ToolExecutionContext {
 }
 
 /** Permission level for a tool. */
-export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm';
+export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm' | 'power_user';
 
 /**
  * A permission rule controlling tool access.
