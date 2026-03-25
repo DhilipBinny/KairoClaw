@@ -47,7 +47,7 @@ export function safePath(p: string | undefined, baseDir: string): string {
 
   const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(baseDir, p);
   const workspace = path.resolve(baseDir);
-  const allowed = [workspace, '/tmp/kairo'];
+  const allowed = [workspace, '/tmp'];
 
   const isAllowed = allowed.some(root =>
     resolved === root || resolved.startsWith(root + path.sep)
