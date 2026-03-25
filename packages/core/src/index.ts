@@ -300,7 +300,7 @@ async function main(): Promise<void> {
     }
     // Group sessions must never be owned by a single user — multiple people share them.
     // resolvedUser is still used for per-request permission checking (AgentContext.user).
-    const isGroupChat = chatIdStr.includes(':-') || chatIdStr.includes('@g.us');
+    const isGroupChat = chatIdStr.startsWith('telegram:-') || chatIdStr.includes('@g.us');
     validUserId = isGroupChat ? undefined : resolvedUser?.id;
 
     const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
@@ -343,7 +343,10 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
-      user: resolvedUser ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated } : undefined,
+      // System/cron/unlinked sessions get admin context so they can use all tools + access all paths
+      user: resolvedUser
+        ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated }
+        : { id: 'system', role: 'admin', elevated: true },
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       tools: await toolRegistry.getDefinitions({

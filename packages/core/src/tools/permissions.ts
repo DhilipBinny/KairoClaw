@@ -6,7 +6,7 @@ import { ToolPermissionRepository } from '../db/repositories/tool-permission.js'
  * Tools that require admin or elevated access.
  * Non-admin, non-elevated users are denied these tools.
  */
-const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file', 'delete_file'];
+const DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file'];
 
 /**
  * Check whether a tool is allowed for a given user.

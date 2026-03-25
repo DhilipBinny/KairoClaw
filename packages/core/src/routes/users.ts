@@ -380,7 +380,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     const repo = new ToolPermissionRepository(db);
     const existing = await repo.listByTenantAndRole(tenantId, role);
     for (const rule of existing) {
-      await repo.delete(rule.id);
+      await repo.delete(rule.id, tenantId);
     }
 
     for (const p of permissions) {
