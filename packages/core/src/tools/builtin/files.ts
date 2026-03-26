@@ -189,7 +189,12 @@ export const fileTools: ToolRegistration[] = [
       }
 
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, fileContent);
+      try {
+        fs.writeFileSync(filePath, fileContent);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { error: `Failed to write file: ${msg}` };
+      }
       const savedPath = path.relative(workspace, filePath);
       return { success: true, path: savedPath, bytes: contentSize, ...(note ? { note } : {}) };
     },
@@ -228,7 +233,12 @@ export const fileTools: ToolRegistration[] = [
         return { error: 'old_string not found in file. Make sure it matches exactly.' };
       }
       content = content.replace(oldStr, newStr);
-      fs.writeFileSync(filePath, content);
+      try {
+        fs.writeFileSync(filePath, content);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return { error: `Failed to write file: ${msg}` };
+      }
       return { success: true, path: args.path };
     },
     source: 'builtin',

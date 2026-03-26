@@ -62,6 +62,11 @@ export class SecretsStore {
     return this.encrypted;
   }
 
+  /** True if decrypt failed — store is returning empty data and refusing writes. */
+  get isDegraded(): boolean {
+    return this.decryptFailed;
+  }
+
   // ── Migration ──────────────────────────────────────────────
 
   /**
@@ -165,9 +170,12 @@ export class SecretsStore {
 
   private _loadPlaintext(): Record<string, Record<string, string>> {
     try {
+      if (!fs.existsSync(this.plaintextPath)) return {};
       const raw = fs.readFileSync(this.plaintextPath, 'utf8');
       return JSON.parse(raw) as Record<string, Record<string, string>>;
-    } catch {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[secrets] Failed to load plaintext secrets: ${msg}`);
       return {};
     }
   }
@@ -186,14 +194,24 @@ export class SecretsStore {
   }
 
   private _saveEncrypted(): void {
-    const store = encryptStore(this.data || {}, this.kek!);
-    writeEncryptedStore(this.encryptedPath, store);
+    try {
+      const store = encryptStore(this.data || {}, this.kek!);
+      writeEncryptedStore(this.encryptedPath, store);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[secrets] Failed to save encrypted secrets: ${msg}`);
+    }
   }
 
   private _savePlaintext(): void {
-    const dir = path.dirname(this.plaintextPath);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.plaintextPath, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+    try {
+      const dir = path.dirname(this.plaintextPath);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(this.plaintextPath, JSON.stringify(this.data, null, 2), { mode: 0o600 });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[secrets] Failed to save plaintext secrets: ${msg}`);
+    }
   }
 
   // ── Generic access ──────────────────────────────────────
