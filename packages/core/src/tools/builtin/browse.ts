@@ -19,82 +19,120 @@ const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB
 
 /**
- * Get page snapshot — extracts readable content + interactive elements with descriptions.
- * Uses DOM evaluation to build a text representation the LLM can work with.
+ * Get page snapshot — two-pass approach:
+ * 1. Direct query ALL interactive elements (inputs, buttons, links, selects)
+ * 2. Extract page text content (headings, paragraphs) for context
+ * This never misses elements regardless of DOM nesting depth.
  */
 async function getSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise<string> {
   try {
     const snapshot = await page.evaluate(() => {
-      const lines: string[] = [];
-      const INTERACTIVE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'DETAILS', 'SUMMARY']);
-      const BLOCK = new Set(['DIV', 'P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TR', 'SECTION', 'ARTICLE', 'HEADER', 'FOOTER', 'NAV', 'MAIN', 'FORM', 'TABLE', 'THEAD', 'TBODY', 'BLOCKQUOTE', 'PRE', 'UL', 'OL', 'DL']);
+      const sections: string[] = [];
 
-      function walk(el: Element, depth: number) {
-        if (depth > 15) return; // prevent infinite recursion
-        const tag = el.tagName;
+      // ── Pass 1: All interactive elements (direct query, no tree walking) ──
+      const interactive: string[] = [];
+      const seen = new Set<Element>();
+
+      function describeElement(el: Element): string | null {
+        if (seen.has(el)) return null;
+        seen.add(el);
         const style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.visibility === 'hidden') return;
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return null;
+        // Skip tiny/invisible elements
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return null;
 
-        const indent = '  '.repeat(Math.min(depth, 8));
+        const tag = el.tagName;
+        const name = el.getAttribute('aria-label')
+          || el.getAttribute('title')
+          || el.getAttribute('placeholder')
+          || el.getAttribute('alt')
+          || el.textContent?.trim().slice(0, 80)
+          || '';
+        if (!name) return null;
 
-        if (INTERACTIVE.has(tag)) {
-          const role = el.getAttribute('role') || tag.toLowerCase();
-          const name = el.getAttribute('aria-label')
-            || el.getAttribute('title')
-            || el.getAttribute('placeholder')
-            || el.textContent?.trim().slice(0, 80)
-            || '';
-          let desc = `${indent}[${role}] "${name}"`;
-
-          if (tag === 'INPUT') {
-            const input = el as HTMLInputElement;
-            const type = input.type || 'text';
-            desc = `${indent}[input type=${type}] "${name}"`;
-            if (input.value) desc += ` value="${input.value.slice(0, 50)}"`;
-          } else if (tag === 'SELECT') {
-            const select = el as HTMLSelectElement;
-            desc = `${indent}[select] "${name}"`;
-            if (select.value) desc += ` value="${select.value}"`;
-            const options = Array.from(select.options).map(o => o.text.trim()).slice(0, 5);
-            if (options.length > 0) desc += ` options=[${options.join(', ')}]`;
-          } else if (tag === 'TEXTAREA') {
-            const ta = el as HTMLTextAreaElement;
-            desc = `${indent}[textarea] "${name}"`;
-            if (ta.value) desc += ` value="${ta.value.slice(0, 50)}"`;
-          } else if (tag === 'A') {
-            desc = `${indent}[link] "${name}"`;
-          }
-
-          if ((el as HTMLInputElement).disabled) desc += ' [disabled]';
-          if ((el as HTMLInputElement).required) desc += ' [required]';
-          if (el.getAttribute('aria-checked') === 'true' || (el as HTMLInputElement).checked) desc += ' [checked]';
-          lines.push(desc);
-          return; // don't recurse into interactive elements
+        if (tag === 'INPUT') {
+          const input = el as HTMLInputElement;
+          if (input.type === 'hidden') return null;
+          let desc = `[input type=${input.type || 'text'}] "${name}"`;
+          if (input.value) desc += ` value="${input.value.slice(0, 50)}"`;
+          if (input.disabled) desc += ' [disabled]';
+          if (input.required) desc += ' [required]';
+          return desc;
         }
-
-        // Block elements: show heading/text content
-        if (BLOCK.has(tag)) {
-          const heading = tag.match(/^H(\d)$/);
-          if (heading) {
-            const text = el.textContent?.trim().slice(0, 120) || '';
-            if (text) lines.push(`${indent}[h${heading[1]}] ${text}`);
-            return;
-          }
-          if (tag === 'P' || tag === 'BLOCKQUOTE' || tag === 'PRE') {
-            const text = el.textContent?.trim().slice(0, 200) || '';
-            if (text) lines.push(`${indent}${text}`);
-            return;
-          }
+        if (tag === 'TEXTAREA') {
+          const ta = el as HTMLTextAreaElement;
+          let desc = `[textarea] "${name}"`;
+          if (ta.value) desc += ` value="${ta.value.slice(0, 50)}"`;
+          return desc;
         }
-
-        // Recurse into children
-        for (const child of el.children) {
-          walk(child, depth + (BLOCK.has(tag) ? 1 : 0));
+        if (tag === 'SELECT') {
+          const select = el as HTMLSelectElement;
+          let desc = `[select] "${name}"`;
+          if (select.value) desc += ` value="${select.value}"`;
+          const opts = Array.from(select.options).map(o => o.text.trim()).slice(0, 5);
+          if (opts.length) desc += ` options=[${opts.join(', ')}]`;
+          return desc;
         }
+        if (tag === 'BUTTON' || el.getAttribute('role') === 'button') {
+          return `[button] "${name}"`;
+        }
+        if (tag === 'A') {
+          return `[link] "${name}"`;
+        }
+        // Elements with click handlers or role
+        const role = el.getAttribute('role');
+        if (role && ['tab', 'menuitem', 'option', 'switch', 'checkbox', 'radio'].includes(role)) {
+          let desc = `[${role}] "${name}"`;
+          if (el.getAttribute('aria-checked') === 'true') desc += ' [checked]';
+          if (el.getAttribute('aria-selected') === 'true') desc += ' [selected]';
+          return desc;
+        }
+        return null;
       }
 
-      walk(document.body, 0);
-      return lines.join('\n');
+      // Query all interactive elements at once — no depth limit issues
+      const elements = document.querySelectorAll(
+        'input, textarea, select, button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="combobox"], [role="searchbox"]'
+      );
+      for (const el of elements) {
+        const desc = describeElement(el);
+        if (desc) interactive.push(desc);
+        if (interactive.length >= 100) break; // cap to prevent token explosion
+      }
+
+      if (interactive.length > 0) {
+        sections.push('INTERACTIVE ELEMENTS:\n' + interactive.join('\n'));
+      }
+
+      // ── Pass 2: Page text content (headings + key text) ──
+      const content: string[] = [];
+
+      // Headings
+      const headings = document.querySelectorAll('h1, h2, h3, h4');
+      for (const h of headings) {
+        const text = h.textContent?.trim().slice(0, 150);
+        if (text) content.push(`[${h.tagName.toLowerCase()}] ${text}`);
+        if (content.length >= 20) break;
+      }
+
+      // Key text: paragraphs, list items, table cells with prices/data
+      const textNodes = document.querySelectorAll('p, li, td, th, span[class*="price"], span[class*="Price"], [data-price], .a-price, .a-offscreen');
+      for (const el of textNodes) {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const text = el.textContent?.trim().slice(0, 200);
+        if (text && text.length > 5) {
+          content.push(text);
+        }
+        if (content.length >= 80) break;
+      }
+
+      if (content.length > 0) {
+        sections.push('PAGE CONTENT:\n' + content.join('\n'));
+      }
+
+      return sections.join('\n\n');
     });
 
     if (!snapshot || snapshot.trim().length === 0) {
@@ -240,8 +278,8 @@ ACTIONS:
             }
 
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-            // Wait a bit for JS to render
-            await page.waitForTimeout(1000);
+            // Wait for JS rendering — try networkidle, fallback to timeout
+            await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
             const snapshot = await getSnapshot(page);
             return {
               success: true,
@@ -277,7 +315,7 @@ ACTIONS:
               return { error: `Could not find or click element: "${element}". Take a fresh snapshot to see current page elements.` };
             }
 
-            await page.waitForTimeout(1000);
+            await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
             const snapshot = await getSnapshot(page);
             return { success: true, url: page.url(), title: await page.title(), snapshot };
           }
@@ -308,7 +346,7 @@ ACTIONS:
 
             if (args.submit) {
               await page.keyboard.press('Enter');
-              await page.waitForTimeout(1500);
+              await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
               const snapshot = await getSnapshot(page);
               return { success: true, url: page.url(), title: await page.title(), snapshot };
             }
@@ -323,7 +361,7 @@ ACTIONS:
             await page.keyboard.press(key);
             const navKeys = ['Enter', 'Tab', 'Escape'];
             if (navKeys.includes(key)) {
-              await page.waitForTimeout(1000);
+              await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
               const snapshot = await getSnapshot(page);
               return { success: true, key, url: page.url(), snapshot };
             }
@@ -466,7 +504,7 @@ ACTIONS:
           // ── Back ───────────────────────────────
           case 'back': {
             await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
-            await page.waitForTimeout(1000);
+            await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
             const snapshot = await getSnapshot(page);
             return { success: true, url: page.url(), title: await page.title(), snapshot };
           }
