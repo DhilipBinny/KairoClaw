@@ -78,11 +78,12 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/sessions/:id — get session with messages
   app.get('/api/v1/sessions/:id', async (request, reply) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
 
-    const session = await sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check: non-admin users can only access their own sessions
@@ -97,11 +98,12 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // PATCH /api/v1/sessions/:id — update session (rename)
   app.patch('/api/v1/sessions/:id', async (request, reply) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
     const { title } = request.body as { title?: string };
     const sessionRepo = new SessionRepository(db);
 
-    const session = await sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check
@@ -122,11 +124,12 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/sessions/:id/messages/:messageId — delete a specific message
   app.delete('/api/v1/sessions/:id/messages/:messageId', async (request, reply) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
+    const tenantId = request.tenantId || 'default';
     const { id, messageId } = request.params as { id: string; messageId: string };
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
 
-    const session = await sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check
@@ -150,10 +153,11 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/sessions/:id — delete session
   app.delete('/api/v1/sessions/:id', async (request, reply) => {
     const db = (request as any).ctx.db as DatabaseAdapter;
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
 
-    const session = await sessionRepo.getById(id);
+    const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
 
     // Ownership check: only session owner or admin can delete
