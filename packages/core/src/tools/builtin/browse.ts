@@ -4,111 +4,132 @@
  * Uses Playwright with system Chromium. Single tool with action discriminator.
  * Flat schema compatible with all LLM providers (no anyOf/oneOf).
  *
- * Accessibility-ref-based interaction: the LLM reads a text snapshot
- * with numbered refs and uses those refs to click/type/select.
+ * Numbered-ref interaction: the snapshot assigns [ref=N] to each interactive
+ * element. The LLM uses ref numbers to click/type/select — no ambiguity.
  */
 
 import path from 'node:path';
 import fs from 'node:fs';
-import type { Page } from 'playwright-core';
+import type { Page, Locator } from 'playwright-core';
 import type { ToolRegistration } from '../types.js';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_INTERACTIVE_ELEMENTS = 100;
+
+// ── Blocked resource domains (ads, trackers) ────────────────
+const BLOCKED_DOMAINS = new Set([
+  'doubleclick.net', 'googlesyndication.com', 'google-analytics.com',
+  'googletagmanager.com', 'facebook.net', 'fbcdn.net',
+  'amazon-adsystem.com', 'adsystem.com', 'adnxs.com',
+  'criteo.com', 'outbrain.com', 'taboola.com',
+  'hotjar.com', 'fullstory.com', 'mixpanel.com',
+  'segment.io', 'sentry.io',
+]);
+const BLOCKED_RESOURCE_TYPES = new Set(['font', 'media']);
+
+/** Check if a URL should be blocked for performance. */
+export function shouldBlockResource(url: string, resourceType: string): boolean {
+  if (BLOCKED_RESOURCE_TYPES.has(resourceType)) return true;
+  try {
+    const hostname = new URL(url).hostname;
+    for (const domain of BLOCKED_DOMAINS) {
+      if (hostname === domain || hostname.endsWith('.' + domain)) return true;
+    }
+  } catch { /* invalid URL */ }
+  return false;
+}
+
+// ── Snapshot with numbered refs ─────────────────────────────
+
+interface SnapshotResult {
+  text: string;
+  refMap: Map<number, string>; // ref → unique CSS selector
+}
 
 /**
- * Get page snapshot — two-pass approach:
- * 1. Direct query ALL interactive elements (inputs, buttons, links, selects)
- * 2. Extract page text content (headings, paragraphs) for context
- * This never misses elements regardless of DOM nesting depth.
+ * Build page snapshot with numbered refs for interactive elements.
+ * Injects data-kc-ref attributes, builds ref→selector map.
  */
-async function getSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise<string> {
+async function buildSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise<SnapshotResult> {
+  const refMap = new Map<number, string>();
+
   try {
-    const snapshot = await page.evaluate(() => {
-      const sections: string[] = [];
-
-      // ── Pass 1: All interactive elements (direct query, no tree walking) ──
-      const interactive: string[] = [];
+    const data = await page.evaluate((maxElements: number) => {
+      const interactive: Array<{ ref: number; desc: string; selector: string }> = [];
+      const content: string[] = [];
       const seen = new Set<Element>();
+      let nextRef = 1;
 
-      function describeElement(el: Element): string | null {
-        if (seen.has(el)) return null;
+      // ── Pass 1: All interactive elements with numbered refs ──
+      const elements = document.querySelectorAll(
+        'input, textarea, select, button, a[href], [role="button"], [role="tab"], ' +
+        '[role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], ' +
+        '[role="combobox"], [role="searchbox"], [role="option"]'
+      );
+
+      for (const el of elements) {
+        if (seen.has(el) || interactive.length >= maxElements) break;
         seen.add(el);
+
         const style = window.getComputedStyle(el);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return null;
-        // Skip tiny/invisible elements
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
         const rect = el.getBoundingClientRect();
-        if (rect.width < 2 || rect.height < 2) return null;
+        if (rect.width < 2 || rect.height < 2) continue;
 
         const tag = el.tagName;
         const name = el.getAttribute('aria-label')
           || el.getAttribute('title')
           || el.getAttribute('placeholder')
           || el.getAttribute('alt')
-          || el.textContent?.trim().slice(0, 80)
+          || el.textContent?.trim().slice(0, 60)
           || '';
-        if (!name) return null;
+        if (!name && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') continue;
 
+        const ref = nextRef++;
+
+        // Set data attribute for later locating
+        el.setAttribute('data-kc-ref', String(ref));
+
+        // Build unique selector
+        const selector = `[data-kc-ref="${ref}"]`;
+
+        // Build description
+        let desc: string;
         if (tag === 'INPUT') {
           const input = el as HTMLInputElement;
-          if (input.type === 'hidden') return null;
-          let desc = `[input type=${input.type || 'text'}] "${name}"`;
-          if (input.value) desc += ` value="${input.value.slice(0, 50)}"`;
+          if (input.type === 'hidden') { nextRef--; continue; }
+          desc = `[ref=${ref}] [input type=${input.type || 'text'}] "${name}"`;
+          if (input.value) desc += ` value="${input.value.slice(0, 40)}"`;
           if (input.disabled) desc += ' [disabled]';
           if (input.required) desc += ' [required]';
-          return desc;
-        }
-        if (tag === 'TEXTAREA') {
-          const ta = el as HTMLTextAreaElement;
-          let desc = `[textarea] "${name}"`;
-          if (ta.value) desc += ` value="${ta.value.slice(0, 50)}"`;
-          return desc;
-        }
-        if (tag === 'SELECT') {
+        } else if (tag === 'TEXTAREA') {
+          desc = `[ref=${ref}] [textarea] "${name}"`;
+          const val = (el as HTMLTextAreaElement).value;
+          if (val) desc += ` value="${val.slice(0, 40)}"`;
+        } else if (tag === 'SELECT') {
           const select = el as HTMLSelectElement;
-          let desc = `[select] "${name}"`;
+          desc = `[ref=${ref}] [select] "${name}"`;
           if (select.value) desc += ` value="${select.value}"`;
           const opts = Array.from(select.options).map(o => o.text.trim()).slice(0, 5);
           if (opts.length) desc += ` options=[${opts.join(', ')}]`;
-          return desc;
-        }
-        if (tag === 'BUTTON' || el.getAttribute('role') === 'button') {
-          return `[button] "${name}"`;
-        }
-        if (tag === 'A') {
-          return `[link] "${name}"`;
-        }
-        // Elements with click handlers or role
-        const role = el.getAttribute('role');
-        if (role && ['tab', 'menuitem', 'option', 'switch', 'checkbox', 'radio'].includes(role)) {
-          let desc = `[${role}] "${name}"`;
+        } else if (tag === 'A') {
+          desc = `[ref=${ref}] [link] "${name}"`;
+        } else if (tag === 'BUTTON' || el.getAttribute('role') === 'button') {
+          desc = `[ref=${ref}] [button] "${name}"`;
+        } else {
+          const role = el.getAttribute('role') || tag.toLowerCase();
+          desc = `[ref=${ref}] [${role}] "${name}"`;
           if (el.getAttribute('aria-checked') === 'true') desc += ' [checked]';
           if (el.getAttribute('aria-selected') === 'true') desc += ' [selected]';
-          return desc;
         }
-        return null;
+
+        interactive.push({ ref, desc, selector });
       }
 
-      // Query all interactive elements at once — no depth limit issues
-      const elements = document.querySelectorAll(
-        'input, textarea, select, button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="combobox"], [role="searchbox"]'
-      );
-      for (const el of elements) {
-        const desc = describeElement(el);
-        if (desc) interactive.push(desc);
-        if (interactive.length >= 100) break; // cap to prevent token explosion
-      }
-
-      if (interactive.length > 0) {
-        sections.push('INTERACTIVE ELEMENTS:\n' + interactive.join('\n'));
-      }
-
-      // ── Pass 2: Page text content (headings + key text) ──
-      const content: string[] = [];
-
-      // Headings
+      // ── Pass 2: Page text content ──
       const headings = document.querySelectorAll('h1, h2, h3, h4');
       for (const h of headings) {
         const text = h.textContent?.trim().slice(0, 150);
@@ -116,91 +137,138 @@ async function getSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise<s
         if (content.length >= 20) break;
       }
 
-      // Key text: paragraphs, list items, table cells with prices/data
-      const textNodes = document.querySelectorAll('p, li, td, th, span[class*="price"], span[class*="Price"], [data-price], .a-price, .a-offscreen');
+      const textNodes = document.querySelectorAll(
+        'p, li, td, th, span[class*="price"], span[class*="Price"], ' +
+        '[data-price], .a-price, .a-offscreen, .a-color-price'
+      );
+      const maxContent = 80;
       for (const el of textNodes) {
+        if (content.length >= maxContent) break;
         const style = window.getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
         const text = el.textContent?.trim().slice(0, 200);
-        if (text && text.length > 5) {
-          content.push(text);
-        }
-        if (content.length >= 80) break;
+        if (text && text.length > 3) content.push(text);
       }
 
-      if (content.length > 0) {
-        sections.push('PAGE CONTENT:\n' + content.join('\n'));
-      }
+      return { interactive, content };
+    }, MAX_INTERACTIVE_ELEMENTS);
 
-      return sections.join('\n\n');
-    });
+    // Build ref map (server-side)
+    for (const item of data.interactive) {
+      refMap.set(item.ref, item.selector);
+    }
 
-    if (!snapshot || snapshot.trim().length === 0) {
-      return '[Empty page — no visible content]';
+    // Build text output
+    const sections: string[] = [];
+    if (data.interactive.length > 0) {
+      sections.push('INTERACTIVE ELEMENTS:\n' + data.interactive.map(i => i.desc).join('\n'));
     }
-    if (snapshot.length > maxChars) {
-      return snapshot.slice(0, maxChars) + '\n[...TRUNCATED — page content exceeds limit]';
+    if (data.content.length > 0) {
+      sections.push('PAGE CONTENT:\n' + data.content.join('\n'));
     }
-    return snapshot;
+
+    let text = sections.join('\n\n');
+    if (!text.trim()) text = '[Empty page — no visible content]';
+    if (text.length > maxChars) {
+      text = text.slice(0, maxChars) + '\n[...TRUNCATED]';
+    }
+
+    return { text, refMap };
   } catch {
-    try {
-      const text = await page.textContent('body');
-      const trimmed = (text || '').trim().slice(0, maxChars);
-      return trimmed || '[Empty page]';
-    } catch {
-      return '[Failed to read page content]';
-    }
+    return { text: '[Failed to read page content]', refMap };
   }
 }
 
-/** Find element by ref-like approach: use accessibility snapshot to build a selector map. */
-async function findElementByText(page: Page, text: string): Promise<string | null> {
-  // Try common patterns: button, link, input by accessible name
-  for (const role of ['button', 'link', 'textbox', 'checkbox', 'radio', 'combobox', 'menuitem']) {
-    const locator = page.getByRole(role as any, { name: text, exact: false });
-    if (await locator.count() > 0) {
-      return `role=${role}[name="${text}"]`;
+/** Resolve a ref number or text description to a Playwright Locator. */
+async function resolveElement(
+  page: Page,
+  refMap: Map<number, string>,
+  ref?: number | string,
+  element?: string,
+): Promise<Locator> {
+  // Try ref number first
+  const refNum = typeof ref === 'number' ? ref : (typeof ref === 'string' ? parseInt(ref) : NaN);
+  if (!isNaN(refNum)) {
+    const selector = refMap.get(refNum);
+    if (selector) {
+      const loc = page.locator(selector);
+      if (await loc.count() > 0) return loc.first();
     }
+    throw new Error(`Element ref=${refNum} not found. Take a fresh snapshot to get updated refs.`);
   }
-  // Fallback: text content
-  const locator = page.getByText(text, { exact: false });
-  if (await locator.count() > 0) return `text="${text}"`;
-  return null;
+
+  // Fallback: text-based search
+  if (element) {
+    // Try role-based matching
+    for (const role of ['button', 'link', 'textbox', 'checkbox', 'radio', 'combobox', 'menuitem'] as const) {
+      const loc = page.getByRole(role, { name: element, exact: false });
+      if (await loc.count() > 0) return loc.first();
+    }
+    // Try text matching
+    const textLoc = page.getByText(element, { exact: false });
+    if (await textLoc.count() > 0) return textLoc.first();
+    // Try placeholder
+    const placeholderLoc = page.getByPlaceholder(element, { exact: false });
+    if (await placeholderLoc.count() > 0) return placeholderLoc.first();
+    // Try label
+    const labelLoc = page.getByLabel(element, { exact: false });
+    if (await labelLoc.count() > 0) return labelLoc.first();
+
+    throw new Error(`Element "${element}" not found. Take a fresh snapshot to see current elements.`);
+  }
+
+  throw new Error('Either ref (number) or element (text) is required.');
 }
+
+/** Resolve element with auto-retry: wait 2s for lazy content, re-try once. */
+async function resolveWithRetry(
+  page: Page,
+  refMap: Map<number, string>,
+  ref?: number | string,
+  element?: string,
+): Promise<Locator> {
+  try {
+    return await resolveElement(page, refMap, ref, element);
+  } catch {
+    // Auto-retry: wait for content to load, try again
+    await page.waitForTimeout(2000);
+    return await resolveElement(page, refMap, ref, element);
+  }
+}
+
+// ── Tool definition ─────────────────────────────────────────
 
 export const browseTools: ToolRegistration[] = [
   {
     definition: {
       name: 'browse',
-      description: `Browse and interact with web pages using a real browser. Returns an accessibility snapshot (text representation of the page with element descriptions).
+      description: `Browse and interact with web pages using a real browser with JavaScript rendering.
 
 WORKFLOW:
-1. Use action="navigate" to go to a URL
-2. Read the returned snapshot to understand the page structure
-3. Use click/type/select with element text descriptions from the snapshot
-4. After navigation or interactions, a fresh snapshot is auto-returned
+1. navigate to a URL → returns page snapshot with numbered [ref=N] elements
+2. Use ref numbers to interact: click(ref=3), type(ref=5, text="hello")
+3. Every action that changes the page auto-returns a fresh snapshot with new refs
 
 RULES:
-- Use the element descriptions from the snapshot to target elements
-- For forms with multiple fields, use action="fill" to fill all at once
-- Use action="screenshot" only for visual verification, not for finding elements
-- If an action fails, take a fresh snapshot before retrying
+- ALWAYS use ref numbers from the LATEST snapshot. Refs become invalid after page changes.
+- For forms, prefer fill action with multiple {ref, value} pairs at once.
+- Use screenshot only for visual verification, not for finding elements.
 
 ACTIONS:
-- navigate: Go to URL. Returns snapshot. Params: url (required)
-- click: Click element. Params: element (required — text/name from snapshot)
-- type: Type into input. Params: element (required), text (required), submit (optional — press Enter after)
-- press: Press keyboard key. Params: key (required — e.g. "Enter", "Tab", "Escape")
-- select: Select dropdown option. Params: element (required), value (required)
-- fill: Fill multiple form fields. Params: fields (required — array of {element, value})
-- snapshot: Get current page content. No params needed.
-- screenshot: Capture page image. Params: fullPage (optional)
-- wait: Wait for condition. Params: text (wait for text), url (wait for URL pattern), timeMs (wait duration)
-- scroll: Scroll page. Params: direction ("up" or "down")
-- back: Navigate back in history
-- tabs: List open tabs
-- hover: Hover element. Params: element (required)
-- close: End browser session`,
+- navigate: Go to URL. Params: url (required). Returns snapshot.
+- click: Click element. Params: ref (required). Returns snapshot.
+- type: Type into input. Params: ref (required), text (required), submit (optional — press Enter after).
+- press: Press key. Params: key (required, e.g. "Enter", "Tab", "Escape").
+- select: Select option. Params: ref (required), value (required).
+- fill: Fill multiple fields. Params: fields (required — [{ref, value}]).
+- snapshot: Get current page with refs.
+- screenshot: Capture page image.
+- wait: Wait for condition. Params: text, url, or timeMs.
+- scroll: Params: direction ("up"/"down").
+- back: Navigate back.
+- tabs: List open tabs.
+- hover: Params: ref (required).
+- close: End browser session.`,
       parameters: {
         type: 'object',
         properties: {
@@ -210,25 +278,26 @@ ACTIONS:
             description: 'The browser action to perform',
           },
           url: { type: 'string', description: 'URL to navigate to (for navigate action)' },
-          element: { type: 'string', description: 'Element description/name from snapshot (for click/type/select/hover)' },
+          ref: { type: 'number', description: 'Element ref number from snapshot (for click/type/select/hover)' },
+          element: { type: 'string', description: 'Element text/name fallback if ref not available (for click/type/select/hover)' },
           text: { type: 'string', description: 'Text to type (for type action) or text to wait for (for wait action)' },
-          key: { type: 'string', description: 'Keyboard key to press (for press action). E.g. "Enter", "Tab", "Escape", "ArrowDown"' },
+          key: { type: 'string', description: 'Key to press (e.g. "Enter", "Tab", "Escape", "ArrowDown")' },
           value: { type: 'string', description: 'Value to select (for select action)' },
           fields: {
             type: 'array',
-            description: 'Array of {element, value} objects for batch form fill',
+            description: 'Array of {ref, value} for batch form fill',
             items: {
               type: 'object',
               properties: {
-                element: { type: 'string', description: 'Element description/name' },
+                ref: { type: 'number', description: 'Element ref number' },
                 value: { type: 'string', description: 'Value to fill' },
               },
             },
           },
           submit: { type: 'boolean', description: 'Press Enter after typing (for type action)' },
           direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction' },
-          fullPage: { type: 'boolean', description: 'Capture full page screenshot (default: viewport only)' },
-          timeMs: { type: 'number', description: 'Wait duration in ms (for wait action)' },
+          fullPage: { type: 'boolean', description: 'Full page screenshot' },
+          timeMs: { type: 'number', description: 'Wait duration in ms' },
         },
         required: ['action'],
       },
@@ -240,211 +309,120 @@ ACTIONS:
       const ctx = context as Record<string, unknown>;
       const browserManager = ctx.browserManager as BrowserSessionManager | undefined;
       if (!browserManager) {
-        return { error: 'Browser not available. The browse tool requires Chromium to be installed.' };
+        return { error: 'Browser not available. Chromium may not be installed.' };
       }
 
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
       const workspace = (ctx.workspace as string) || process.cwd();
 
-      // Close action doesn't need a session
       if (action === 'close') {
         await browserManager.closeSession(userId);
         return { success: true, message: 'Browser session closed' };
       }
 
-      // Get or create browser session
       let page: Page;
       try {
         const session = await browserManager.getSession(userId);
         page = session.page;
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return { error: `Failed to start browser: ${msg}. Chromium may not be installed.` };
+        return { error: `Failed to start browser: ${e instanceof Error ? e.message : String(e)}` };
       }
+
+      // Helper: take snapshot + update ref map
+      async function snap(): Promise<{ url: string; title: string; snapshot: string }> {
+        const result = await buildSnapshot(page);
+        browserManager!.setRefMap(userId, result.refMap);
+        return { url: page.url(), title: await page.title(), snapshot: result.text };
+      }
+
+      const refMap = browserManager.getRefMap(userId);
 
       try {
         switch (action) {
-          // ── Navigate ───────────────────────────
           case 'navigate': {
             const url = args.url as string;
             if (!url) return { error: 'url is required for navigate action' };
-
-            // SSRF check
             try {
               const parsed = validateFetchUrl(url);
               await validateResolvedIP(parsed.hostname);
             } catch (e: unknown) {
               return { error: `Blocked: ${e instanceof Error ? e.message : String(e)}` };
             }
-
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-            // Wait for JS rendering — try networkidle, fallback to timeout
             await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-            const snapshot = await getSnapshot(page);
-            return {
-              success: true,
-              url: page.url(),
-              title: await page.title(),
-              snapshot,
-            };
+            return { success: true, ...(await snap()) };
           }
 
-          // ── Click ──────────────────────────────
           case 'click': {
-            const element = args.element as string;
-            if (!element) return { error: 'element is required for click. Use a description from the snapshot.' };
-
-            // Try to find and click the element
-            try {
-              // Try getByRole first (most reliable)
-              const selector = await findElementByText(page, element);
-              if (selector) {
-                if (selector.startsWith('role=')) {
-                  const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
-                  if (match) {
-                    await page.getByRole(match[1] as any, { name: match[2] }).first().click({ timeout: 10_000 });
-                  }
-                } else if (selector.startsWith('text=')) {
-                  await page.getByText(element, { exact: false }).first().click({ timeout: 10_000 });
-                }
-              } else {
-                // Last resort: try as CSS selector
-                await page.click(element, { timeout: 10_000 });
-              }
-            } catch {
-              return { error: `Could not find or click element: "${element}". Take a fresh snapshot to see current page elements.` };
-            }
-
+            const loc = await resolveWithRetry(page, refMap, args.ref as number, args.element as string);
+            await loc.click({ timeout: 10_000 });
             await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
-            const snapshot = await getSnapshot(page);
-            return { success: true, url: page.url(), title: await page.title(), snapshot };
+            return { success: true, ...(await snap()) };
           }
 
-          // ── Type ───────────────────────────────
           case 'type': {
-            const element = args.element as string;
             const text = args.text as string;
-            if (!element) return { error: 'element is required for type action' };
             if (!text) return { error: 'text is required for type action' };
-
-            try {
-              const selector = await findElementByText(page, element);
-              if (selector) {
-                const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
-                if (match) {
-                  const loc = page.getByRole(match[1] as any, { name: match[2] }).first();
-                  await loc.fill(text, { timeout: 10_000 });
-                } else {
-                  await page.getByText(element, { exact: false }).first().fill(text, { timeout: 10_000 });
-                }
-              } else {
-                await page.fill(element, text, { timeout: 10_000 });
-              }
-            } catch {
-              return { error: `Could not find or type into element: "${element}". Take a fresh snapshot.` };
-            }
-
+            const loc = await resolveWithRetry(page, refMap, args.ref as number, args.element as string);
+            await loc.fill(text, { timeout: 10_000 });
             if (args.submit) {
               await page.keyboard.press('Enter');
               await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-              const snapshot = await getSnapshot(page);
-              return { success: true, url: page.url(), title: await page.title(), snapshot };
+              return { success: true, ...(await snap()) };
             }
             return { success: true, typed: text.length + ' characters' };
           }
 
-          // ── Press ──────────────────────────────
           case 'press': {
             const key = args.key as string;
-            if (!key) return { error: 'key is required for press action (e.g. "Enter", "Tab", "Escape")' };
-
+            if (!key) return { error: 'key is required' };
             await page.keyboard.press(key);
-            const navKeys = ['Enter', 'Tab', 'Escape'];
-            if (navKeys.includes(key)) {
+            if (['Enter', 'Tab', 'Escape'].includes(key)) {
               await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
-              const snapshot = await getSnapshot(page);
-              return { success: true, key, url: page.url(), snapshot };
+              return { success: true, key, ...(await snap()) };
             }
             return { success: true, key };
           }
 
-          // ── Select ─────────────────────────────
           case 'select': {
-            const element = args.element as string;
             const value = args.value as string;
-            if (!element) return { error: 'element is required for select action' };
             if (!value) return { error: 'value is required for select action' };
-
-            try {
-              const selector = await findElementByText(page, element);
-              if (selector) {
-                const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
-                if (match) {
-                  await page.getByRole(match[1] as any, { name: match[2] }).first().selectOption(value, { timeout: 10_000 });
-                } else {
-                  await page.getByText(element, { exact: false }).first().selectOption(value, { timeout: 10_000 });
-                }
-              } else {
-                await page.selectOption(element, value, { timeout: 10_000 });
-              }
-            } catch {
-              return { error: `Could not find or select on element: "${element}". Take a fresh snapshot.` };
-            }
+            const loc = await resolveWithRetry(page, refMap, args.ref as number, args.element as string);
+            await loc.selectOption(value, { timeout: 10_000 });
             return { success: true, selected: value };
           }
 
-          // ── Fill (batch) ───────────────────────
           case 'fill': {
-            const fields = args.fields as Array<{ element: string; value: string }> | undefined;
+            const fields = args.fields as Array<{ ref: number; value: string }> | undefined;
             if (!fields || !Array.isArray(fields) || fields.length === 0) {
-              return { error: 'fields array is required for fill action. E.g. [{element: "Email", value: "me@example.com"}]' };
+              return { error: 'fields array required. E.g. [{ref: 2, value: "me@example.com"}]' };
             }
-
             const results: string[] = [];
             for (const field of fields) {
               try {
-                const selector = await findElementByText(page, field.element);
-                if (selector) {
-                  const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
-                  if (match) {
-                    await page.getByRole(match[1] as any, { name: match[2] }).first().fill(field.value, { timeout: 5_000 });
-                    results.push(`${field.element}: filled`);
-                  } else {
-                    await page.getByText(field.element, { exact: false }).first().fill(field.value, { timeout: 5_000 });
-                    results.push(`${field.element}: filled`);
-                  }
-                } else {
-                  results.push(`${field.element}: not found`);
-                }
+                const loc = await resolveElement(page, refMap, field.ref);
+                await loc.fill(field.value, { timeout: 5_000 });
+                results.push(`ref=${field.ref}: filled`);
               } catch {
-                results.push(`${field.element}: failed`);
+                results.push(`ref=${field.ref}: failed`);
               }
             }
-
-            const snapshot = await getSnapshot(page);
-            return { success: true, results, url: page.url(), snapshot };
+            return { success: true, results, ...(await snap()) };
           }
 
-          // ── Snapshot ───────────────────────────
           case 'snapshot': {
-            const snapshot = await getSnapshot(page);
-            return { url: page.url(), title: await page.title(), snapshot };
+            return await snap();
           }
 
-          // ── Screenshot ─────────────────────────
           case 'screenshot': {
-            const fullPage = args.fullPage as boolean || false;
             const buffer = await page.screenshot({
-              fullPage,
+              fullPage: !!args.fullPage,
               type: 'jpeg',
               quality: 75,
             });
-
             if (buffer.length > MAX_SCREENSHOT_SIZE) {
-              return { error: 'Screenshot too large (max 5MB). Try viewport-only (fullPage: false).' };
+              return { error: 'Screenshot too large (max 5MB). Try fullPage: false.' };
             }
-
-            // Save to user's scoped media dir
             const user = (ctx.user as { id?: string } | undefined);
             const mediaDir = user?.id
               ? path.join(workspace, 'scopes', user.id, 'media')
@@ -457,99 +435,54 @@ ACTIONS:
             } catch (e: unknown) {
               return { error: `Failed to save screenshot: ${e instanceof Error ? e.message : 'disk error'}` };
             }
-
             return {
               success: true,
               url: page.url(),
               title: await page.title(),
               screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
-              _media: [{
-                type: 'image' as const,
-                filePath,
-                fileName: filename,
-                mimeType: 'image/jpeg',
-              }],
+              _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: 'image/jpeg' }],
             };
           }
 
-          // ── Wait ───────────────────────────────
           case 'wait': {
             const waitText = args.text as string | undefined;
             const waitUrl = args.url as string | undefined;
-            const timeMs = (args.timeMs as number) || 5000;
-            const maxWait = Math.min(timeMs, 30_000);
-
-            if (waitText) {
-              await page.waitForSelector(`text="${waitText}"`, { timeout: maxWait }).catch(() => {});
-            } else if (waitUrl) {
-              await page.waitForURL(waitUrl, { timeout: maxWait }).catch(() => {});
-            } else {
-              await page.waitForTimeout(Math.min(maxWait, 10_000));
-            }
-
-            const snapshot = await getSnapshot(page);
-            return { success: true, url: page.url(), title: await page.title(), snapshot };
+            const maxWait = Math.min((args.timeMs as number) || 5000, 30_000);
+            if (waitText) await page.waitForSelector(`text="${waitText}"`, { timeout: maxWait }).catch(() => {});
+            else if (waitUrl) await page.waitForURL(waitUrl, { timeout: maxWait }).catch(() => {});
+            else await page.waitForTimeout(Math.min(maxWait, 10_000));
+            return { success: true, ...(await snap()) };
           }
 
-          // ── Scroll ─────────────────────────────
           case 'scroll': {
-            const direction = (args.direction as string) || 'down';
-            const delta = direction === 'up' ? -500 : 500;
+            const delta = (args.direction as string) === 'up' ? -500 : 500;
             await page.mouse.wheel(0, delta);
             await page.waitForTimeout(500);
-            const snapshot = await getSnapshot(page);
-            return { success: true, direction, url: page.url(), snapshot };
+            return { success: true, direction: args.direction || 'down', ...(await snap()) };
           }
 
-          // ── Back ───────────────────────────────
           case 'back': {
             await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
             await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => {});
-            const snapshot = await getSnapshot(page);
-            return { success: true, url: page.url(), title: await page.title(), snapshot };
+            return { success: true, ...(await snap()) };
           }
 
-          // ── Tabs ───────────────────────────────
           case 'tabs': {
-            const pages = page.context().pages();
-            const tabs = pages.map((p, i) => ({
-              index: i,
-              url: p.url(),
-              title: '', // title is async, keep it simple
-              active: p === page,
-            }));
-            return { tabs };
+            return { tabs: page.context().pages().map((p, i) => ({ index: i, url: p.url(), active: p === page })) };
           }
 
-          // ── Hover ──────────────────────────────
           case 'hover': {
-            const element = args.element as string;
-            if (!element) return { error: 'element is required for hover action' };
-
-            try {
-              const selector = await findElementByText(page, element);
-              if (selector) {
-                const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
-                if (match) {
-                  await page.getByRole(match[1] as any, { name: match[2] }).first().hover({ timeout: 10_000 });
-                } else {
-                  await page.getByText(element, { exact: false }).first().hover({ timeout: 10_000 });
-                }
-              } else {
-                await page.hover(element, { timeout: 10_000 });
-              }
-            } catch {
-              return { error: `Could not find element to hover: "${element}"` };
-            }
+            const loc = await resolveWithRetry(page, refMap, args.ref as number, args.element as string);
+            await loc.hover({ timeout: 10_000 });
             return { success: true };
           }
 
           default:
-            return { error: `Unknown action: "${action}". Valid actions: navigate, click, type, press, select, fill, snapshot, screenshot, wait, scroll, back, tabs, hover, close` };
+            return { error: `Unknown action: "${action}"` };
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        return { error: `Browser error: ${msg}` };
+        return { error: msg };
       }
     },
     source: 'builtin',
