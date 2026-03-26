@@ -424,7 +424,7 @@ async function main(): Promise<void> {
   await server.register(authPlugin, { db, auditService });
 
   // 12. Register ALL routes
-  await server.register(registerHealthRoutes);
+  await server.register(registerHealthRoutes, { secretsStore });
   await server.register(registerAuthRoutes);
   await server.register(registerSessionRoutes);
   // Config change handler — hot-reload channels when toggled via Settings UI

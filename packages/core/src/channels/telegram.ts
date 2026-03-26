@@ -656,7 +656,9 @@ class TelegramChannel implements Channel {
         chunks.push(text.slice(i, i + MAX_LEN));
       }
       for (const chunk of chunks) {
-        await this.bot.api.sendMessage(targetChatId, chunk).catch(() => {});
+        await this.bot.api.sendMessage(targetChatId, chunk).catch((e: unknown) => {
+          log.warn({ err: e instanceof Error ? e.message : String(e), chatId: targetChatId }, 'Telegram chunk send failed');
+        });
       }
     }
   }

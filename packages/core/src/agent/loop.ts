@@ -292,13 +292,19 @@ export async function runAgent(
     // Record per-round usage with cost estimate (skip for ephemeral)
     const provider = model.split('/')[0] ?? 'unknown';
     const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
-    if (usageRepo) await usageRepo.record({
-      tenantId, userId,
-      sessionId: session.id,
-      model, provider,
-      inputTokens: inTok, outputTokens: outTok,
-      costUsd,
-    });
+    if (usageRepo) {
+      try {
+        await usageRepo.record({
+          tenantId, userId,
+          sessionId: session.id,
+          model, provider,
+          inputTokens: inTok, outputTokens: outTok,
+          costUsd,
+        });
+      } catch (e: unknown) {
+        reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)');
+      }
+    }
 
     // If no tool calls, we're done
     if (!response.toolCalls) {
@@ -393,19 +399,23 @@ export async function runAgent(
 
       const durationMs = Date.now() - toolStartTime;
 
-      // Record tool call in the database (skip for ephemeral)
+      // Record tool call in the database (skip for ephemeral, non-critical)
       if (toolCallRepo) {
-        await toolCallRepo.record({
-          id: tc.id || crypto.randomUUID(),
-          sessionId: session.id,
-          tenantId,
-          userId,
-          toolName,
-          arguments: toolArgs,
-          result,
-          status: toolStatus,
-          durationMs,
-        });
+        try {
+          await toolCallRepo.record({
+            id: tc.id || crypto.randomUUID(),
+            sessionId: session.id,
+            tenantId,
+            userId,
+            toolName,
+            arguments: toolArgs,
+            result,
+            status: toolStatus,
+            durationMs,
+          });
+        } catch (e: unknown) {
+          reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: toolName }, 'Failed to record tool call (non-critical)');
+        }
       }
 
       // Collect _media attachments from tool results

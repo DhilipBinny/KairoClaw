@@ -3,12 +3,14 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
+import type { SecretsStore } from '../secrets/store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as { version: string };
 const APP_VERSION = pkg.version;
 
-export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
+export const registerHealthRoutes: FastifyPluginAsync<{ secretsStore?: SecretsStore }> = async (app, opts) => {
+  const { secretsStore } = opts;
   // GET /health — simple health check
   app.get('/health', async (_request, reply) => {
     return reply.send({ status: 'ok', timestamp: new Date().toISOString() });
@@ -32,8 +34,10 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       firstRun = totalUsers <= 1 && (sessionCount?.count ?? 0) === 0;
     } catch { /* non-critical */ }
 
+    const secretsDegraded = secretsStore?.isDegraded ?? false;
+
     return {
-      status: 'ok',
+      status: secretsDegraded ? 'degraded' : 'ok',
       version: APP_VERSION,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
@@ -44,6 +48,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       model: (config as Record<string, Record<string, string>>)?.model?.primary || 'not configured',
       firstRun,
       users: { total: totalUsers, active: activeUsers },
+      ...(secretsDegraded ? { warnings: ['Secrets store decrypt failed — API keys unavailable. Check AGW_MASTER_KEY.'] } : {}),
     };
   });
 
