@@ -49,18 +49,13 @@ connectBtn.addEventListener('click', async () => {
     return;
   }
 
+  // Save config
   await chrome.storage.local.set({ serverUrl, apiKey });
-  // Background script auto-reconnects on storage change
+  // Explicitly tell background to connect
+  chrome.runtime.sendMessage({ type: 'connect' });
+  statusText.textContent = 'Connecting...';
 });
 
-disconnectBtn.addEventListener('click', async () => {
-  // Send disconnect message to background
+disconnectBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'disconnect' });
-});
-
-// Handle disconnect message in background
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'disconnect') {
-    // Background will handle this
-  }
 });
