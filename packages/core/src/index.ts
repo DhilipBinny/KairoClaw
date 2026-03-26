@@ -316,7 +316,7 @@ async function main(): Promise<void> {
         'SELECT id, role, elevated, active FROM users WHERE id = ? AND active = 1',
         [String(inbound.userId)],
       );
-      reqLog.info({ userId: inbound.userId, resolved: !!resolvedUser, role: resolvedUser?.role, channel: inbound.channel }, 'User resolution');
+      console.log(`[user-resolve] userId=${inbound.userId} resolved=${!!resolvedUser} role=${resolvedUser?.role} channel=${inbound.channel}`);
     }
     if (!resolvedUser && inbound.userId && inbound.channel !== 'web' && inbound.channel !== 'api') {
       // Channel sender — look up sender_links
