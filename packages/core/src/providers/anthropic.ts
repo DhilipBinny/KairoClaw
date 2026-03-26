@@ -229,7 +229,7 @@ export class AnthropicProvider implements ProviderInterface {
     }, `Anthropic request: ${apiMessages.length} msgs, ${anthropicTools.length} tools (${(toolSchemaSize / 1024).toFixed(1)}KB schema)`);
     log.debug(`  messages: [${msgsInfo}]`);
     if (anthropicTools.length > 0) {
-      log.debug(`  tools: [${toolNames}]`);
+      log.info(`  tools: [${toolNames}]`);
     }
 
     // Timeout handling
