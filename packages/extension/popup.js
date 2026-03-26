@@ -57,5 +57,10 @@ connectBtn.addEventListener('click', async () => {
 });
 
 disconnectBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'disconnect' });
+  chrome.runtime.sendMessage({ type: 'disconnect' }, () => {
+    // Update UI immediately
+    updateUI('disconnected');
+  });
+  // Also update status in case service worker is slow
+  chrome.storage.local.set({ connectionStatus: 'disconnected' });
 });
