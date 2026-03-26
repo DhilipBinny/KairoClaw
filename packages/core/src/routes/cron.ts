@@ -99,4 +99,12 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
       }
     },
   );
+
+  // GET /api/v1/my/cron — own cron jobs (any authenticated user)
+  app.get('/api/v1/my/cron', async (request) => {
+    const userId = request.user?.id;
+    if (!userId) return { jobs: [] };
+    const allJobs = scheduler.list();
+    return { jobs: allJobs.filter(j => j.userId === userId) };
+  });
 };

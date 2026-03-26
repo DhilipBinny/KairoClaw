@@ -40,4 +40,15 @@ export const registerUsageRoutes: FastifyPluginAsync = async (app) => {
 
     return summary;
   });
+
+  // GET /api/v1/my/usage — own usage stats (any authenticated user)
+  app.get('/api/v1/my/usage', async (request) => {
+    const db = (request as any).ctx.db as DatabaseAdapter;
+    const tenantId = request.tenantId || 'default';
+    const userId = request.user?.id;
+    if (!userId) return { totalInput: 0, totalOutput: 0, totalCost: 0, byModel: {} };
+    const days = parseInt((request.query as any)?.days || '30');
+    const repo = new UsageRepository(db);
+    return await repo.summarizeByUser(tenantId, userId, days);
+  });
 };
