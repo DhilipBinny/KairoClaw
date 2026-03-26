@@ -159,7 +159,7 @@
 
 <style>
   .personas-page {
-    max-width: 900px;
+    max-width: 1000px;
   }
   .page-header {
     margin-bottom: 24px;

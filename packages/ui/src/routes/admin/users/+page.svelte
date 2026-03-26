@@ -466,7 +466,7 @@
 </div>
 
 <style>
-  .users-page { max-width: 1100px; }
+  .users-page { max-width: 1000px; }
   .page-header {
     display: flex;
     justify-content: space-between;

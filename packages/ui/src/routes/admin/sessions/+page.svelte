@@ -22,10 +22,17 @@
     created_at: string;
   }
 
+  interface UserGroup {
+    id: string | null;
+    name: string;
+    sessionCount: number;
+  }
+
   let sessions: SessionRow[] = $state([]);
   let loading = $state(true);
   let searchQuery = $state('');
   let channelFilter = $state('all');
+  let selectedUserId = $state<string | null | 'all'>('all');
   let confirmDeleteId = $state<string | null>(null);
   let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedSession: string | null = $state(null);
@@ -35,8 +42,38 @@
 
   let channels = $derived([...new Set(sessions.map(s => s.channel))].sort());
 
+  // Group sessions by user
+  let userGroups = $derived((): UserGroup[] => {
+    const map = new Map<string | null, { name: string; count: number }>();
+    for (const s of sessions) {
+      const key = s.user_id ?? null;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count++;
+      } else {
+        map.set(key, { name: s.user_name || 'Unlinked', count: 1 });
+      }
+    }
+    const groups: UserGroup[] = [];
+    for (const [id, { name, count }] of map) {
+      groups.push({ id, name, sessionCount: count });
+    }
+    // Sort: named users first (alphabetical), then unlinked last
+    groups.sort((a, b) => {
+      if (a.id === null) return 1;
+      if (b.id === null) return -1;
+      return a.name.localeCompare(b.name);
+    });
+    return groups;
+  });
+
   let filteredSessions = $derived(
     sessions.filter((s) => {
+      // User filter
+      if (selectedUserId !== 'all') {
+        if (selectedUserId === null && s.user_id !== null) return false;
+        if (selectedUserId !== null && s.user_id !== selectedUserId) return false;
+      }
       if (channelFilter !== 'all' && s.channel !== channelFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -49,7 +86,7 @@
   async function loadSessions() {
     loading = true;
     try {
-      const data = await getSessions(100);
+      const data = await getSessions(200);
       sessions = data.sessions;
     } catch (e) {
       console.error('Failed to load sessions:', e);
@@ -103,9 +140,16 @@
     switch (channel) {
       case 'web': return 'blue';
       case 'telegram': return 'green';
+      case 'whatsapp': return 'green';
       case 'api': return 'yellow';
       default: return 'default';
     }
+  }
+
+  function selectUser(userId: string | null | 'all') {
+    selectedUserId = userId;
+    selectedSession = null;
+    selectedMessages = [];
   }
 
   onMount(loadSessions);
@@ -118,10 +162,33 @@
 <div class="sessions-page">
   <div class="page-header">
     <h1 class="page-title">Sessions</h1>
-    <p class="page-desc">Browse and manage chat sessions.</p>
+    <p class="page-desc">Browse and manage chat sessions grouped by user.</p>
   </div>
 
   <div class="sessions-layout">
+    <!-- User sidebar -->
+    <div class="users-panel">
+      <h3 class="panel-title">Users</h3>
+      <button
+        class="user-row"
+        class:active={selectedUserId === 'all'}
+        onclick={() => selectUser('all')}
+      >
+        <span class="user-name">All Users</span>
+        <span class="user-count">{sessions.length}</span>
+      </button>
+      {#each userGroups() as group}
+        <button
+          class="user-row"
+          class:active={selectedUserId === group.id}
+          onclick={() => selectUser(group.id)}
+        >
+          <span class="user-name">{group.name}</span>
+          <span class="user-count">{group.sessionCount}</span>
+        </button>
+      {/each}
+    </div>
+
     <!-- Session list -->
     <div class="sessions-list-panel">
       <div class="search-bar">
@@ -150,7 +217,7 @@
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-ghost)">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
           </svg>
-          {searchQuery ? 'No sessions match your search.' : 'No sessions found. Start a conversation to see sessions here.'}
+          {searchQuery ? 'No sessions match your search.' : 'No sessions for this user.'}
         </div>
       {:else}
         <div class="sessions-list">
@@ -158,12 +225,11 @@
             <button
               class="session-row"
               class:active={selectedSession === session.id}
-              aria-label="View session {session.id.slice(0, 16)}"
               onclick={() => viewSession(session.id)}
             >
               <div class="session-row-header">
                 <Badge variant={channelVariant(session.channel)}>{session.channel}</Badge>
-                {#if session.user_name}
+                {#if selectedUserId === 'all' && session.user_name}
                   <span class="session-user">{session.user_name}</span>
                 {/if}
                 <span class="session-turns">{session.turns} turns</span>
@@ -188,7 +254,6 @@
           </div>
           <button
             class="btn btn-sm btn-danger"
-            aria-label={confirmDeleteId === selectedSession ? 'Confirm delete session' : 'Delete session'}
             onclick={() => requestDeleteSession(selectedSession!)}
             disabled={deleteInProgress === selectedSession}
           >
@@ -200,7 +265,7 @@
           <div class="loading"><span class="spinner"></span> Loading messages...</div>
         {:else}
           <div class="messages-list">
-            {#each selectedMessages as msg, i}
+            {#each selectedMessages as msg}
               <div class="message-row" class:user={msg.role === 'user'} class:assistant={msg.role === 'assistant'}>
                 <div class="message-role">
                   <Badge variant={msg.role === 'user' ? 'blue' : 'green'}>{msg.role}</Badge>
@@ -230,121 +295,129 @@
     display: flex;
     flex-direction: column;
   }
-  .page-header {
-    margin-bottom: 16px;
-  }
-  .page-title {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    letter-spacing: -0.3px;
-  }
-  .page-desc {
-    color: var(--text-muted);
-    font-size: 14px;
-  }
+  .page-header { margin-bottom: 16px; }
+  .page-title { font-size: 24px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .page-desc { color: var(--text-muted); font-size: 14px; }
+
   .sessions-layout {
     flex: 1;
     display: flex;
-    gap: 16px;
+    gap: 12px;
     min-height: 0;
   }
+
+  /* Users panel */
+  .users-panel {
+    width: 180px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 0 8px 8px;
+  }
+  .user-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    background: none;
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text-secondary);
+    transition: all var(--duration) var(--ease);
+  }
+  .user-row:hover { background: var(--bg-raised); color: var(--text-primary); }
+  .user-row.active { background: var(--accent-subtle); border-color: var(--border-accent); color: var(--accent); font-weight: 600; }
+  .user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-raised);
+    padding: 1px 6px;
+    border-radius: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Sessions list panel */
   .sessions-list-panel {
-    width: 340px;
+    width: 300px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
   }
   .search-bar {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
     position: relative;
   }
   .search-icon {
     position: absolute;
-    left: 12px;
+    left: 10px;
     top: 50%;
     transform: translateY(-50%);
     color: var(--text-muted);
     pointer-events: none;
   }
   .search-input {
-    padding-left: 36px;
+    padding-left: 32px;
     flex: 1;
     min-width: 0;
+    font-size: 12px;
   }
   .channel-filter {
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
-    font-size: 13px;
-    padding: 7px 10px;
+    font-size: 12px;
+    padding: 6px 8px;
     cursor: pointer;
     flex-shrink: 0;
-  }
-  .channel-filter:focus {
-    outline: none;
-    border-color: var(--accent);
   }
   .sessions-list {
     flex: 1;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
   .session-row {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-radius: var(--radius);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-subtle);
     background: var(--bg-surface);
     cursor: pointer;
     font-family: var(--font);
     color: var(--text-primary);
     transition: all var(--duration) var(--ease);
   }
-  .session-row:hover {
-    border-color: var(--border);
-    background: var(--bg-raised);
-  }
-  .session-row.active {
-    border-color: var(--border-accent);
-    background: var(--accent-subtle);
-  }
-  .session-row-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 4px;
-  }
-  .session-user {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--accent);
-  }
-  .session-turns {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-left: auto;
-  }
-  .session-title-text {
-    font-size: 12px;
-    color: var(--text-primary);
-    margin-bottom: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .session-date {
-    font-size: 11px;
-    color: var(--text-muted);
-  }
+  .session-row:hover { background: var(--bg-raised); }
+  .session-row.active { border-color: var(--border-accent); background: var(--accent-subtle); }
+  .session-row-header { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .session-user { font-size: 11px; font-weight: 600; color: var(--accent); }
+  .session-turns { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .session-title-text { font-size: 12px; color: var(--text-primary); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-date { font-size: 11px; color: var(--text-muted); }
+
+  /* Messages panel */
   .messages-panel {
     flex: 1;
     min-width: 0;
@@ -359,48 +432,25 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 20px;
+    padding: 12px 18px;
     border-bottom: 1px solid var(--border);
   }
-  .messages-header-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .messages-header-info h3 {
-    font-size: 14px;
-    font-weight: 600;
-  }
+  .messages-header-info { display: flex; align-items: center; gap: 10px; }
+  .messages-header-info h3 { font-size: 14px; font-weight: 600; }
   .messages-session-id {
-    font-size: 12px;
+    font-size: 11px;
     font-family: var(--font-mono);
     color: var(--text-muted);
     background: var(--bg-raised);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
   }
-  .messages-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px;
-  }
-  .message-row {
-    padding: 12px 14px;
-    margin-bottom: 8px;
-    border-radius: var(--radius);
-    transition: background var(--duration) var(--ease);
-  }
+  .messages-list { flex: 1; overflow-y: auto; padding: 12px; }
+  .message-row { padding: 12px 14px; margin-bottom: 8px; border-radius: var(--radius); }
   .message-row.user { background: var(--bg-void); }
   .message-row.assistant { background: var(--bg-raised); }
-  .message-role {
-    margin-bottom: 6px;
-  }
-  .message-content {
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
+  .message-role { margin-bottom: 6px; }
+  .message-content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .loading, .empty, .no-selection {
     padding: 40px;
     text-align: center;
@@ -415,23 +465,19 @@
   @media (max-width: 768px) {
     .page-title { font-size: 20px; }
     .page-desc { font-size: 13px; }
-    .sessions-layout {
-      flex-direction: column;
-    }
-    .sessions-list-panel {
+    .sessions-layout { flex-direction: column; }
+    .users-panel {
       width: 100%;
-      max-height: 40vh;
-      flex-shrink: 0;
+      flex-direction: row;
+      overflow-x: auto;
+      gap: 4px;
+      padding-bottom: 8px;
     }
-    .messages-panel {
-      min-height: 300px;
-    }
-    .messages-header {
-      padding: 10px 14px;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .messages-session-id { font-size: 11px; }
-    .session-row { padding: 10px 12px; }
+    .panel-title { display: none; }
+    .user-row { white-space: nowrap; padding: 6px 10px; font-size: 12px; }
+    .sessions-list-panel { width: 100%; max-height: 35vh; }
+    .messages-panel { min-height: 300px; }
+    .messages-header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
+    .session-row { padding: 8px 10px; }
   }
 </style>

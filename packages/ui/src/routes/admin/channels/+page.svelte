@@ -1102,7 +1102,7 @@
 </div>
 
 <style>
-  .channels-page { max-width: 700px; }
+  .channels-page { max-width: 800px; }
   .page-header { margin-bottom: 28px; }
   .page-title { font-size: 24px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
   .page-desc { color: var(--text-muted); font-size: 14px; }
