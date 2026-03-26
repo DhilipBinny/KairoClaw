@@ -7,6 +7,7 @@ import { emailTools } from './email.js';
 import { pluginTools } from './plugins.js';
 import { pdfTools } from './pdf.js';
 import { subagentTools } from './subagent.js';
+import { browseTools } from './browse.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -19,6 +20,7 @@ export const builtinTools: ToolRegistration[] = [
   ...pluginTools,
   ...pdfTools,
   ...subagentTools,
+  ...browseTools,
 ];
 
 export { fileTools } from './files.js';

@@ -290,7 +290,16 @@ async function main(): Promise<void> {
     cronScheduler?: any;
     telegramSend?: (text: string, chatId?: string) => Promise<void>;
     whatsappSend?: (text: string, jid?: string) => Promise<void>;
+    browserManager?: any;
   } = {};
+
+  // Browser session manager — lazy-initialized on first browse tool call
+  try {
+    const { BrowserSessionManager } = await import('./browser/session-manager.js');
+    sharedServices.browserManager = new BrowserSessionManager();
+  } catch {
+    // Chromium may not be installed — browse tool will return an error
+  }
 
   const createRunner: AgentRunner = async (
     inbound: InboundMessage,
@@ -406,6 +415,7 @@ async function main(): Promise<void> {
           scopeKey,
           secretsStore,
           cronScheduler: sharedServices.cronScheduler,
+          browserManager: sharedServices.browserManager,
           telegramSend: sharedServices.telegramSend,
           whatsappSend: sharedServices.whatsappSend,
           broadcastToWeb,
@@ -752,6 +762,11 @@ async function main(): Promise<void> {
 
     // Shutdown MCP bridge
     await mcpBridge.shutdown();
+
+    // Shutdown browser sessions
+    if (sharedServices.browserManager?.shutdown) {
+      await sharedServices.browserManager.shutdown();
+    }
 
     // Stop media cleanup
     mediaStore.stopCleanup();

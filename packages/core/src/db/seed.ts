@@ -47,6 +47,7 @@ export async function seedDatabase(db: DatabaseAdapter): Promise<{ apiKey?: stri
     { role: 'user', pattern: 'write_file', permission: 'power_user' },
     { role: 'user', pattern: 'exec', permission: 'power_user' },
     { role: 'user', pattern: 'manage_cron', permission: 'power_user' },
+    { role: 'user', pattern: 'browse', permission: 'power_user' },
     { role: 'user', pattern: 'edit_file', permission: 'allow' },
     // Viewers are read-only
     { role: 'viewer', pattern: 'read_file', permission: 'allow' },

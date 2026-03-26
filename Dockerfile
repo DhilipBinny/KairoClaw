@@ -30,6 +30,9 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tini curl git ca-certificates \
     jq bsdmainutils poppler-utils tesseract-ocr \
+    # Chromium for browse tool (headless browser automation)
+    chromium \
+    fonts-liberation fonts-noto-color-emoji fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@10
 
@@ -62,7 +65,9 @@ RUN mkdir -p /data && chown node:node /data
 ENV NODE_ENV=production \
     AGW_STATE_DIR=/data \
     AGW_CONFIG=/data/config.json \
-    LOG_LEVEL=info
+    LOG_LEVEL=info \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 USER node
 EXPOSE 18181
