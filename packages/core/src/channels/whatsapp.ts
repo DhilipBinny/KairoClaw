@@ -420,7 +420,7 @@ class WhatsAppChannel implements Channel {
         images = [{ data: base64, mimeType }];
       } catch (_e: unknown) {
         // Fallback: save to disk
-        const localPath = await this.downloadMediaToDisk(msg, 'image.jpg');
+        const localPath = await this.downloadMediaToDisk(msg, 'image.jpg', senderPhone);
         const workspace = this.config.agent.workspace;
         msgText = localPath
           ? `[Image saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
@@ -447,14 +447,14 @@ class WhatsAppChannel implements Channel {
           msgText = caption || "What's in this image?";
           images = [{ data: base64, mimeType, filename: fileName }];
         } catch {
-          const localPath = await this.downloadMediaToDisk(msg, fileName);
+          const localPath = await this.downloadMediaToDisk(msg, fileName, senderPhone);
           const workspace = this.config.agent.workspace;
           msgText = localPath
             ? `[Document "${fileName}" saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
             : caption || '[Document received but download failed]';
         }
       } else {
-        const localPath = await this.downloadMediaToDisk(msg, fileName);
+        const localPath = await this.downloadMediaToDisk(msg, fileName, senderPhone);
         const workspace = this.config.agent.workspace;
 
         if (!localPath) {
@@ -472,7 +472,7 @@ class WhatsAppChannel implements Channel {
       }
     } else if (contentType === 'audioMessage') {
       const ext = 'ogg';
-      const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`);
+      const localPath = await this.downloadMediaToDisk(msg, `voice.${ext}`, senderPhone);
       if (!localPath) {
         msgText = '[Voice message received but download failed]';
       } else {
@@ -495,7 +495,7 @@ class WhatsAppChannel implements Channel {
       }
     } else if (contentType === 'videoMessage') {
       const videoMsg = msg.message.videoMessage!;
-      const localPath = await this.downloadMediaToDisk(msg, 'video.mp4');
+      const localPath = await this.downloadMediaToDisk(msg, 'video.mp4', senderPhone);
       const workspace = this.config.agent.workspace;
       const caption = videoMsg.caption || '';
       msgText = localPath
@@ -689,11 +689,18 @@ class WhatsAppChannel implements Channel {
 
   // ── Media download ──────────────────────────────────────
 
-  private async downloadMediaToDisk(msg: WAMessage, filename: string): Promise<string | null> {
+  private async downloadMediaToDisk(msg: WAMessage, filename: string, senderPhone?: string): Promise<string | null> {
     if (!this.sock) return null;
     try {
-      const mediaDir = path.join(this.config.agent.workspace, 'media');
-      fs.mkdirSync(mediaDir, { recursive: true });
+      // Save to sender's scoped media dir if linked, otherwise shared/media
+      let mediaDir: string;
+      if (senderPhone) {
+        const { getScopedMediaDir } = await import('../media/scoped-dir.js');
+        mediaDir = await getScopedMediaDir(this.config.agent.workspace, 'whatsapp', senderPhone, this.db, this.tenantId);
+      } else {
+        mediaDir = path.join(this.config.agent.workspace, 'shared', 'media');
+        fs.mkdirSync(mediaDir, { recursive: true });
+      }
 
       const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
         logger: silentLogger,

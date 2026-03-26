@@ -132,6 +132,15 @@ When a user asks the agent to create a file:
 - **"Save to shared"**: saved to `shared/documents/` (team-accessible)
 - The agent is instructed about this distinction in its system prompt
 
+### Media uploads
+
+When a user sends a file (PDF, image, voice note) via any channel:
+- **Linked user**: saved to `scopes/{uuid}/media/` (personal, only they can access)
+- **Unlinked sender**: saved to `shared/media/` (team-accessible)
+- **Web upload**: saved to `scopes/{uuid}/media/` (authenticated by API key)
+
+This applies to Telegram photos/documents/voice, WhatsApp media, and web chat file uploads.
+
 ---
 
 ## Tool Permissions
