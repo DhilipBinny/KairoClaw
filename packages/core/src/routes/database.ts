@@ -5,9 +5,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import type { GatewayConfig } from '@agw/types';
-import type { DatabaseAdapter } from '../db/index.js';
 import { requireRole } from '../auth/middleware.js';
+import { getDb, getConfig } from './utils.js';
 
 // Tables to migrate in FK-safe order
 const MIGRATE_TABLES = [
@@ -19,8 +18,8 @@ export const registerDatabaseRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/v1/admin/database — database status + migration info
   app.get('/api/v1/admin/database', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
-    const db = (request as any).ctx.db as DatabaseAdapter;
+    const config = getConfig(request);
+    const db = getDb(request);
     const stateDir = config._stateDir || '';
 
     const isPostgres = !!process.env.AGW_DATABASE_URL;
@@ -81,8 +80,8 @@ export const registerDatabaseRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /api/v1/admin/database/migrate — migrate SQLite → PostgreSQL
   app.post('/api/v1/admin/database/migrate', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
-    const db = (request as any).ctx.db as DatabaseAdapter;
+    const config = getConfig(request);
+    const db = getDb(request);
     const stateDir = config._stateDir || '';
 
     if (!process.env.AGW_DATABASE_URL) {

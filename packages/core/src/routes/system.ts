@@ -6,8 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
+import { getConfig } from './utils.js';
 import { getModelCapabilities } from '../models/registry.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
@@ -27,7 +27,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
   const secretsStore = opts?.secretsStore;
   // GET /api/v1/admin/system — system info
   app.get('/api/v1/admin/system', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const stateDir = config._stateDir || '';
     const mem = process.memoryUsage();
     const osMem = { total: os.totalmem(), free: os.freemem() };
@@ -62,7 +62,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // GET /api/v1/admin/doctor — run diagnostic checks
   app.get('/api/v1/admin/doctor', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const stateDir = config._stateDir || '';
     const checks: { name: string; status: string; message: string }[] = [];
 
@@ -236,7 +236,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     '/api/v1/admin/providers/test',
     { preHandler: [requireRole('admin')] },
     async (request, reply) => {
-      const config = (request as any).ctx.config as GatewayConfig;
+      const config = getConfig(request);
       const {
         provider,
         apiKey: reqApiKey,
@@ -416,7 +416,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // GET /api/v1/admin/providers/status — credential status for each provider
   app.get('/api/v1/admin/providers/status', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const hasVal = (v: unknown) => typeof v === 'string' && v !== '' && !v.startsWith('${');
 
     return {
@@ -438,7 +438,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // PATCH /api/v1/admin/providers/:id/credentials — save provider secrets
   app.patch('/api/v1/admin/providers/:id/credentials', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { id } = request.params as { id: string };
     const body = request.body as { apiKey?: string; authToken?: string; baseUrl?: string };
 
@@ -545,7 +545,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // GET /api/v1/admin/tools/email/test — verify SMTP connection
   app.post('/api/v1/admin/tools/email/test', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const emailConfig = config.tools?.email;
     const host = (emailConfig?.host as string) || '';
     const port = (emailConfig?.port as number) || 587;
@@ -578,7 +578,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // GET /api/v1/admin/model — current model configuration and capabilities
   app.get('/api/v1/admin/model', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const primaryRef = config.model?.primary || 'anthropic/claude-sonnet-4-20250514';
     const fallbackRef = config.model?.fallback || '';
 
@@ -610,7 +610,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // PATCH /api/v1/admin/models/capabilities — save capability overrides for a model
   app.patch('/api/v1/admin/models/capabilities', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const stateDir = config._stateDir || '';
     const body = request.body as {
       modelId: string;
@@ -668,7 +668,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // GET /api/v1/admin/export — download state directory as tar.gz
   app.get('/api/v1/admin/export', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const db = (request as unknown as { ctx: { db: { pragma: (s: string) => unknown } } }).ctx.db;
     const stateDir = config._stateDir || '';
 
@@ -713,7 +713,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
   // POST /api/v1/admin/import — upload and restore state directory from tar.gz
   app.post('/api/v1/admin/import', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const stateDir = config._stateDir || '';
 
     if (!stateDir) {

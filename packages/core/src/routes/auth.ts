@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { hashApiKey } from '../auth/keys.js';
-import type { DatabaseAdapter } from '../db/index.js';
+import { getDb } from './utils.js';
 
 // Per-IP login attempt tracking for brute-force protection
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -52,7 +52,7 @@ export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
       return reply.code(400).send({ error: 'apiKey is required' });
     }
 
-    const db = (request as any).ctx.db as DatabaseAdapter;
+    const db = getDb(request);
     const keyHash = hashApiKey(apiKey);
     const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; email: string; active: number }>(
       'SELECT id, tenant_id, name, role, email, active FROM users WHERE api_key_hash = ?',

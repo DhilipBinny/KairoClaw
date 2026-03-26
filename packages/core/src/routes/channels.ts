@@ -12,13 +12,12 @@ import type { TelegramChannelInstance } from '../channels/telegram.js';
 import type { WhatsAppChannelInstance } from '../channels/whatsapp.js';
 import type { GatewayConfig } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
-import type { DatabaseAdapter } from '../db/index.js';
 import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import { SenderLinkRepository } from '../db/repositories/sender-link.js';
 import { UserRepository } from '../db/repositories/user.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateApiKey, hashApiKey } from '../auth/keys.js';
-import { setNestedPath } from './utils.js';
+import { setNestedPath, getDb, getTenantId, getConfig } from './utils.js';
 
 export interface ChannelRoutesOptions {
   channelRegistry: {
@@ -103,7 +102,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
   // GET /api/v1/admin/channels/pending-senders
   app.get('/api/v1/admin/channels/pending-senders', { preHandler: [requireRole('admin')] }, async (request) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const db = getDb(request);
     try {
       const repo = new PendingSenderRepository(db);
       const pending = await repo.listByStatus('pending', 50);
@@ -122,11 +121,11 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
   // POST /api/v1/admin/channels/pending-senders/:id/approve
   app.post('/api/v1/admin/channels/pending-senders/:id/approve', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: GatewayConfig } }).ctx.db;
-    const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
+    const db = getDb(request);
+    const liveConfig = getConfig(request);
     const { id } = request.params as { id: string };
 
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const repo = new PendingSenderRepository(db);
     const sender = await repo.getById(Number(id), tenantId);
     if (!sender) {
@@ -194,8 +193,8 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
   // POST /api/v1/admin/channels/pending-senders/:id/reject
   app.post('/api/v1/admin/channels/pending-senders/:id/reject', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
-    const tenantId = request.tenantId || 'default';
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
@@ -210,8 +209,8 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
   // POST /api/v1/admin/channels/pending-senders/:id/onboard — one-click: create user + approve + link
   app.post('/api/v1/admin/channels/pending-senders/:id/onboard', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: GatewayConfig } }).ctx.db;
-    const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
+    const db = getDb(request);
+    const liveConfig = getConfig(request);
     const { id } = request.params as { id: string };
     const { name, email, role, elevated } = (request.body as {
       name: string; email?: string; role?: string; elevated?: boolean;
@@ -221,7 +220,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(400).send({ error: 'Name is required' });
     }
 
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
 
     const pendingRepo = new PendingSenderRepository(db);
     const sender = await pendingRepo.getById(Number(id), tenantId);

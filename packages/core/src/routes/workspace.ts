@@ -7,9 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import type { GatewayConfig } from '@agw/types';
-import type { DatabaseAdapter } from '../db/index.js';
 import { requireRole } from '../auth/middleware.js';
+import { getDb, getConfig } from './utils.js';
 import { WORKSPACE_MAX_FILE_SIZE } from '../constants.js';
 import { SCOPE_DIR_NAME } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';
@@ -21,7 +20,7 @@ const WORKSPACE_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md'];
 export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/workspace/files — list workspace files
   app.get('/api/v1/workspace/files', { preHandler: [requireRole('admin', 'user')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const workspace = config.agent.workspace;
 
     const files = WORKSPACE_FILES.map((name) => {
@@ -42,7 +41,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/v1/workspace/files/:name — read a workspace file
   app.get('/api/v1/workspace/files/:name', { preHandler: [requireRole('admin', 'user')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { name } = request.params as { name: string };
 
     if (!WORKSPACE_FILES.includes(name)) {
@@ -63,7 +62,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
     '/api/v1/workspace/files/:name',
     { preHandler: [requireRole('admin', 'user')] },
     async (request, reply) => {
-      const config = (request as any).ctx.config as GatewayConfig;
+      const config = getConfig(request);
       const { name } = request.params as { name: string };
 
       if (!WORKSPACE_FILES.includes(name)) {
@@ -92,8 +91,8 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/v1/workspace/scopes — list all scoped users
   app.get('/api/v1/workspace/scopes', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
-    const db = (request as any).ctx.db as DatabaseAdapter;
+    const config = getConfig(request);
+    const db = getDb(request);
     const scopesDir = path.join(config.agent.workspace, SCOPE_DIR_NAME);
 
     if (!fs.existsSync(scopesDir)) {
@@ -172,7 +171,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/v1/workspace/scopes/:key — read a specific scope's files
   app.get('/api/v1/workspace/scopes/:key', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { key } = request.params as { key: string };
 
     // Validate scope key — no path traversal

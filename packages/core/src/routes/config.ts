@@ -4,7 +4,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
 import type { AuditService } from '../security/audit.js';
-import { setNestedPath } from './utils.js';
+import { setNestedPath, getConfig, getTenantId } from './utils.js';
 import { configSchema, pluginsSchema } from '../config/schema.js';
 import { loadPlugins, savePlugins } from '../plugins/store.js';
 
@@ -23,7 +23,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
   const onConfigChange = opts?.onConfigChange;
   // GET /api/v1/admin/config — get config (sanitized, no secrets)
   app.get('/api/v1/admin/config', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config;
+    const config = getConfig(request);
     // Return config with secrets masked
     const sanitized = JSON.parse(JSON.stringify(config));
     // Mask API keys
@@ -38,7 +38,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
   // PATCH /api/v1/admin/config — save config changes
   app.patch('/api/v1/admin/config', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { path: dotPath, value } = request.body as { path?: string; value?: unknown };
 
     if (!dotPath || typeof dotPath !== 'string') {
@@ -111,7 +111,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     if (auditService) {
       try {
         await auditService.log({
-          tenantId: (request as any).ctx.tenantId || 'default',
+          tenantId: getTenantId(request),
           userId: (request as any).ctx.userId,
           action: 'config.update',
           resource: dotPath,
@@ -190,7 +190,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
   // POST /api/v1/admin/tools/transcription/test — test STT endpoint connectivity
   app.post('/api/v1/admin/tools/transcription/test', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const txConfig = config.tools?.transcription;
     if (!txConfig?.baseUrl) {
       return { success: false, error: 'No endpoint URL configured' };
@@ -218,7 +218,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
   // GET /api/v1/admin/plugins — read plugins.json
   app.get('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const stateDir = getStateDir(config);
     const plugins = loadPlugins(stateDir);
     return { plugins };
@@ -226,7 +226,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
   // PUT /api/v1/admin/plugins — save plugins.json (raw JSON editor)
   app.put('/api/v1/admin/plugins', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { plugins: newPlugins } = request.body as { plugins?: Record<string, unknown> };
 
     if (!newPlugins || typeof newPlugins !== 'object') {
@@ -268,7 +268,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     if (auditService) {
       try {
         await auditService.log({
-          tenantId: (request as any).ctx.tenantId || 'default',
+          tenantId: getTenantId(request),
           userId: (request as any).ctx.userId,
           action: 'plugins.update',
           resource: 'plugins.json',
@@ -285,7 +285,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
   // PUT /api/v1/admin/config — bulk save (raw JSON editor)
   app.put('/api/v1/admin/config', { preHandler: [requireRole('admin')] }, async (request, reply) => {
-    const config = (request as any).ctx.config as GatewayConfig;
+    const config = getConfig(request);
     const { config: newConfig } = request.body as { config?: Record<string, unknown> };
 
     if (!newConfig || typeof newConfig !== 'object') {
@@ -368,7 +368,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     if (auditService) {
       try {
         await auditService.log({
-          tenantId: (request as any).ctx.tenantId || 'default',
+          tenantId: getTenantId(request),
           userId: (request as any).ctx.userId,
           action: 'config.bulk_update',
           resource: 'config',

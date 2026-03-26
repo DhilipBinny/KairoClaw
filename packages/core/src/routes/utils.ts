@@ -2,6 +2,49 @@
  * Shared utilities for route handlers.
  */
 
+import type { FastifyRequest, FastifyReply } from 'fastify';
+import type { DatabaseAdapter } from '../db/index.js';
+import type { GatewayConfig } from '@agw/types';
+
+// ── Request context helpers ─────────────────────────────────
+
+/** Extract database adapter from request context. */
+export function getDb(request: FastifyRequest): DatabaseAdapter {
+  return (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+}
+
+/** Extract tenant ID from authenticated request (falls back to 'default'). */
+export function getTenantId(request: FastifyRequest): string {
+  return request.tenantId || 'default';
+}
+
+/** Extract config from request context. */
+export function getConfig(request: FastifyRequest): GatewayConfig {
+  return (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
+}
+
+// ── Ownership helpers ───────────────────────────────────────
+
+/**
+ * Assert the authenticated user can access a session.
+ * Admin can access any session; non-admin can only access their own.
+ * Returns true if access is allowed, sends 403 and returns false if denied.
+ */
+export function assertSessionAccess(
+  session: { user_id?: string | null },
+  request: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  if (request.user?.role === 'admin') return true;
+  if (request.user?.id && session.user_id && session.user_id !== request.user.id) {
+    reply.code(403).send({ error: 'Forbidden' });
+    return false;
+  }
+  return true;
+}
+
+// ── Existing utilities ──────────────────────────────────────
+
 /**
  * Set a nested property on an object by dot-separated path.
  * e.g. setNestedPath(obj, "model.primary", "claude-sonnet-4-6")

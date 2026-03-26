@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { DatabaseAdapter } from '../db/index.js';
 import { UserRepository } from '../db/repositories/user.js';
 import { SenderLinkRepository } from '../db/repositories/sender-link.js';
 import { UsageRepository } from '../db/repositories/usage.js';
@@ -7,16 +6,13 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { ToolPermissionRepository } from '../db/repositories/tool-permission.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateApiKey, hashApiKey } from '../auth/keys.js';
-
-function getDb(request: unknown): DatabaseAdapter {
-  return (request as { ctx: { db: DatabaseAdapter } }).ctx.db;
-}
+import { getDb, getTenantId } from './utils.js';
 
 export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/users — list all users with stats
   app.get('/api/v1/admin/users', { preHandler: [requireRole('admin')] }, async (request) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
 
     const userRepo = new UserRepository(db);
     const senderLinkRepo = new SenderLinkRepository(db);
@@ -58,7 +54,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/users/unlinked-sessions — sessions without a user, for linking
   app.get('/api/v1/admin/users/unlinked-sessions', { preHandler: [requireRole('admin')] }, async (request) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
 
     // Get sessions with no user_id, excluding groups and cron/internal
     const sessions = await db.query<{
@@ -102,7 +98,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/admin/users — create user (returns API key ONCE)
   app.post('/api/v1/admin/users', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { name, email, role, elevated } = (request.body as {
       name: string; email?: string; role?: string; elevated?: boolean;
     }) || {};
@@ -155,7 +151,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/users/:id — user detail
   app.get('/api/v1/admin/users/:id', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const userRepo = new UserRepository(db);
@@ -197,7 +193,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // PATCH /api/v1/admin/users/:id — update user
   app.patch('/api/v1/admin/users/:id', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
     const body = request.body as { name?: string; email?: string; role?: string; elevated?: boolean };
 
@@ -226,7 +222,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/admin/users/:id — deactivate (soft delete)
   app.delete('/api/v1/admin/users/:id', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     // Prevent self-deactivation
@@ -253,7 +249,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/admin/users/:id/permanent — hard delete
   app.delete('/api/v1/admin/users/:id/permanent', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     if (id === request.user?.id) {
@@ -271,7 +267,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/admin/users/:id/reactivate — reactivate user
   app.post('/api/v1/admin/users/:id/reactivate', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const userRepo = new UserRepository(db);
@@ -285,7 +281,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/admin/users/:id/api-key — regenerate API key
   app.post('/api/v1/admin/users/:id/api-key', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const userRepo = new UserRepository(db);
@@ -302,7 +298,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/users/:id/sender-links — list linked senders
   app.get('/api/v1/admin/users/:id/sender-links', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const senderLinkRepo = new SenderLinkRepository(db);
@@ -312,7 +308,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/admin/users/:id/sender-links — link a sender
   app.post('/api/v1/admin/users/:id/sender-links', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
     const { channelType, senderId } = (request.body as { channelType: string; senderId: string }) || {};
 
@@ -339,7 +335,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/v1/admin/users/:id/sender-links/:linkId — unlink
   app.delete('/api/v1/admin/users/:id/sender-links/:linkId', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { linkId } = request.params as { id: string; linkId: string };
 
     const senderLinkRepo = new SenderLinkRepository(db);
@@ -353,7 +349,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/admin/tool-permissions/:role — get tool permissions for a role
   app.get('/api/v1/admin/tool-permissions/:role', { preHandler: [requireRole('admin')] }, async (request) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { role } = request.params as { role: string };
 
     const repo = new ToolPermissionRepository(db);
@@ -365,7 +361,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   // PUT /api/v1/admin/tool-permissions/:role — replace all permissions for a role
   app.put('/api/v1/admin/tool-permissions/:role', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { role } = request.params as { role: string };
     const { permissions } = (request.body as { permissions: Array<{ toolPattern: string; permission: string }> }) || {};
 
