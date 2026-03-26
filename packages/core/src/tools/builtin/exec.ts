@@ -1,8 +1,9 @@
-import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAULT_TIMEOUT_SECONDS } from '../../constants.js';
+import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAULT_TIMEOUT_SECONDS, SCOPE_DIR_NAME } from '../../constants.js';
 import { execFile as execFileCb } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
-import { safePath } from './files.js';
+import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 
 const execFileAsync = promisify(execFileCb);
@@ -19,9 +20,9 @@ export const SAFE_ENV_KEYS = [
   'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
 ];
 
-// ── Layer 1: Hard block — never execute these, period ──────
-
-const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+// ── Minimal blocks — apply to ALL users including admin ────
+// Only truly catastrophic / irreversible system commands
+const MINIMAL_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
   // Filesystem destruction
   { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*-.*r.*-.*f|.*-.*f.*-.*r)\s*\//i, reason: 'rm -rf on root path' },
   { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+\/(?!\w)/i, reason: 'recursive delete on root' },
@@ -33,17 +34,39 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\breboot\b/i, reason: 'system reboot' },
   { pattern: /\binit\s+[06]\b/i, reason: 'init runlevel change' },
   { pattern: /\bkill\s+-9\s+1\b/i, reason: 'kill init process' },
-  { pattern: /\bsystemctl\s+(stop|disable|mask)\s+(docker|sshd|network|firewall)/i, reason: 'disable critical service' },
   // Remote code execution
   { pattern: /\bcurl\b.*\|\s*(ba)?sh/i, reason: 'curl pipe to shell' },
   { pattern: /\bwget\b.*\|\s*(ba)?sh/i, reason: 'wget pipe to shell' },
-  // Credential/key theft
-  { pattern: /\bcat\b.*\/(\.ssh\/|\.aws\/|\.env\b|secrets\.json|\.docker\/config)/i, reason: 'read credential files' },
-  { pattern: /\b(history|\.bash_history|\.zsh_history)\b/i, reason: 'read shell history' },
   // Environment/loader hijacking
   { pattern: /\bLD_PRELOAD\s*=/i, reason: 'LD_PRELOAD injection' },
   { pattern: /\bDYLD_/i, reason: 'DYLD injection' },
   { pattern: /\bLD_LIBRARY_PATH\s*=/i, reason: 'LD_LIBRARY_PATH hijacking' },
+];
+
+// ── Sandboxed blocks — apply to non-admin users only ───────
+// Persona files, source code, secrets, cross-scope access
+const SANDBOXED_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
+  // Credential/key theft
+  { pattern: /\bcat\b.*\/(\.ssh\/|\.aws\/|\.env\b|secrets\.json|\.docker\/config)/i, reason: 'read credential files' },
+  { pattern: /\b(history|\.bash_history|\.zsh_history)\b/i, reason: 'read shell history' },
+  { pattern: /\bsystemctl\s+(stop|disable|mask)\s+(docker|sshd|network|firewall)/i, reason: 'disable critical service' },
+
+  // Persona file protection
+  { pattern: /\b(sed|awk|perl)\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'modify persona file' },
+  { pattern: />\s*\S*(IDENTITY|SOUL|RULES)\.md/i, reason: 'redirect to persona file' },
+  { pattern: /\b(echo|printf|cat|tee)\b.*>\s*\S*(IDENTITY|SOUL|RULES)\.md/i, reason: 'overwrite persona file' },
+  { pattern: /\b(cp|mv)\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'copy/move persona file' },
+  { pattern: /\b(python[23]?|node|ruby|perl)\s+(-[cCe]\s+)?.*\b(IDENTITY|SOUL|RULES)\b/i, reason: 'script modify persona file' },
+  { pattern: /\brm\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'delete persona file' },
+
+  // Application source code protection (Docker path)
+  { pattern: /\/app\/packages\//i, reason: 'access application source code' },
+  { pattern: /\/app\/node_modules\//i, reason: 'access application dependencies' },
+  { pattern: /\bfind\s+\/app\b/i, reason: 'scan application directory' },
+
+  // Encrypted secrets / master key
+  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*master\.key/i, reason: 'read encryption master key' },
+  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*secrets\.enc/i, reason: 'read encrypted secrets' },
 ];
 
 // ── Layer 2: Confirmation required — risky but sometimes needed ──
@@ -79,22 +102,35 @@ const CONFIRM_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
 ];
 
 /**
- * Check command safety. Returns:
- * - { action: 'block', reason } — never execute
- * - { action: 'confirm', reason } — ask user first
- * - { action: 'allow' } — safe to run
+ * Check command safety. Two modes:
+ * - 'unrestricted' (admin): only truly catastrophic commands blocked
+ * - 'sandboxed' (non-admin): full blocks + persona/source/secret protection + confirm patterns
  */
-function checkCommandSafety(command: string): { action: 'block' | 'confirm' | 'allow'; reason?: string } {
-  for (const { pattern, reason } of BLOCKED_PATTERNS) {
+function checkCommandSafety(
+  command: string,
+  mode: 'unrestricted' | 'sandboxed',
+): { action: 'block' | 'confirm' | 'allow'; reason?: string } {
+  // Minimal blocks always apply (rm -rf /, shutdown, curl|sh, etc.)
+  for (const { pattern, reason } of MINIMAL_BLOCKED) {
     if (pattern.test(command)) {
       return { action: 'block', reason };
     }
   }
-  for (const { pattern, reason } of CONFIRM_PATTERNS) {
-    if (pattern.test(command)) {
-      return { action: 'confirm', reason };
+
+  // Sandboxed mode: additional blocks + confirmation patterns
+  if (mode === 'sandboxed') {
+    for (const { pattern, reason } of SANDBOXED_BLOCKED) {
+      if (pattern.test(command)) {
+        return { action: 'block', reason };
+      }
+    }
+    for (const { pattern, reason } of CONFIRM_PATTERNS) {
+      if (pattern.test(command)) {
+        return { action: 'confirm', reason };
+      }
     }
   }
+
   return { action: 'allow' };
 }
 
@@ -122,8 +158,9 @@ export const execTools: ToolRegistration[] = [
         return { error: 'Command too long (max 10000 chars)' };
       }
 
-      // Two-layer safety check
-      const safety = checkCommandSafety(command);
+      // Safety check — admin gets unrestricted, others get sandboxed
+      const execMode = context.user?.role === 'admin' ? 'unrestricted' : 'sandboxed';
+      const safety = checkCommandSafety(command, execMode);
       if (safety.action === 'block') {
         return { error: `Blocked: ${safety.reason}. This command is too dangerous to execute. Ask the user to run it manually if needed.` };
       }
@@ -137,13 +174,40 @@ export const execTools: ToolRegistration[] = [
       }
 
       const workspace = getWorkspace(context as Record<string, unknown>);
+      const isAdmin = context.user?.role === 'admin';
+      const scopeKey = context.scopeKey;
+
+      // For non-admin: dynamic source code protection (works on any install path)
+      if (!isAdmin) {
+        // Block access to the application's own source directory (parent of workspace)
+        const appRoot = path.resolve(workspace, '..');
+        const nodeModules = path.join(appRoot, 'node_modules');
+        if (command.includes(nodeModules) || command.includes(path.join(appRoot, 'packages'))) {
+          return { error: 'Blocked: access to application source code. This is restricted for security.' };
+        }
+      }
+
+      // For non-admin users, block commands that reference other users' scopes
+      if (!isAdmin && scopeKey) {
+        const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
+        if (scopesRef.test(command)) {
+          return { error: 'Access denied: cannot access other users\' directories via exec' };
+        }
+      }
+
       const ctx = context as Record<string, unknown>;
       const configTimeout = (ctx.config as Record<string, unknown>)?.tools
         ? ((ctx.config as Record<string, Record<string, Record<string, unknown>>>).tools?.exec?.timeout as number)
         : undefined;
       const defaultTimeout = typeof configTimeout === 'number' && configTimeout > 0 ? configTimeout : EXEC_DEFAULT_TIMEOUT_SECONDS;
       const timeout = Math.min((args.timeout as number) || defaultTimeout, EXEC_MAX_TIMEOUT_SECONDS) * 1000;
-      const cwd = args.workdir ? safePath(args.workdir as string, workspace) : workspace;
+
+      // Default cwd: user's own scope dir for non-admin, workspace root for admin
+      let defaultCwd = workspace;
+      if (!isAdmin && scopeKey) {
+        defaultCwd = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
+      }
+      const cwd = args.workdir ? scopedSafePath(args.workdir as string, workspace, context) : defaultCwd;
 
       // Only pass safe env vars to child process (allowlist, not denylist)
       const safeEnv: Record<string, string> = {};

@@ -12,6 +12,8 @@
     output_tokens: number;
     created_at: string;
     updated_at: string;
+    user_name?: string | null;
+    user_id?: string | null;
   }
 
   interface SessionMessage {
@@ -38,7 +40,7 @@
       if (channelFilter !== 'all' && s.channel !== channelFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q) || (s.title || '').toLowerCase().includes(q);
+        return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q) || (s.title || '').toLowerCase().includes(q) || (s.user_name || '').toLowerCase().includes(q);
       }
       return true;
     })
@@ -161,6 +163,9 @@
             >
               <div class="session-row-header">
                 <Badge variant={channelVariant(session.channel)}>{session.channel}</Badge>
+                {#if session.user_name}
+                  <span class="session-user">{session.user_name}</span>
+                {/if}
                 <span class="session-turns">{session.turns} turns</span>
               </div>
               <div class="session-title-text" title={session.id}>{session.title || session.id.slice(0, 24) + '...'}</div>
@@ -318,9 +323,15 @@
     justify-content: space-between;
     margin-bottom: 4px;
   }
+  .session-user {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+  }
   .session-turns {
     font-size: 11px;
     color: var(--text-muted);
+    margin-left: auto;
   }
   .session-title-text {
     font-size: 12px;

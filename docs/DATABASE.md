@@ -46,7 +46,7 @@ That's it. On first start, tables are created and data is seeded.
 | Workspace files | `workspace/` (filesystem) | No |
 | Master encryption key | `master.key` (filesystem) | No |
 | Plugins | `plugins.json` (filesystem) | No |
-| Cron jobs | `cron-jobs.json` (filesystem) | No |
+| Cron jobs | Database | Yes — migrated automatically (legacy: `cron-jobs.json` is the migration source) |
 
 ---
 
@@ -71,7 +71,7 @@ When you switch to PostgreSQL, data migrates automatically on first startup:
 | Table | Description |
 |-------|------------|
 | tenants | Multi-tenant organizations |
-| users | Admin and user accounts (with API key hashes) |
+| users | Admin and user accounts (with API key hashes, roles, elevated flag) |
 | sessions | Chat sessions (web, telegram, whatsapp, etc.) |
 | messages | Conversation history |
 | tool_calls | Tool execution audit trail |
@@ -80,6 +80,8 @@ When you switch to PostgreSQL, data migrates automatically on first startup:
 | tool_permissions | RBAC rules |
 | memory_chunks | Workspace memory index |
 | pending_senders | Channel discovery records |
+| sender_links | Maps Telegram/WhatsApp sender IDs to user accounts |
+| cron_jobs | Scheduled tasks with per-user ownership |
 
 ### Conditions for auto-migration
 

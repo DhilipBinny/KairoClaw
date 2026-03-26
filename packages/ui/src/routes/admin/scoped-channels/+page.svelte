@@ -72,10 +72,17 @@
             onclick={() => viewScope(scope.scopeKey)}
           >
             <div class="user-card-header">
-              <span class="channel-badge" style="color: {channelColor(scope.channel)}">
-                {scope.channel}
-              </span>
-              <span class="user-id">{scope.userId}</span>
+              {#if scope.scopeType === 'group'}
+                <span class="scope-badge group">Group</span>
+                <span class="channel-badge" style="color: {channelColor(scope.channel)}">{scope.channel}</span>
+              {:else if scope.userName}
+                <span class="scope-user-name">{scope.userName}</span>
+              {:else}
+                <span class="channel-badge" style="color: {channelColor(scope.channel)}">
+                  {scope.channel}
+                </span>
+                <span class="user-id">{scope.userId}</span>
+              {/if}
             </div>
             <div class="user-card-meta">
               {#if scope.sessionCount > 0}
@@ -215,6 +222,21 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+  .scope-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .scope-badge.group {
+    background: #dbeafe;
+    color: #2563eb;
+  }
+  .scope-user-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
   }
   .user-id {
     font-size: 13px;

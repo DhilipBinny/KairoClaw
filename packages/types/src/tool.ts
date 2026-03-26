@@ -70,13 +70,17 @@ export interface ToolExecutionContext {
   user?: {
     id?: string;
     name?: string;
+    role?: string;
+    elevated?: boolean;
   };
   /** Tenant identifier (reserved for multi-tenant mode). */
   tenant?: string;
+  /** Scope key for per-user isolation (e.g. "telegram:12345"). null = unscoped. */
+  scopeKey?: string | null;
 }
 
 /** Permission level for a tool. */
-export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm';
+export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm' | 'power_user';
 
 /**
  * A permission rule controlling tool access.

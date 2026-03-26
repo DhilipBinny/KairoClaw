@@ -50,6 +50,8 @@ export interface AgentContext {
   session: SessionRow;
   tenantId: string;
   userId?: string;
+  /** User info for permission checks (role + elevated toggle). */
+  user?: { id: string; role: string; elevated: boolean };
   /** Generic LLM call function — decoupled from specific providers. */
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   /** Tool definitions available for this turn. */
@@ -377,7 +379,7 @@ export async function runAgent(
 
       try {
         if (context.executeTool) {
-          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry } as any);
+          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry, user: context.user, scopeKey: context.scopeKey } as any);
         } else {
           result = { error: 'No tool executor configured' };
           toolStatus = 'error';

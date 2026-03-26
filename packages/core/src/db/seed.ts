@@ -43,10 +43,11 @@ export async function seedDatabase(db: DatabaseAdapter): Promise<{ apiKey?: stri
     { role: 'user', pattern: 'inspect_image', permission: 'allow' },
     { role: 'user', pattern: 'memory_*', permission: 'allow' },
     { role: 'user', pattern: 'mcp__*', permission: 'allow' },
-    // Users need confirmation for write ops
-    { role: 'user', pattern: 'write_file', permission: 'confirm' },
-    { role: 'user', pattern: 'edit_file', permission: 'confirm' },
-    { role: 'user', pattern: 'exec', permission: 'confirm' },
+    // Power User only — admin can change these from Settings
+    { role: 'user', pattern: 'write_file', permission: 'power_user' },
+    { role: 'user', pattern: 'exec', permission: 'power_user' },
+    { role: 'user', pattern: 'manage_cron', permission: 'power_user' },
+    { role: 'user', pattern: 'edit_file', permission: 'allow' },
     // Viewers are read-only
     { role: 'viewer', pattern: 'read_file', permission: 'allow' },
     { role: 'viewer', pattern: 'list_directory', permission: 'allow' },

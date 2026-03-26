@@ -1,6 +1,6 @@
 # Channels — Features & Constraints
 
-AGW supports three messaging channels: **Web Chat**, **Telegram**, and **WhatsApp**. Each channel connects to the same AI agent — same tools, same memory, same persona.
+KairoClaw supports three messaging channels: **Web Chat**, **Telegram**, and **WhatsApp**. Each channel connects to the same AI agent — same tools, same memory, same persona.
 
 ---
 
@@ -19,7 +19,7 @@ AGW supports three messaging channels: **Web Chat**, **Telegram**, and **WhatsAp
 - Multi-session support
 
 ### Constraints
-- Single user (authenticated via API key)
+- Authenticated via API key (each user has their own key)
 - No mobile app — browser only
 - Sessions are per-browser (localStorage)
 
@@ -68,8 +68,8 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 
 ### Constraints
 - Bot cannot initiate conversations (Telegram restriction)
-- Bot token is permanent — regenerating via BotFather disconnects AGW
-- Rate limits apply (Telegram's global limits, not AGW's)
+- Bot token is permanent — regenerating via BotFather disconnects KairoClaw
+- Rate limits apply (Telegram's global limits, not KairoClaw's)
 - Bot sees all group messages but only processes mentions (when Require Mention = On)
 
 ### Setup
@@ -176,7 +176,7 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 | PDF analysis | Yes (via read_pdf) | Yes (via read_pdf) | Yes (via read_pdf) |
 | Allow-list (users) | No (API key auth) | By user ID | By phone number |
 | Allow-list (groups) | N/A | By group chat ID | By group JID |
-| Per-user memory | No (global) | Yes (scoped) | Yes (scoped) |
+| Per-user memory | Yes (scoped by user account) | Yes (scoped) | Yes (scoped) |
 | Hot-reload | N/A | Yes | Yes |
 | Read receipts | N/A | N/A | Configurable |
 | Mention in groups | N/A | @botname or reply | @phone or reply |

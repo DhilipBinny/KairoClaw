@@ -153,6 +153,9 @@ export const PERSONA_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md'];
 /** Default subdirectory for agent-generated documents */
 export const DOCUMENTS_DIR = 'documents';
 
+/** Shared team directory (accessible to all users) */
+export const SHARED_DIR = 'shared';
+
 // ── PDF ─────────────────────────────────────────────────────
 
 /** Maximum pages to extract from a PDF */

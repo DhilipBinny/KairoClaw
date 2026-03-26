@@ -59,12 +59,16 @@ const MIGRATE_TABLES = [
   'tool_permissions',
   'memory_chunks',
   'pending_senders',
+  'sender_links',
+  'cron_jobs',
 ];
 
 // Tables with SERIAL primary keys that need sequence resets
 const SERIAL_TABLES = [
   'messages', 'usage_records', 'audit_log',
   'tool_permissions', 'memory_chunks', 'pending_senders',
+  'sender_links',
+  // cron_jobs uses TEXT PK (UUID), no serial reset needed
 ];
 
 export interface MigrationResult {

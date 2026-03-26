@@ -15,9 +15,21 @@ export interface CronRoutesOptions {
 export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (app, opts) => {
   const { scheduler } = opts;
 
-  // GET /api/v1/admin/cron — list cron jobs
-  app.get('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async () => {
-    return { jobs: scheduler.list() };
+  // GET /api/v1/admin/cron — list cron jobs (with user names)
+  app.get('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async (request) => {
+    const jobs = scheduler.list();
+    // Enrich with user names
+    const db = (request as any).ctx?.db;
+    if (db) {
+      const userIds = [...new Set(jobs.map(j => j.userId).filter(Boolean))] as string[];
+      if (userIds.length > 0) {
+        const placeholders = userIds.map(() => '?').join(',');
+        const users = await db.query(`SELECT id, name FROM users WHERE id IN (${placeholders})`, userIds);
+        const nameMap = new Map(users.map((u: any) => [u.id, u.name]));
+        return { jobs: jobs.map(j => ({ ...j, userName: j.userId ? nameMap.get(j.userId) || null : null })) };
+      }
+    }
+    return { jobs: jobs.map(j => ({ ...j, userName: null })) };
   });
 
   // POST /api/v1/admin/cron — create a cron job
@@ -87,4 +99,12 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
       }
     },
   );
+
+  // GET /api/v1/my/cron — own cron jobs (any authenticated user)
+  app.get('/api/v1/my/cron', async (request) => {
+    const userId = request.user?.id;
+    if (!userId) return { jobs: [] };
+    const allJobs = scheduler.list();
+    return { jobs: allJobs.filter(j => j.userId === userId) };
+  });
 };
