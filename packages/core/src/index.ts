@@ -510,14 +510,18 @@ async function main(): Promise<void> {
   // 13. Start cron scheduler
   const scheduler = new CronScheduler({
     stateDir,
+    db,
+    tenantId,
     logger: (server.log as unknown as Logger).child({ category: 'cron' }),
     executor: async (job) => {
+      // Use job owner's userId if set — cron runs with their permissions
+      const cronUserId = job.userId || 'system';
       const inbound: InboundMessage = {
         text: job.prompt,
-        channel: 'cron',
+        channel: job.userId ? 'internal' : 'cron', // user-owned crons use 'internal' channel
         chatId: `cron:${job.id}`,
         chatType: 'private',
-        userId: 'system',
+        userId: cronUserId,
         senderName: 'Cron',
       };
       const result = await createRunner(inbound);
@@ -563,7 +567,7 @@ async function main(): Promise<void> {
       }
     },
   });
-  scheduler.start();
+  await scheduler.start();
   sharedServices.cronScheduler = scheduler;
 
   // Migrate: seed outbound allowlists from existing active cron targets
