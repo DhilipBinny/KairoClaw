@@ -40,6 +40,7 @@ const TABLES = [
   'memory_chunks',
   'pending_senders',
   'sender_links',
+  'cron_jobs',
 ];
 
 async function migrate() {
