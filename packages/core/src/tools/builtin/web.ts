@@ -133,8 +133,12 @@ export const webTools: ToolRegistration[] = [
           });
           if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
             if (i >= maxRedirects) return { error: 'Too many redirects' };
-            const next = new URL(res.headers.get('location')!, currentUrl).href;
-            try { validateFetchUrl(next); } catch (e: unknown) {
+            const nextUrl = new URL(res.headers.get('location')!, currentUrl);
+            const next = nextUrl.href;
+            try {
+              validateFetchUrl(next);
+              await validateResolvedIP(nextUrl.hostname);
+            } catch (e: unknown) {
               return { error: `SSRF protection on redirect: ${e instanceof Error ? e.message : String(e)}` };
             }
             currentUrl = next;
