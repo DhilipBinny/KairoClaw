@@ -64,6 +64,9 @@ async function buildSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise
       let nextRef = 1;
 
       // ── Pass 1: All interactive elements with numbered refs ──
+      // Clear any pre-existing refs (prevent malicious page from spoofing refs)
+      document.querySelectorAll('[data-kc-ref]').forEach(el => el.removeAttribute('data-kc-ref'));
+
       const elements = document.querySelectorAll(
         'input, textarea, select, button, a[href], [role="button"], [role="tab"], ' +
         '[role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], ' +
@@ -102,7 +105,9 @@ async function buildSnapshot(page: Page, maxChars = MAX_SNAPSHOT_CHARS): Promise
           const input = el as HTMLInputElement;
           if (input.type === 'hidden') { nextRef--; continue; }
           desc = `[ref=${ref}] [input type=${input.type || 'text'}] "${name}"`;
-          if (input.value) desc += ` value="${input.value.slice(0, 40)}"`;
+          // Never leak password values
+          if (input.type === 'password') { desc += ' value="[REDACTED]"'; }
+          else if (input.value) desc += ` value="${input.value.slice(0, 40)}"`;
           if (input.disabled) desc += ' [disabled]';
           if (input.required) desc += ' [required]';
         } else if (tag === 'TEXTAREA') {
@@ -357,10 +362,13 @@ ACTIONS:
       }
 
       // Load saved session on navigate if requested
+      let sessionWarning: string | undefined;
       if (action === 'navigate' && args.session) {
         try {
           await browserManager.loadSession(userId, args.session as string, workspace);
-        } catch { /* session not found — continue without it */ }
+        } catch (e: unknown) {
+          sessionWarning = `Failed to load session "${args.session}": ${e instanceof Error ? e.message : String(e)}. Continuing without saved cookies.`;
+        }
       }
 
       let page: Page;
@@ -393,7 +401,7 @@ ACTIONS:
             }
             await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
             await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-            return { success: true, ...(await snap()) };
+            return { success: true, ...(await snap()), ...(sessionWarning ? { warning: sessionWarning } : {}) };
           }
 
           case 'click': {
@@ -474,7 +482,7 @@ ACTIONS:
             const filePath = path.join(mediaDir, filename);
             try {
               fs.mkdirSync(mediaDir, { recursive: true });
-              fs.writeFileSync(filePath, buffer);
+              fs.writeFileSync(filePath, buffer, { mode: 0o600 });
             } catch (e: unknown) {
               return { error: `Failed to save screenshot: ${e instanceof Error ? e.message : 'disk error'}` };
             }
@@ -491,7 +499,10 @@ ACTIONS:
             const waitText = args.text as string | undefined;
             const waitUrl = args.url as string | undefined;
             const maxWait = Math.min((args.timeMs as number) || 5000, 30_000);
-            if (waitText) await page.waitForSelector(`text="${waitText}"`, { timeout: maxWait }).catch(() => {});
+            if (waitText) {
+              const safeText = waitText.replace(/"/g, '\\"');
+              await page.waitForSelector(`text="${safeText}"`, { timeout: maxWait }).catch(() => {});
+            }
             else if (waitUrl) await page.waitForURL(waitUrl, { timeout: maxWait }).catch(() => {});
             else await page.waitForTimeout(Math.min(maxWait, 10_000));
             return { success: true, ...(await snap()) };
@@ -553,7 +564,9 @@ ACTIONS:
 
                   // Find label
                   const id = el.getAttribute('id');
-                  const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
+                  // Escape id for CSS selector to prevent injection
+                  const safeId = id ? id.replace(/["\\]/g, '') : null;
+                  const labelEl = safeId ? document.querySelector(`label[for="${safeId}"]`) : null;
                   const label = labelEl?.textContent?.trim().slice(0, 60)
                     || el.getAttribute('aria-label')
                     || el.getAttribute('placeholder')
@@ -567,7 +580,8 @@ ACTIONS:
                     label,
                     name: el.getAttribute('name') || '',
                     required: (el as HTMLInputElement).required || false,
-                    value: (el as HTMLInputElement).value || '',
+                    // Never leak password values
+                    value: type === 'password' ? '[REDACTED]' : ((el as HTMLInputElement).value || ''),
                   });
                 }
 
