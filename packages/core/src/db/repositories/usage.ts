@@ -130,13 +130,6 @@ export class UsageRepository {
     };
   }
 
-  async summarizeByDateRange(tenantId: string, startDate: string, endDate: string): Promise<UsageRow[]> {
-    return await this.db.query<UsageRow>(
-      `SELECT * FROM usage_records WHERE tenant_id = ? AND created_at >= ? AND created_at <= ? ORDER BY created_at ASC`,
-      [tenantId, startDate, endDate],
-    );
-  }
-
   async summarizeAllUsers(tenantId: string, days = 30): Promise<Array<{ user_id: string; total_input: number; total_output: number; total_cost: number; request_count: number }>> {
     const cutoff = new Date(Date.now() - days * 86400000).toISOString();
     return await this.db.query(

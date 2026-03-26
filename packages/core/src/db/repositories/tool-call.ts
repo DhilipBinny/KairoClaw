@@ -55,28 +55,4 @@ export class ToolCallRepository {
     );
   }
 
-  async listByTool(tenantId: string, toolName: string, limit = 100): Promise<ToolCallRow[]> {
-    return await this.db.query<ToolCallRow>(
-      'SELECT * FROM tool_calls WHERE tenant_id = ? AND tool_name = ? ORDER BY created_at DESC LIMIT ?',
-      [tenantId, toolName, limit],
-    );
-  }
-
-  async updateStatus(id: string, status: string, result?: unknown, durationMs?: number): Promise<void> {
-    const fields: string[] = ['status = ?'];
-    const values: unknown[] = [status];
-
-    if (result !== undefined) {
-      fields.push('result = ?');
-      values.push(JSON.stringify(result));
-    }
-    if (durationMs !== undefined) {
-      fields.push('duration_ms = ?');
-      values.push(durationMs);
-    }
-
-    values.push(id);
-
-    await this.db.run(`UPDATE tool_calls SET ${fields.join(', ')} WHERE id = ?`, values);
-  }
 }

@@ -88,6 +88,3 @@ export class AgentQueue {
     };
   }
 }
-
-/** Default singleton queue instance. */
-export const agentQueue = new AgentQueue();

@@ -39,11 +39,6 @@ const _authCleanupInterval = setInterval(() => {
   }
 }, 5 * 60_000);
 
-/** Stop the periodic login-attempt cleanup timer (for graceful shutdown). */
-export function cleanupAuthTimers(): void {
-  clearInterval(_authCleanupInterval);
-}
-
 export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/v1/auth/login — validate API key and return user info
   app.post('/api/v1/auth/login', async (request, reply) => {

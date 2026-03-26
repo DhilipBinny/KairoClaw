@@ -20,9 +20,6 @@ export const SAFETY_RULES = [
 
 // ── Agent Loop ──────────────────────────────────────────────
 
-/** Max tool-call rounds per agent turn (overridden by config.agent.maxToolRounds) */
-export const DEFAULT_MAX_TOOL_ROUNDS = 25;
-
 /** Max chars per individual tool result before truncation */
 export const MAX_TOOL_RESULT_CHARS = 10_000;
 
@@ -30,12 +27,6 @@ export const MAX_TOOL_RESULT_CHARS = 10_000;
 export const MAX_TOTAL_TOOL_RESULTS = 30_000;
 
 // ── Compaction ──────────────────────────────────────────────
-
-/** Context usage ratio that triggers compaction (overridden by config.agent.compactionThreshold) */
-export const DEFAULT_COMPACTION_THRESHOLD = 0.75;
-
-/** Messages to keep after compaction (overridden by config.agent.keepRecentMessages) */
-export const DEFAULT_KEEP_RECENT_MESSAGES = 10;
 
 // ── Memory ──────────────────────────────────────────────────
 
@@ -140,9 +131,6 @@ export const SCOPE_DIR_NAME = 'scopes';
 
 /** Files that are ALWAYS global (never overridden per scope) */
 export const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'SOUL.md'];
-
-/** Files that cascade: scope override → global fallback */
-export const CASCADING_FILES = ['USER.md'];
 
 /** Channels that get scoped memory */
 export const SCOPED_CHANNELS = ['telegram', 'whatsapp', 'web'];

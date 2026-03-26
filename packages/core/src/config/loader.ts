@@ -154,18 +154,3 @@ export function loadConfig(configPath?: string): GatewayConfig {
 
   return config;
 }
-
-// ──────────────────────────────────────────────
-// Save config
-// ──────────────────────────────────────────────
-
-/**
- * Save a configuration object to disk as JSON.
- */
-export function saveConfig(config: GatewayConfig, configPath: string): void {
-  // Remove internal fields before saving
-  const toSave = { ...config };
-  delete toSave._stateDir;
-
-  fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), { mode: 0o600 });
-}
