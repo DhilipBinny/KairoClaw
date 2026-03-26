@@ -105,4 +105,10 @@
   .msg.assistant { border-left: 3px solid var(--green); }
   .msg-role { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); }
   .msg-content { font-size: 13px; margin-top: 4px; white-space: pre-wrap; color: var(--text-primary); }
+
+  @media (max-width: 768px) {
+    .sessions-layout { flex-direction: column; height: auto; }
+    .session-list { width: 100%; min-width: unset; max-height: 40vh; }
+    .session-detail { min-height: 40vh; }
+  }
 </style>
