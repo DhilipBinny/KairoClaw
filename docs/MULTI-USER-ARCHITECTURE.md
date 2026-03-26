@@ -152,12 +152,11 @@ Message arrives from Telegram/WhatsApp
   +-- config.json                         <-- all configuration
   +-- secrets.enc                         <-- encrypted API keys (AES-256-GCM)
   +-- master.key                          <-- encryption master key (BACK UP!)
-  +-- gateway.db                          <-- SQLite database
-  +-- cron-jobs.json                      <-- scheduled tasks
+  +-- gateway.db                          <-- SQLite database (includes cron_jobs table)
   +-- plugins.json                        <-- plugin config
   +-- logs/                               <-- server-YYYY-MM-DD.log (7-day retention)
   +-- whatsapp/                           <-- WhatsApp session auth files
-  +-- media/                              <-- uploaded PDFs, voice messages, images
+  +-- media/                              <-- legacy media (pre-scoping, served by MediaStore)
   |
   +-- workspace/                          <-- agent workspace (config.agent.workspace)
         |
@@ -166,8 +165,9 @@ Message arrives from Telegram/WhatsApp
         +-- RULES.md                      <-- shared rules (protected)
         +-- USER.md                       <-- global user profile (fallback)
         |
-        +-- documents/                    <-- shared writable space (all users)
-        +-- media/                        <-- agent-generated images
+        +-- shared/                       <-- TEAM SPACE (all users can read/write)
+        |     +-- documents/              <-- team reports, exports, shared files
+        |     +-- media/                  <-- shared media (unlinked sender uploads)
         |
         +-- memory/                       <-- global memory (cron/system only)
         |     +-- PROFILE.md
@@ -179,27 +179,26 @@ Message arrives from Telegram/WhatsApp
               |
               +-- 675390be-.../           <-- Admin (Binny)
               |     +-- USER.md           <-- personal profile
+              |     +-- documents/        <-- personal documents (default write target)
+              |     +-- media/            <-- personal uploads (WA/TG/web)
               |     +-- memory/
               |           +-- PROFILE.md  <-- merged from ALL channels
               |           +-- sessions/
-              |                 +-- 2026-03-21.md
-              |                 +-- 2026-03-22.md
               |
               +-- 0ccce21b-.../           <-- Sruthi
+              |     +-- documents/        <-- her documents
+              |     +-- media/            <-- her uploaded PDFs, images, voice
               |     +-- memory/
               |           +-- PROFILE.md
               |           +-- sessions/
               |
               |  --- GROUP SCOPES ---
               |
-              +-- group_telegram_-100332../ <-- Telegram group
+              +-- group_telegram_.../     <-- Telegram group
+              |     +-- documents/        <-- files from group context
+              |     +-- media/
               |     +-- memory/
               |           +-- PROFILE.md  <-- group context memory
-              |           +-- sessions/
-              |
-              +-- group_whatsapp_12036.../ <-- WhatsApp group
-              |     +-- memory/
-              |           +-- PROFILE.md
               |           +-- sessions/
               |
               |  --- UNLINKED SENDER SCOPES (temporary) ---

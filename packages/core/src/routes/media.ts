@@ -76,9 +76,20 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
     const originalName = data.filename || 'upload';
     const ext = path.extname(originalName).slice(1).toLowerCase() || 'bin';
 
-    // Save to workspace/media/ (not mediaStore) so safePath() allows tool access
-    const mediaDir = path.join(workspace, 'media');
-    fs.mkdirSync(mediaDir, { recursive: true });
+    // Save to user's scoped media dir if authenticated, otherwise shared/media
+    let mediaDir: string;
+    if (request.user?.id) {
+      const { getScopedMediaDir } = await import('../media/scoped-dir.js');
+      const db = (request as any).ctx?.db;
+      const tenantId = request.tenantId || 'default';
+      // Web uploads: user is authenticated by API key, use their UUID directly
+      const scopeDir = path.join(workspace, 'scopes', request.user.id, 'media');
+      fs.mkdirSync(scopeDir, { recursive: true });
+      mediaDir = scopeDir;
+    } else {
+      mediaDir = path.join(workspace, 'shared', 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+    }
     const safeExt = ext.replace(/[^a-z0-9]/gi, '').slice(0, 10) || 'bin';
     const savedName = `${Date.now()}-${originalName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60)}.${safeExt}`;
     const filePath = path.join(mediaDir, savedName);
