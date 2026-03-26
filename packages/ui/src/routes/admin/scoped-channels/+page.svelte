@@ -157,7 +157,7 @@
 
 <style>
   .page {
-    max-width: 1200px;
+    max-width: 1000px;
   }
   .page-header {
     margin-bottom: 24px;
