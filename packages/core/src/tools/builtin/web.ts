@@ -175,6 +175,10 @@ export const webTools: ToolRegistration[] = [
           .trim()
           .slice(0, maxChars);
 
+        // Hint: if content is mostly empty, the site likely needs JS rendering
+        if (text.length < 200) {
+          return { content: text, url, chars: text.length, hint: 'Content appears very short — this site may require JavaScript rendering. Try the browse tool instead.' };
+        }
         return { content: text, url, chars: text.length };
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
