@@ -108,4 +108,39 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
     const allJobs = scheduler.list();
     return { jobs: allJobs.filter(j => j.userId === userId) };
   });
+
+  // PATCH /api/v1/my/cron/:id — enable/disable own cron job
+  app.patch('/api/v1/my/cron/:id', async (request, reply) => {
+    const userId = request.user?.id;
+    if (!userId) return reply.code(401).send({ error: 'Not authenticated' });
+
+    const { id } = request.params as { id: string };
+    const { enabled } = request.body as { enabled?: boolean };
+
+    // Ownership check
+    const job = scheduler.list().find(j => j.id === id);
+    if (!job) return reply.code(404).send({ error: 'Job not found' });
+    if (job.userId !== userId) return reply.code(403).send({ error: 'Forbidden' });
+
+    if (enabled === undefined) return reply.code(400).send({ error: 'enabled is required' });
+
+    const updated = scheduler.update(id, { enabled });
+    return { success: true, job: updated };
+  });
+
+  // DELETE /api/v1/my/cron/:id — delete own cron job
+  app.delete('/api/v1/my/cron/:id', async (request, reply) => {
+    const userId = request.user?.id;
+    if (!userId) return reply.code(401).send({ error: 'Not authenticated' });
+
+    const { id } = request.params as { id: string };
+
+    // Ownership check
+    const job = scheduler.list().find(j => j.id === id);
+    if (!job) return reply.code(404).send({ error: 'Job not found' });
+    if (job.userId !== userId) return reply.code(403).send({ error: 'Forbidden' });
+
+    scheduler.remove(id);
+    return { success: true };
+  });
 };
