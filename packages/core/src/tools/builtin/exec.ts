@@ -45,6 +45,25 @@ const BLOCKED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bLD_PRELOAD\s*=/i, reason: 'LD_PRELOAD injection' },
   { pattern: /\bDYLD_/i, reason: 'DYLD injection' },
   { pattern: /\bLD_LIBRARY_PATH\s*=/i, reason: 'LD_LIBRARY_PATH hijacking' },
+
+  // ── Persona file protection ──────────────────────────────
+  // Prevent modification of IDENTITY.md, SOUL.md, RULES.md via any method
+  { pattern: /\b(sed|awk|perl)\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'modify persona file' },
+  { pattern: />\s*\S*(IDENTITY|SOUL|RULES)\.md/i, reason: 'redirect to persona file' },
+  { pattern: /\b(echo|printf|cat|tee)\b.*>\s*\S*(IDENTITY|SOUL|RULES)\.md/i, reason: 'overwrite persona file' },
+  { pattern: /\b(cp|mv)\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'copy/move persona file' },
+  { pattern: /\b(python[23]?|node|ruby|perl)\s+(-[cCe]\s+)?.*\b(IDENTITY|SOUL|RULES)\b/i, reason: 'script modify persona file' },
+  { pattern: /\brm\b.*\b(IDENTITY|SOUL|RULES)\.md\b/i, reason: 'delete persona file' },
+
+  // ── Application source code protection ───────────────────
+  // Prevent reading app internals — security patterns, auth logic, encryption
+  { pattern: /\/app\/packages\//i, reason: 'access application source code' },
+  { pattern: /\/app\/node_modules\//i, reason: 'access application dependencies' },
+  { pattern: /\bfind\s+\/app\b/i, reason: 'scan application directory' },
+
+  // ── Encrypted secrets / master key protection ────────────
+  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*master\.key/i, reason: 'read encryption master key' },
+  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*secrets\.enc/i, reason: 'read encrypted secrets' },
 ];
 
 // ── Layer 2: Confirmation required — risky but sometimes needed ──
