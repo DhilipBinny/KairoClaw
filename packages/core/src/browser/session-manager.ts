@@ -5,6 +5,8 @@
  * Contexts auto-close after idle timeout. Browser instance is shared (single Chromium process).
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { createModuleLogger } from '../observability/logger.js';
 import { validateFetchUrl, validateResolvedIP } from '../tools/builtin/web.js';
@@ -211,6 +213,120 @@ export class BrowserSessionManager {
   setRefMap(userId: string, refMap: Map<number, string>): void {
     const session = this.sessions.get(userId);
     if (session) session.refMap = refMap;
+  }
+
+  // ── Session persistence (cookies/localStorage) ─────────────
+
+  /** Get the directory for storing browser session profiles. */
+  private _sessionDir(workspace: string, userId: string): string {
+    return path.join(workspace, 'scopes', userId, 'browser-sessions');
+  }
+
+  /** Save current browser session (cookies + localStorage) to a named profile. */
+  async saveSession(userId: string, name: string, workspace: string): Promise<{ success: boolean; name: string }> {
+    const session = this.sessions.get(userId);
+    if (!session) throw new Error('No active browser session. Navigate to a page first.');
+
+    const dir = this._sessionDir(workspace, userId);
+    fs.mkdirSync(dir, { recursive: true });
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
+    const filePath = path.join(dir, `${safeName}.json`);
+
+    const state = await session.context.storageState();
+    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    log.info({ userId, name: safeName }, 'Browser session saved');
+    return { success: true, name: safeName };
+  }
+
+  /** Create a new browser context with a saved session profile (cookies/localStorage restored). */
+  async loadSession(userId: string, name: string, workspace: string): Promise<{ page: Page; context: BrowserContext }> {
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
+    const filePath = path.join(this._sessionDir(workspace, userId), `${safeName}.json`);
+
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Saved session "${name}" not found. Use saveSession first.`);
+    }
+
+    // Close existing session if any
+    await this.closeSession(userId);
+
+    // Read saved state
+    const stateJson = fs.readFileSync(filePath, 'utf8');
+    const storageState = JSON.parse(stateJson);
+
+    // Launch browser if needed
+    if (!this.browser || !this.browser.isConnected()) {
+      this.browser = await chromium.launch({
+        executablePath: this.executablePath,
+        args: CHROMIUM_ARGS,
+      });
+    }
+
+    // Create context with saved state
+    let context: BrowserContext | null = null;
+    try {
+      context = await this.browser.newContext({
+        viewport: DEFAULT_VIEWPORT,
+        userAgent: 'KairoClaw/1.0 (Browser Tool)',
+        acceptDownloads: false,
+        storageState,
+      });
+      context.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
+      context.setDefaultTimeout(NAV_TIMEOUT_MS);
+
+      // Apply same protections as _createSession
+      context.on('page', (newPage) => {
+        if (context!.pages().length > MAX_PAGES_PER_CONTEXT) newPage.close().catch(() => {});
+      });
+      context.on('page', (p) => {
+        p.on('dialog', (d) => d.dismiss().catch(() => {}));
+      });
+      const { shouldBlockResource } = await import('../tools/builtin/browse.js');
+      await context.route('**/*', async (route) => {
+        const url = route.request().url();
+        if (url.startsWith('data:') || url.startsWith('blob:')) { await route.continue(); return; }
+        if (shouldBlockResource(url, route.request().resourceType())) { await route.abort('blockedbyclient'); return; }
+        try {
+          const parsed = validateFetchUrl(url);
+          await validateResolvedIP(parsed.hostname);
+          await route.continue();
+        } catch { await route.abort('blockedbyclient'); }
+      });
+
+      const page = await context.newPage();
+      page.on('dialog', (d) => d.dismiss().catch(() => {}));
+
+      this.sessions.set(userId, {
+        context, page, userId,
+        createdAt: Date.now(), lastActivity: Date.now(),
+        refMap: new Map(),
+      });
+      log.info({ userId, name: safeName }, 'Browser session loaded from saved state');
+      return { page, context };
+    } catch (e) {
+      if (context) try { await context.close(); } catch { /* ignore */ }
+      throw e;
+    }
+  }
+
+  /** List saved session profile names for a user. */
+  listSavedSessions(userId: string, workspace: string): string[] {
+    const dir = this._sessionDir(workspace, userId);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''));
+  }
+
+  /** Delete a saved session profile. */
+  deleteSavedSession(userId: string, name: string, workspace: string): boolean {
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
+    const filePath = path.join(this._sessionDir(workspace, userId), `${safeName}.json`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+    return false;
   }
 
   /** Close a specific user's session. */

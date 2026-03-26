@@ -255,7 +255,7 @@ RULES:
 - Use screenshot only for visual verification, not for finding elements.
 
 ACTIONS:
-- navigate: Go to URL. Params: url (required). Returns snapshot.
+- navigate: Go to URL. Params: url (required). Optional: session (load saved session first). Returns snapshot.
 - click: Click element. Params: ref (required). Returns snapshot.
 - type: Type into input. Params: ref (required), text (required), submit (optional — press Enter after).
 - press: Press key. Params: key (required, e.g. "Enter", "Tab", "Escape").
@@ -268,15 +268,21 @@ ACTIONS:
 - back: Navigate back.
 - tabs: List open tabs.
 - hover: Params: ref (required).
+- forms: Detect all forms on page — returns structured field list with refs for easy fill.
+- saveSession: Save cookies/login state. Params: session (required — name for the profile).
+- loadSession: Restore saved session. Params: session (required).
+- listSessions: List saved session profiles.
+- deleteSession: Delete saved profile. Params: session (required).
 - close: End browser session.`,
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['navigate', 'click', 'type', 'press', 'select', 'fill', 'snapshot', 'screenshot', 'wait', 'scroll', 'back', 'tabs', 'hover', 'close'],
+            enum: ['navigate', 'click', 'type', 'press', 'select', 'fill', 'snapshot', 'screenshot', 'wait', 'scroll', 'back', 'tabs', 'hover', 'forms', 'saveSession', 'loadSession', 'listSessions', 'deleteSession', 'close'],
             description: 'The browser action to perform',
           },
+          session: { type: 'string', description: 'Session profile name (for saveSession/loadSession/deleteSession, or with navigate to auto-restore)' },
           url: { type: 'string', description: 'URL to navigate to (for navigate action)' },
           ref: { type: 'number', description: 'Element ref number from snapshot (for click/type/select/hover)' },
           element: { type: 'string', description: 'Element text/name fallback if ref not available (for click/type/select/hover)' },
@@ -315,9 +321,46 @@ ACTIONS:
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
       const workspace = (ctx.workspace as string) || process.cwd();
 
+      // Actions that don't need an active page
       if (action === 'close') {
         await browserManager.closeSession(userId);
         return { success: true, message: 'Browser session closed' };
+      }
+      if (action === 'listSessions') {
+        const sessions = browserManager.listSavedSessions(userId, workspace);
+        return { sessions, count: sessions.length };
+      }
+      if (action === 'deleteSession') {
+        const name = args.session as string;
+        if (!name) return { error: 'session name is required for deleteSession' };
+        const deleted = browserManager.deleteSavedSession(userId, name, workspace);
+        return deleted ? { success: true, deleted: name } : { error: `Session "${name}" not found` };
+      }
+      if (action === 'saveSession') {
+        const name = args.session as string;
+        if (!name) return { error: 'session name is required for saveSession' };
+        try {
+          return await browserManager.saveSession(userId, name, workspace);
+        } catch (e: unknown) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      if (action === 'loadSession') {
+        const name = args.session as string;
+        if (!name) return { error: 'session name is required for loadSession' };
+        try {
+          await browserManager.loadSession(userId, name, workspace);
+          return { success: true, loaded: name, message: `Session "${name}" loaded. Cookies and login state restored.` };
+        } catch (e: unknown) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+
+      // Load saved session on navigate if requested
+      if (action === 'navigate' && args.session) {
+        try {
+          await browserManager.loadSession(userId, args.session as string, workspace);
+        } catch { /* session not found — continue without it */ }
       }
 
       let page: Page;
@@ -475,6 +518,92 @@ ACTIONS:
             const loc = await resolveWithRetry(page, refMap, args.ref as number, args.element as string);
             await loc.hover({ timeout: 10_000 });
             return { success: true };
+          }
+
+          case 'forms': {
+            // Take a fresh snapshot first to ensure refs are current
+            const snapResult = await snap();
+
+            const formData = await page.evaluate(() => {
+              const forms: Array<{
+                name: string;
+                action: string;
+                method: string;
+                fields: Array<{ ref: number; tag: string; type: string; label: string; name: string; required: boolean; value: string }>;
+                submitButton: { ref: number; text: string } | null;
+              }> = [];
+
+              for (const form of document.querySelectorAll('form')) {
+                const fields: typeof forms[0]['fields'] = [];
+                let submitBtn: typeof forms[0]['submitButton'] = null;
+
+                // Find all fields in this form
+                for (const el of form.querySelectorAll('input, textarea, select')) {
+                  const refAttr = el.getAttribute('data-kc-ref');
+                  if (!refAttr) continue;
+                  const ref = parseInt(refAttr);
+                  const tag = el.tagName.toLowerCase();
+                  const type = (el as HTMLInputElement).type || tag;
+                  if (type === 'hidden' || type === 'submit') {
+                    if (type === 'submit' && !submitBtn) {
+                      submitBtn = { ref, text: (el as HTMLInputElement).value || 'Submit' };
+                    }
+                    continue;
+                  }
+
+                  // Find label
+                  const id = el.getAttribute('id');
+                  const labelEl = id ? document.querySelector(`label[for="${id}"]`) : null;
+                  const label = labelEl?.textContent?.trim().slice(0, 60)
+                    || el.getAttribute('aria-label')
+                    || el.getAttribute('placeholder')
+                    || el.getAttribute('name')
+                    || '';
+
+                  fields.push({
+                    ref,
+                    tag,
+                    type,
+                    label,
+                    name: el.getAttribute('name') || '',
+                    required: (el as HTMLInputElement).required || false,
+                    value: (el as HTMLInputElement).value || '',
+                  });
+                }
+
+                // Find submit button (if not found as input[type=submit])
+                if (!submitBtn) {
+                  const btn = form.querySelector('button[type="submit"], button:not([type])');
+                  if (btn) {
+                    const refAttr = btn.getAttribute('data-kc-ref');
+                    if (refAttr) {
+                      submitBtn = { ref: parseInt(refAttr), text: btn.textContent?.trim().slice(0, 40) || 'Submit' };
+                    }
+                  }
+                }
+
+                if (fields.length > 0) {
+                  forms.push({
+                    name: form.getAttribute('aria-label') || form.getAttribute('name') || form.getAttribute('id') || `Form ${forms.length + 1}`,
+                    action: form.getAttribute('action') || '',
+                    method: (form.getAttribute('method') || 'GET').toUpperCase(),
+                    fields,
+                    submitButton: submitBtn,
+                  });
+                }
+              }
+              return forms;
+            });
+
+            return {
+              url: snapResult.url,
+              title: snapResult.title,
+              forms: formData,
+              formCount: formData.length,
+              hint: formData.length > 0
+                ? 'Use the fill action with [{ref, value}] to fill form fields, then click the submit button ref.'
+                : 'No forms detected on this page.',
+            };
           }
 
           default:
