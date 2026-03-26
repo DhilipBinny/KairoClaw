@@ -122,12 +122,33 @@ async function executeCommand(msg) {
       case 'navigate': {
         const url = params.url;
         if (!url) return { error: 'url is required' };
-        // Open in new tab
-        const tab = await chrome.tabs.create({ url, active: true });
+
+        // Check if we already have an agent-opened tab (never reuse user's tabs)
+        let tab;
+        let existingAgentTab = null;
+        for (const tabId of [...agentTabIds].reverse()) {
+          try {
+            await chrome.tabs.get(tabId);
+            existingAgentTab = tabId;
+            break;
+          } catch {
+            agentTabIds.delete(tabId);
+          }
+        }
+
+        if (existingAgentTab) {
+          // Reuse existing agent tab
+          tab = await chrome.tabs.update(existingAgentTab, { url, active: true });
+        } else {
+          // Open in a NEW WINDOW so user can see chat + browser side by side
+          const win = await chrome.windows.create({ url, type: 'normal' });
+          tab = win.tabs[0];
+        }
         agentTabIds.add(tab.id);
         // Wait for page load
         await waitForTabLoad(tab.id, 30000);
-        return { success: true, tabId: tab.id, url: tab.url || url };
+        const updatedTab = await chrome.tabs.get(tab.id);
+        return { success: true, tabId: tab.id, url: updatedTab.url || url };
       }
 
       case 'snapshot': {
@@ -155,11 +176,12 @@ async function executeCommand(msg) {
         if (!tabId) return { error: 'No active tab' };
         const ref = params.ref;
         const element = params.element;
+        // Visual feedback: highlight + cursor animation
+        await highlightElement(tabId, ref, element);
         const result = await executeInTab(tabId, (ref, element) => {
           let el = null;
           if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
           if (!el && element) {
-            // Fallback: find by text
             for (const tag of ['button', 'a', 'input', '[role="button"]']) {
               for (const candidate of document.querySelectorAll(tag)) {
                 const text = candidate.getAttribute('aria-label') || candidate.textContent?.trim() || '';
@@ -172,8 +194,7 @@ async function executeCommand(msg) {
           el.click();
           return { success: true, clicked: el.tagName };
         }, [ref, element]);
-        // Wait for potential navigation
-        await sleep(1500);
+        await sleep(1000);
         return result;
       }
 
@@ -181,6 +202,8 @@ async function executeCommand(msg) {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
         const { ref, element, text, submit } = params;
+        // Visual feedback
+        await highlightElement(tabId, ref, element);
         const result = await executeInTab(tabId, (ref, element, text) => {
           let el = null;
           if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
@@ -325,6 +348,91 @@ async function executeCommand(msg) {
   }
 }
 
+// ── Visual feedback helpers ──────────────────────────────────
+
+/**
+ * Highlight an element and animate a cursor pointer to it.
+ * Runs inside the page via chrome.scripting.executeScript.
+ */
+/** Inject highlight CSS into a tab (once per tab, CSP-proof via chrome.scripting.insertCSS) */
+const highlightCssInjected = new Set();
+
+async function injectHighlightCSS(tabId) {
+  if (highlightCssInjected.has(tabId)) return;
+  try {
+    await chrome.scripting.insertCSS({
+      target: { tabId },
+      css: `
+        @keyframes kc-highlight-pulse {
+          0% { outline-color: rgba(239, 68, 68, 1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+          50% { outline-color: rgba(239, 68, 68, 0.5); box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+          100% { outline-color: rgba(239, 68, 68, 1); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+        }
+        .kc-highlight {
+          outline: 4px solid #ef4444 !important;
+          outline-offset: 3px !important;
+          background-color: rgba(239, 68, 68, 0.08) !important;
+          animation: kc-highlight-pulse 0.5s ease-in-out 3 !important;
+          transition: outline 0.2s, background-color 0.2s !important;
+        }
+      `,
+    });
+    highlightCssInjected.add(tabId);
+  } catch (e) {
+    console.warn('[KairoClaw] Failed to inject CSS:', e.message);
+  }
+}
+
+async function highlightElement(tabId, ref, element) {
+  // Focus the agent window so user can see it
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.windows.update(tab.windowId, { focused: true });
+    await chrome.tabs.update(tabId, { active: true });
+  } catch { /* ignore */ }
+
+  // Inject CSS (once per tab)
+  await injectHighlightCSS(tabId);
+
+  // Add highlight class to target element
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (ref, element) => {
+        // Remove previous highlight
+        document.querySelectorAll('.kc-highlight').forEach(el => el.classList.remove('kc-highlight'));
+
+        // Find target
+        let el = null;
+        if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
+        if (!el && element) {
+          for (const tag of ['button', 'a', 'input', 'textarea', 'select', '[role="button"]']) {
+            for (const candidate of document.querySelectorAll(tag)) {
+              const text = candidate.getAttribute('aria-label') || candidate.textContent?.trim() || '';
+              if (text.toLowerCase().includes(element.toLowerCase())) { el = candidate; break; }
+            }
+            if (el) break;
+          }
+        }
+        if (!el) return;
+
+        // Scroll into view and highlight
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('kc-highlight');
+
+        // Remove after 2.5s
+        setTimeout(() => el.classList.remove('kc-highlight'), 2500);
+      },
+      args: [ref, element],
+    });
+  } catch (e) {
+    console.warn('[KairoClaw] Highlight failed:', e.message);
+  }
+
+  // Wait so user can actually see the highlight before action executes
+  await sleep(1500);
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function sleep(ms) {
@@ -332,7 +440,7 @@ function sleep(ms) {
 }
 
 async function getActiveAgentTab() {
-  // Return the most recently used agent tab that still exists
+  // Return the most recently used agent-opened tab (NEVER use user's tabs)
   for (const tabId of [...agentTabIds].reverse()) {
     try {
       await chrome.tabs.get(tabId);
@@ -341,9 +449,8 @@ async function getActiveAgentTab() {
       agentTabIds.delete(tabId);
     }
   }
-  // Fallback: active tab
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.id;
+  // No agent tab — return null (caller must handle)
+  return null;
 }
 
 function waitForTabLoad(tabId, timeoutMs) {
@@ -366,12 +473,17 @@ function waitForTabLoad(tabId, timeoutMs) {
 }
 
 async function executeInTab(tabId, func, args) {
-  const results = await chrome.scripting.executeScript({
-    target: { tabId },
-    func,
-    args,
-  });
-  return results[0]?.result;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func,
+      args,
+    });
+    return results[0]?.result;
+  } catch (e) {
+    console.warn('[KairoClaw] executeInTab failed:', e.message);
+    return { error: `Script execution failed: ${e.message}` };
+  }
 }
 
 async function getTabSnapshot(tabId) {
@@ -451,6 +563,7 @@ async function getTabSnapshot(tabId) {
 chrome.tabs.onRemoved.addListener((tabId) => {
   agentTabIds.delete(tabId);
   debuggerAttached.delete(tabId);
+  highlightCssInjected.delete(tabId);
 });
 
 // ── Auto-connect on startup ─────────────────────────────────
@@ -471,6 +584,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Export for popup
-self.connect = connect;
-self.disconnect = disconnect;
+// Listen for messages from popup
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'connect') {
+    disconnect();
+    connect();
+  } else if (msg.type === 'disconnect') {
+    disconnect();
+  }
+});

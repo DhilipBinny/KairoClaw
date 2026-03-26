@@ -329,8 +329,32 @@ ACTIONS:
         try {
           const params: Record<string, unknown> = { ...args };
           delete params.action;
-          const result = await sendBrowserCommand(userId, action, params);
-          return result as Record<string, unknown>;
+          const result = await sendBrowserCommand(userId, action, params) as Record<string, unknown>;
+
+          // Screenshot: save base64 data to file and return media URL
+          if (action === 'screenshot' && result.screenshot && typeof result.screenshot === 'string' && result.screenshot.startsWith('data:')) {
+            const match = (result.screenshot as string).match(/^data:image\/(\w+);base64,(.+)$/);
+            if (match) {
+              const ext = match[1] === 'png' ? 'png' : 'jpg';
+              const buffer = Buffer.from(match[2], 'base64');
+              const mediaDir = path.join(workspace, 'scopes', userId, 'media');
+              const filename = `screenshot-${Date.now()}.${ext}`;
+              const filePath = path.join(mediaDir, filename);
+              try {
+                fs.mkdirSync(mediaDir, { recursive: true });
+                fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+                return {
+                  success: true,
+                  url: result.url || '',
+                  title: result.title || '',
+                  screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
+                  _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: `image/${ext}` }],
+                };
+              } catch { /* fall through to raw result */ }
+            }
+          }
+
+          return result;
         } catch (e: unknown) {
           return { error: e instanceof Error ? e.message : String(e) };
         }
