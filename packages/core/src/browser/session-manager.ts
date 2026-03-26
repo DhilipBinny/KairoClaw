@@ -250,9 +250,19 @@ export class BrowserSessionManager {
     // Close existing session if any
     await this.closeSession(userId);
 
-    // Read saved state
+    // Read and validate saved state
     const stateJson = fs.readFileSync(filePath, 'utf8');
     const storageState = JSON.parse(stateJson);
+    // Basic schema validation — Playwright expects { cookies: [], origins: [] }
+    if (!storageState || typeof storageState !== 'object') {
+      throw new Error(`Corrupted session file "${name}".`);
+    }
+    if (storageState.cookies && !Array.isArray(storageState.cookies)) {
+      throw new Error(`Invalid session file "${name}" — cookies must be an array.`);
+    }
+    if (storageState.origins && !Array.isArray(storageState.origins)) {
+      throw new Error(`Invalid session file "${name}" — origins must be an array.`);
+    }
 
     // Launch browser if needed
     if (!this.browser || !this.browser.isConnected()) {
