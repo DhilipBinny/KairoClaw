@@ -588,7 +588,12 @@ async function main(): Promise<void> {
   // Register cron routes (needs scheduler)
   await server.register(registerCronRoutes, { scheduler });
 
-  // 14. Register WebSocket (webchat) plugin
+  // 14. Register @fastify/websocket at server level (shared by webchat + browser bridge)
+  await server.register(import('@fastify/websocket'), {
+    options: { maxPayload: 1 * 1024 * 1024 },
+  });
+
+  // 14a. Register WebSocket (webchat) plugin
   await server.register(webchatPlugin, { db, config, runner: createRunner, secretsStore });
 
   // 14b. Register browser bridge WebSocket (for Chrome extension remote browsing)

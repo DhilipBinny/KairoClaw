@@ -97,11 +97,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
   const sessionRepo = new SessionRepository(db);
   const messageRepo = new MessageRepository(db);
 
-  // Ensure @fastify/websocket is registered (1MB max frame size to prevent abuse)
-  await app.register(import('@fastify/websocket'), {
-    options: { maxPayload: 1 * 1024 * 1024 },
-  });
-
+  // @fastify/websocket is registered at server level (index.ts)
   app.get('/ws', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     if (clients.size >= MAX_WS_CONNECTIONS) {
       log.warn('WebSocket connection rejected: max connections reached');
