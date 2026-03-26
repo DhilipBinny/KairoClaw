@@ -625,8 +625,8 @@ export async function getMyCrons(): Promise<{ jobs: Array<Record<string, unknown
   return request('/my/cron');
 }
 
-export async function toggleMyCron(id: string, enabled: boolean): Promise<{ success: boolean }> {
-  return request(`/my/cron/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) });
+export async function updateMyCron(id: string, updates: Record<string, unknown>): Promise<{ success: boolean; job: Record<string, unknown> }> {
+  return request(`/my/cron/${id}`, { method: 'PATCH', body: updates });
 }
 
 export async function deleteMyCron(id: string): Promise<{ success: boolean }> {

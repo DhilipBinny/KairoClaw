@@ -109,23 +109,27 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
     return { jobs: allJobs.filter(j => j.userId === userId) };
   });
 
-  // PATCH /api/v1/my/cron/:id — enable/disable own cron job
+  // PATCH /api/v1/my/cron/:id — update own cron job
   app.patch('/api/v1/my/cron/:id', async (request, reply) => {
     const userId = request.user?.id;
     if (!userId) return reply.code(401).send({ error: 'Not authenticated' });
 
     const { id } = request.params as { id: string };
-    const { enabled } = request.body as { enabled?: boolean };
+    const body = request.body as Record<string, unknown>;
 
     // Ownership check
     const job = scheduler.list().find(j => j.id === id);
     if (!job) return reply.code(404).send({ error: 'Job not found' });
     if (job.userId !== userId) return reply.code(403).send({ error: 'Forbidden' });
 
-    if (enabled === undefined) return reply.code(400).send({ error: 'enabled is required' });
-
-    const updated = scheduler.update(id, { enabled });
-    return { success: true, job: updated };
+    try {
+      const updated = scheduler.update(id, body as any);
+      if (!updated) return reply.code(404).send({ error: 'Job not found' });
+      return { success: true, job: updated };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(400).send({ error: msg });
+    }
   });
 
   // DELETE /api/v1/my/cron/:id — delete own cron job
