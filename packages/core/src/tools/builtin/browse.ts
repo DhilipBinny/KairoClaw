@@ -14,6 +14,7 @@ import type { Page, Locator } from 'playwright-core';
 import type { ToolRegistration } from '../types.js';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
+import { hasRemoteBrowser, sendBrowserCommand } from '../../browser/bridge.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB
@@ -318,13 +319,28 @@ ACTIONS:
       if (!action) return { error: 'action is required' };
 
       const ctx = context as Record<string, unknown>;
-      const browserManager = ctx.browserManager as BrowserSessionManager | undefined;
-      if (!browserManager) {
-        return { error: 'Browser not available. Chromium may not be installed.' };
-      }
-
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
       const workspace = (ctx.workspace as string) || process.cwd();
+
+      // ── Remote browser mode: route through Chrome extension bridge ──
+      // Session management actions always use local (they're about local files)
+      const localOnlyActions = new Set(['saveSession', 'loadSession', 'listSessions', 'deleteSession']);
+      if (!localOnlyActions.has(action) && hasRemoteBrowser(userId)) {
+        try {
+          const params: Record<string, unknown> = { ...args };
+          delete params.action;
+          const result = await sendBrowserCommand(userId, action, params);
+          return result as Record<string, unknown>;
+        } catch (e: unknown) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+
+      // ── Local browser mode (Playwright) ──
+      const browserManager = ctx.browserManager as BrowserSessionManager | undefined;
+      if (!browserManager) {
+        return { error: 'Browser not available. Install the Chrome extension for remote browsing, or ensure Chromium is installed for local browsing.' };
+      }
 
       // Actions that don't need an active page
       if (action === 'close') {

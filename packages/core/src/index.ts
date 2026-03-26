@@ -591,6 +591,12 @@ async function main(): Promise<void> {
   // 14. Register WebSocket (webchat) plugin
   await server.register(webchatPlugin, { db, config, runner: createRunner, secretsStore });
 
+  // 14b. Register browser bridge WebSocket (for Chrome extension remote browsing)
+  try {
+    const { browserBridgePlugin } = await import('./browser/bridge.js');
+    await server.register(browserBridgePlugin, { db });
+  } catch { /* browser bridge not available — non-critical */ }
+
   // 15. Channel registry — mutable so channels can be hot-reloaded via Settings
   const channelRegistry: {
     telegram?: TelegramChannelInstance;
