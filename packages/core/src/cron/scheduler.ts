@@ -594,7 +594,7 @@ export class CronScheduler {
     const job = this.jobs.get(id);
     if (!job) return null;
     // Only allow updating safe fields — reject internal/tracking fields
-    const safeFields = new Set(['schedule', 'prompt', 'channel', 'chatId', 'enabled', 'timezone', 'name', 'delivery']);
+    const safeFields = new Set(['schedule', 'prompt', 'channel', 'chatId', 'enabled', 'timezone', 'name', 'delivery', 'userId']);
     const safeUpdates: Partial<CronJob> = {};
     for (const key of Object.keys(updates) as Array<keyof CronJob>) {
       if (safeFields.has(key)) {
