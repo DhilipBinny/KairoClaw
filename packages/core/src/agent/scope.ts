@@ -15,7 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SCOPE_DIR_NAME, GLOBAL_ONLY_FILES, SCOPED_CHANNELS } from '../constants.js';
+import { SCOPE_DIR_NAME, GLOBAL_ONLY_FILES, SCOPED_CHANNELS, SHARED_DIR, DOCUMENTS_DIR } from '../constants.js';
 import type { DatabaseAdapter } from '../db/index.js';
 
 /**
@@ -124,9 +124,13 @@ export function ensureScopeDir(
 ): void {
   const scopeDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
   const memoryDir = path.join(scopeDir, 'memory', 'sessions');
+  const docsDir = path.join(scopeDir, 'documents');
+  const mediaDir = path.join(scopeDir, 'media');
   const isNew = !fs.existsSync(scopeDir);
 
   fs.mkdirSync(memoryDir, { recursive: true });
+  fs.mkdirSync(docsDir, { recursive: true });
+  fs.mkdirSync(mediaDir, { recursive: true });
 
   // Seed USER.md on first creation (skip for group scopes — groups aren't a person)
   if (isNew && senderInfo && !scopeKey.startsWith('group_')) {
@@ -229,4 +233,43 @@ function mergeDir(srcDir: string, destDir: string): void {
       }
     }
   }
+}
+
+/**
+ * Migrate old workspace/documents/ and workspace/media/ to workspace/shared/.
+ * One-time on startup. Safe to run repeatedly (skips if shared/ already exists).
+ */
+export function migrateToSharedDir(workspace: string): { migrated: boolean } {
+  const sharedDir = path.join(workspace, SHARED_DIR);
+  const sharedDocs = path.join(sharedDir, DOCUMENTS_DIR);
+  const sharedMedia = path.join(sharedDir, 'media');
+  const oldDocs = path.join(workspace, DOCUMENTS_DIR);
+  const oldMedia = path.join(workspace, 'media');
+
+  // Skip if shared/ already has documents (already migrated)
+  if (fs.existsSync(sharedDocs) && fs.readdirSync(sharedDocs).length > 0) {
+    return { migrated: false };
+  }
+
+  let migrated = false;
+
+  // Move documents/ → shared/documents/
+  if (fs.existsSync(oldDocs) && fs.readdirSync(oldDocs).length > 0) {
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.renameSync(oldDocs, sharedDocs);
+    migrated = true;
+  }
+
+  // Move media/ → shared/media/
+  if (fs.existsSync(oldMedia) && fs.readdirSync(oldMedia).length > 0) {
+    fs.mkdirSync(sharedDir, { recursive: true });
+    fs.renameSync(oldMedia, sharedMedia);
+    migrated = true;
+  }
+
+  // Ensure shared dirs exist even if nothing to migrate
+  fs.mkdirSync(sharedDocs, { recursive: true });
+  fs.mkdirSync(sharedMedia, { recursive: true });
+
+  return { migrated };
 }

@@ -1,4 +1,4 @@
-import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME } from '../../constants.js';
+import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHARED_DIR } from '../../constants.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
@@ -6,19 +6,22 @@ import type { ToolExecutionContext } from '@agw/types';
 import { getWorkspace } from './utils.js';
 
 /**
- * Enforce workspace file organization.
- * - Persona files in root (IDENTITY.md, SOUL.md, etc.) are protected from agent writes
- * - Files written to workspace root are redirected to documents/
- * - Subdirectory writes (documents/x.md, media/x.png) pass through unchanged
+ * Enforce workspace file organization with per-user scoping.
+ * - Persona files in root are protected from agent writes
+ * - Root-level writes redirect to user's personal documents/ (if scoped) or shared/documents/
+ * - Writes to shared/ pass through (team space)
+ * - Writes to user's own scope pass through
  */
-function enforceFileOrganization(filePath: string, workspace: string): { path: string; redirected: boolean } {
+function enforceFileOrganization(
+  filePath: string,
+  workspace: string,
+  scopeKey?: string | null,
+): { path: string; redirected: boolean; note?: string } {
   const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(workspace, filePath);
   const relative = path.relative(workspace, resolved);
 
   // If writing to a subdirectory, allow as-is
   if (relative.includes(path.sep)) {
-    // Scoped directories — agent can read and write freely
-    // (USER.md, memory/PROFILE.md, memory/sessions/ are all agent-managed per user)
     return { path: resolved, redirected: false };
   }
 
@@ -28,10 +31,17 @@ function enforceFileOrganization(filePath: string, workspace: string): { path: s
     throw new Error(`Cannot overwrite "${fileName}" — this is a protected persona file. Edit it from the admin UI.`);
   }
 
-  // Redirect other root-level files to documents/
-  const docsDir = path.join(workspace, DOCUMENTS_DIR);
-  const redirected = path.join(docsDir, fileName);
-  return { path: redirected, redirected: true };
+  // Redirect root-level files to user's personal documents/ (or shared/ if no scope)
+  if (scopeKey) {
+    const userDocsDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey, DOCUMENTS_DIR);
+    fs.mkdirSync(userDocsDir, { recursive: true });
+    return { path: path.join(userDocsDir, fileName), redirected: true, note: 'Saved to your personal documents folder' };
+  }
+
+  // No scope (admin/system) — redirect to shared/documents/
+  const sharedDocsDir = path.join(workspace, SHARED_DIR, DOCUMENTS_DIR);
+  fs.mkdirSync(sharedDocsDir, { recursive: true });
+  return { path: path.join(sharedDocsDir, fileName), redirected: true, note: 'Saved to shared documents folder' };
 }
 
 const MAX_WRITE_SIZE = FILE_MAX_WRITE_SIZE;
@@ -167,15 +177,13 @@ export const fileTools: ToolRegistration[] = [
         return { error: `Content too large: ${(contentSize / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_WRITE_SIZE / 1024 / 1024}MB limit` };
       }
 
-      // Enforce file organization — redirect root files to documents/, protect persona files
+      // Enforce file organization — redirect root files to user's documents/, protect persona files
       let filePath = rawPath;
       let note: string | undefined;
       try {
-        const result = enforceFileOrganization(rawPath, workspace);
+        const result = enforceFileOrganization(rawPath, workspace, context.scopeKey);
         filePath = result.path;
-        if (result.redirected) {
-          note = `File saved to documents/ (workspace root is reserved for system files)`;
-        }
+        note = result.note;
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };
       }

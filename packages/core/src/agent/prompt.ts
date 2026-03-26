@@ -61,24 +61,24 @@ export function buildSystemPrompt(
   // Workspace — do NOT expose absolute server path or other users' scopes
   const workspaceSection = scopeKey
     ? `## Workspace
-Your files are in your personal scope directory.
+You have two file areas:
+- **documents/** — your personal documents (only you can access). Files you create go here by default.
+- **shared/documents/** — team-shared documents (all users can access). Use when user explicitly asks to share.
+- **media/** — your personal media and uploads
+- **shared/media/** — team-shared media
+- Your memory files are managed by the system automatically.
+- Do NOT create .md files in the workspace root — reserved for system files.
 
-File organization rules:
-- **documents/** — save any generated documents, research, reports, plans, or exports here
-- **media/** — images and media files (managed by the system)
-- Your memory files are managed by the system in your scope directory
-- Do NOT create .md files in the workspace root — the root is reserved for system persona files
-- When the user asks you to create a file, save it to documents/ unless they specify a different path
+When the user asks to create/save a file → save to documents/ (personal).
+When the user says "save to shared" or "share this" → save to shared/documents/.
 
-SCOPE BOUNDARY: You are serving a single user. Do not attempt to access, list, or reference other users' directories. The scopes/ directory is restricted.`
+SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.`
     : `## Workspace
-Your files are organized in the workspace directory.
-
-File organization rules:
-- **documents/** — save any generated documents, research, reports, plans, or exports here
-- **media/** — images and media files (managed by the system)
-- Do NOT create .md files in the workspace root — the root is reserved for system persona files
-- When the user asks you to create a file, save it to documents/ unless they specify a different path`;
+File organization:
+- **shared/documents/** — save documents, research, reports, plans here
+- **shared/media/** — images and media files
+- Do NOT create .md files in the workspace root — reserved for system files.
+- When the user asks to create a file, save it to shared/documents/.`;
   sections.push(workspaceSection);
 
   // Time

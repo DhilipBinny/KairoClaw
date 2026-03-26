@@ -26,7 +26,7 @@ import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
-import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID } from './agent/scope.js';
+import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -246,6 +246,16 @@ async function main(): Promise<void> {
     }
   } catch (e) {
     console.error('[scope] Scope migration failed:', e instanceof Error ? e.message : e);
+  }
+
+  // 7b2. Migrate old documents/ and media/ to shared/ (one-time)
+  try {
+    const sharedResult = migrateToSharedDir(config.agent.workspace);
+    if (sharedResult.migrated) {
+      console.log('[scope] Migrated documents/ and media/ to shared/');
+    }
+  } catch (e) {
+    console.error('[scope] Shared dir migration failed:', e instanceof Error ? e.message : e);
   }
 
   // 7c. Initialize memory system
