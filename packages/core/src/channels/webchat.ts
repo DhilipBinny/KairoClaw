@@ -111,6 +111,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
 
     const gatewayToken = secretsStore?.get('gateway', 'token') || config.gateway.token;
     let authenticated = !gatewayToken;
+    let userResolved = false; // track if we've resolved the user identity
     if (!gatewayToken) {
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
@@ -175,46 +176,52 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         return;
       }
 
-      // Auth gate
-      if (!authenticated) {
-        if (msg.type === 'auth') {
-          authAttempts++;
-          if (authAttempts > 5) {
-            safeSend({ type: 'auth.error', message: 'Too many auth attempts' });
-            socket.close(1008, 'Too many auth attempts');
-            return;
-          }
-          const token = msg.token as string | undefined;
-          // Check against gateway token first
-          let authValid = safeTokenCompare(token, gatewayToken);
-          // Always try to resolve user from API key — sets stable UUID for scoping
-          if (token) {
-            const keyHash = hashApiKey(token);
-            const user = await db.get<{ id: string; active: number; role: string }>(
-              'SELECT id, active, role FROM users WHERE api_key_hash = ?',
-              [keyHash],
-            );
-            if (user) {
-              if (!user.active) {
-                safeSend({ type: 'auth.error', message: 'Account deactivated' });
-                return;
-              }
-              authValid = true;
-              // Use stable user UUID for scoped memory (not ephemeral web-{timestamp})
-              clientId = user.id;
-              clientRole = user.role === 'admin' ? 'admin' : 'user';
-            }
-          }
-          if (authValid) {
-            authenticated = true;
-            clients.set(socket, { sessionKey: 'main' });
-            safeSend({ type: 'auth.ok' });
-            log.info({ clientId }, 'WebChat client authenticated');
-          } else {
-            safeSend({ type: 'auth.error', message: 'Invalid token' });
-          }
+      // Auth message — resolve user identity from API key
+      if (msg.type === 'auth') {
+        if (authenticated && userResolved) {
+          safeSend({ type: 'auth.ok' });
           return;
         }
+        authAttempts++;
+        if (authAttempts > 5) {
+          safeSend({ type: 'auth.error', message: 'Too many auth attempts' });
+          socket.close(1008, 'Too many auth attempts');
+          return;
+        }
+        const token = msg.token as string | undefined;
+        // Check against gateway token first
+        let authValid = authenticated || safeTokenCompare(token, gatewayToken);
+        // Always try to resolve user from API key — sets stable UUID for scoping
+        if (token) {
+          const keyHash = hashApiKey(token);
+          const user = await db.get<{ id: string; active: number; role: string }>(
+            'SELECT id, active, role FROM users WHERE api_key_hash = ?',
+            [keyHash],
+          );
+          if (user) {
+            if (!user.active) {
+              safeSend({ type: 'auth.error', message: 'Account deactivated' });
+              return;
+            }
+            authValid = true;
+            clientId = user.id;
+            clientRole = user.role === 'admin' ? 'admin' : 'user';
+            userResolved = true;
+          }
+        }
+        if (authValid) {
+          authenticated = true;
+          clients.set(socket, { sessionKey: 'main' });
+          safeSend({ type: 'auth.ok' });
+          log.info({ clientId, clientRole }, 'WebChat client authenticated');
+        } else {
+          safeSend({ type: 'auth.error', message: 'Invalid token' });
+        }
+        return;
+      }
+
+      // Not authenticated and not an auth message
+      if (!authenticated) {
         safeSend({ type: 'error', message: 'Not authenticated. Send { type: "auth", token: "..." }' });
         return;
       }
