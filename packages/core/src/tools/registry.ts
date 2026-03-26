@@ -86,7 +86,7 @@ export class ToolRegistry {
     // RBAC check
     let permission: ToolPermissionLevel = 'allow';
     const db = context.db as DatabaseAdapter | undefined;
-    const tenantId = context.tenant || 'default';
+    const tenantId = context.tenant || (context as Record<string, unknown>).tenantId as string || 'default';
     const userRole = context.user?.role || 'user';
     const userElevated = !!context.user?.elevated;
 
