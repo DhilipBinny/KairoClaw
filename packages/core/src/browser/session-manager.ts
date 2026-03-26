@@ -39,6 +39,8 @@ interface BrowserSession {
   userId: string;
   createdAt: number;
   lastActivity: number;
+  /** Map of ref number → CSS selector for element targeting */
+  refMap: Map<number, string>;
 }
 
 export class BrowserSessionManager {
@@ -129,14 +131,33 @@ export class BrowserSessionManager {
         }
       });
 
-      // SSRF protection: intercept all requests and block private IPs
+      // Auto-dismiss dialogs (alert/confirm/prompt) so agent doesn't get stuck
+      context.on('page', (p) => {
+        p.on('dialog', (dialog) => {
+          log.debug({ type: dialog.type(), message: dialog.message().slice(0, 100) }, 'Auto-dismissing dialog');
+          dialog.dismiss().catch(() => {});
+        });
+      });
+
+      // SSRF + performance: intercept requests, block private IPs + ads/trackers
+      const { shouldBlockResource } = await import('../tools/builtin/browse.js');
       await context.route('**/*', async (route) => {
         const url = route.request().url();
-        // Allow data: URLs for inline resources
+        const resourceType = route.request().resourceType();
+
+        // Allow data/blob URLs
         if (url.startsWith('data:') || url.startsWith('blob:')) {
           await route.continue();
           return;
         }
+
+        // Block ads, trackers, fonts, media for performance
+        if (shouldBlockResource(url, resourceType)) {
+          await route.abort('blockedbyclient');
+          return;
+        }
+
+        // SSRF protection
         try {
           const parsed = validateFetchUrl(url);
           await validateResolvedIP(parsed.hostname);
@@ -149,12 +170,19 @@ export class BrowserSessionManager {
 
       const page = await context.newPage();
 
+      // Dialog handler for initial page
+      page.on('dialog', (dialog) => {
+        log.debug({ type: dialog.type(), message: dialog.message().slice(0, 100) }, 'Auto-dismissing dialog');
+        dialog.dismiss().catch(() => {});
+      });
+
       const session: BrowserSession = {
         context,
         page,
         userId,
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        refMap: new Map(),
       };
       this.sessions.set(userId, session);
       log.info({ userId, activeSessions: this.sessions.size }, 'Browser session created');
@@ -172,6 +200,17 @@ export class BrowserSessionManager {
   /** Check if a user has an active session. */
   hasSession(userId: string): boolean {
     return this.sessions.has(userId);
+  }
+
+  /** Get the ref map for a user's session. */
+  getRefMap(userId: string): Map<number, string> {
+    return this.sessions.get(userId)?.refMap ?? new Map();
+  }
+
+  /** Update the ref map for a user's session. */
+  setRefMap(userId: string, refMap: Map<number, string>): void {
+    const session = this.sessions.get(userId);
+    if (session) session.refMap = refMap;
   }
 
   /** Close a specific user's session. */
