@@ -28,13 +28,7 @@ export async function checkToolPermission(
   if (userRole === 'admin') return 'allow';
 
   const repo = new ToolPermissionRepository(db);
-  const permissions = await repo.listByTenantAndRole(tenantId, userRole);
-
-  // If no permission rules are configured, default to allow
-  if (permissions.length === 0) {
-    return 'allow';
-  }
-
+  // Single query — checkPermission returns 'allow' when no rules match
   const permission = await repo.checkPermission(tenantId, userRole, toolName);
 
   // power_user: allow only if user has elevated flag
