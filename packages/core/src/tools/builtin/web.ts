@@ -1,3 +1,4 @@
+import dns from 'node:dns';
 import type { ToolRegistration } from '../types.js';
 
 /**
@@ -66,6 +67,26 @@ export function validateFetchUrl(urlStr: string): URL {
   return parsed;
 }
 
+/**
+ * Resolve DNS and validate the resolved IP is not private.
+ * Prevents DNS rebinding attacks (e.g., evil.com → 169.254.169.254).
+ */
+export async function validateResolvedIP(hostname: string): Promise<void> {
+  // Skip if hostname is already an IP literal
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) return;
+
+  try {
+    const { address } = await dns.promises.lookup(hostname);
+    if (isPrivateIP(address)) {
+      throw new Error(`Blocked: hostname "${hostname}" resolves to private IP ${address}`);
+    }
+  } catch (e: unknown) {
+    // Re-throw our own blocked errors
+    if (e instanceof Error && e.message.startsWith('Blocked:')) throw e;
+    // DNS resolution failure — let fetch handle it naturally
+  }
+}
+
 export const webTools: ToolRegistration[] = [
   {
     definition: {
@@ -87,7 +108,8 @@ export const webTools: ToolRegistration[] = [
       }
 
       try {
-        validateFetchUrl(url);
+        const parsed = validateFetchUrl(url);
+        await validateResolvedIP(parsed.hostname);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `SSRF protection: ${message}` };

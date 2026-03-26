@@ -43,12 +43,13 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
       const workspace = config?.agent?.workspace;
       if (workspace) {
         const safe = path.basename(filename); // prevent traversal
-        // Check shared/media/
+
+        // Check shared/media/ (accessible to all)
         const sharedPath = path.join(workspace, 'shared', 'media', safe);
         if (fs.existsSync(sharedPath)) {
           filePath = sharedPath;
-        } else {
-          // Search scoped media dirs
+        } else if (request.user?.role === 'admin') {
+          // Admin: search all scoped media dirs
           const scopesDir = path.join(workspace, 'scopes');
           if (fs.existsSync(scopesDir)) {
             for (const scope of fs.readdirSync(scopesDir)) {
@@ -59,7 +60,14 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
               }
             }
           }
+        } else if (request.user?.id) {
+          // Non-admin: only own scope
+          const ownPath = path.join(workspace, 'scopes', request.user.id, 'media', safe);
+          if (fs.existsSync(ownPath)) {
+            filePath = ownPath;
+          }
         }
+        // Unauthenticated: only MediaStore (legacy) + shared/media (already checked above)
       }
     }
 
