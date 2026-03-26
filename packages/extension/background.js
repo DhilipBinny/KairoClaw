@@ -12,10 +12,12 @@ let apiKey = '';
 let connected = false;
 let agentTabIds = new Set(); // tabs opened by the agent
 let debuggerAttached = new Set(); // tabs with debugger attached
+let intentionalDisconnect = false; // true when user clicks Disconnect
 
 // ── Connection management ───────────────────────────────────
 
 async function connect() {
+  intentionalDisconnect = false;
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
   const config = await chrome.storage.local.get(['serverUrl', 'apiKey']);
@@ -73,8 +75,10 @@ async function connect() {
   ws.onclose = () => {
     connected = false;
     updateStatus('disconnected');
-    // Auto-reconnect after 5s
-    setTimeout(connect, 5000);
+    // Auto-reconnect after 5s (only if not intentionally disconnected)
+    if (!intentionalDisconnect) {
+      setTimeout(connect, 5000);
+    }
   };
 
   ws.onerror = () => {
@@ -84,6 +88,7 @@ async function connect() {
 }
 
 function disconnect() {
+  intentionalDisconnect = true;
   if (ws) {
     ws.close();
     ws = null;
@@ -174,8 +179,8 @@ async function executeCommand(msg) {
       case 'click': {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
-        const ref = params.ref;
-        const element = params.element;
+        const ref = params.ref ?? null;
+        const element = params.element ?? null;
         // Visual feedback: highlight + cursor animation
         await highlightElement(tabId, ref, element);
         const result = await executeInTab(tabId, (ref, element) => {
@@ -201,7 +206,9 @@ async function executeCommand(msg) {
       case 'type': {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
-        const { ref, element, text, submit } = params;
+        const { text, submit } = params;
+        const ref = params.ref ?? null;
+        const element = params.element ?? null;
         // Visual feedback
         await highlightElement(tabId, ref, element);
         const result = await executeInTab(tabId, (ref, element, text) => {
@@ -395,6 +402,8 @@ async function highlightElement(tabId, ref, element) {
   await injectHighlightCSS(tabId);
 
   // Add highlight class to target element
+  const safeRef = ref ?? null;
+  const safeElement = element ?? null;
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -423,7 +432,7 @@ async function highlightElement(tabId, ref, element) {
         // Remove after 2.5s
         setTimeout(() => el.classList.remove('kc-highlight'), 2500);
       },
-      args: [ref, element],
+      args: [safeRef, safeElement],
     });
   } catch (e) {
     console.warn('[KairoClaw] Highlight failed:', e.message);
@@ -585,11 +594,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // Listen for messages from popup
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'connect') {
     disconnect();
     connect();
+    sendResponse({ ok: true });
   } else if (msg.type === 'disconnect') {
     disconnect();
+    sendResponse({ ok: true });
   }
+  return true; // keep message channel open for async
 });
