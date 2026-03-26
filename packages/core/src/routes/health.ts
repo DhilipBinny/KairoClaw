@@ -55,4 +55,24 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       timestamp: new Date().toISOString(),
     });
   });
+
+  // GET /api/v1/my/dashboard — authenticated user's own stats
+  app.get('/api/v1/my/dashboard', async (request) => {
+    const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const userId = request.user?.id;
+    if (!userId) return { error: 'Not authenticated' };
+
+    const sessions = await db.get<{ count: number }>(
+      'SELECT COUNT(*) as count FROM sessions WHERE user_id = ?', [userId]);
+    const usage = await db.get<{ tokens: number; cost: number }>(
+      `SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as tokens,
+              COALESCE(SUM(cost_usd), 0) as cost
+       FROM usage_records WHERE user_id = ?`, [userId]);
+
+    return {
+      user: { id: request.user!.id, name: request.user!.name, role: request.user!.role },
+      sessions: sessions?.count || 0,
+      usage: { tokens: usage?.tokens || 0, cost: usage?.cost || 0 },
+    };
+  });
 };

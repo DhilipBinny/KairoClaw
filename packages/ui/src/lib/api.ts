@@ -607,3 +607,20 @@ export async function getToolPermissions(role: string): Promise<{ role: string; 
 export async function saveToolPermissions(role: string, permissions: Array<{ toolPattern: string; permission: string }>): Promise<{ success: boolean }> {
   return request(`/admin/tool-permissions/${role}`, { method: 'PUT', body: { permissions } });
 }
+
+// User portal (/my/) endpoints
+export async function getMyDashboard(): Promise<{
+  user: { id: string; name: string; role: string };
+  sessions: number;
+  usage: { tokens: number; cost: number };
+}> {
+  return request('/my/dashboard');
+}
+
+export async function getMyUsage(days = 30): Promise<Record<string, unknown>> {
+  return request(`/my/usage?days=${days}`);
+}
+
+export async function getMyCrons(): Promise<{ jobs: Array<Record<string, unknown>> }> {
+  return request('/my/cron');
+}
