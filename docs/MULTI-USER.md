@@ -1,362 +1,276 @@
 # Multi-User System
 
-KairoClaw supports multiple users within a single deployment. Each user gets their own sessions, permissions, usage tracking, and channel identity — while sharing the same AI configuration, API keys, and channels.
+KairoClaw supports multiple users on a single deployment. Each user gets their own isolated workspace, memory, permissions, and channel identity — while sharing the same AI agent, persona, and infrastructure.
 
 ---
 
-## Architecture Overview
+## Quick Start
 
-```
-KairoClaw Instance (single org)
-│
-├── Admin (you)
-│   ├── Full access to all tools, config, user management
-│   ├── Linked: Telegram ID 12345, WhatsApp +6512345
-│   └── Sessions: telegram:12345, whatsapp:6512345, web:xxx
-│
-├── User: Manoj
-│   ├── Safe tools only (no exec, no cron)
-│   ├── Linked: Telegram ID 67890, WhatsApp +6567890
-│   └── Sessions: telegram:67890, whatsapp:6567890
-│
-├── User: Mom (elevated)
-│   ├── All tools (elevated flag granted by admin)
-│   ├── Linked: WhatsApp +6511111
-│   └── Sessions: whatsapp:6511111
-│
-├── Shared Resources:
-│   ├── One Telegram bot (all users message the same bot)
-│   ├── One WhatsApp number (all users message the same number)
-│   ├── One set of API keys (Anthropic, OpenAI, Ollama)
-│   ├── One system prompt / AI personality
-│   └── MCP servers, plugins, cron jobs
-```
+### For the admin (you)
+
+1. Deploy KairoClaw → you're the admin
+2. Someone messages your bot on Telegram/WhatsApp → they appear in **Channels → Pending**
+3. Click **"Add as User"** → creates their account, links their channel, gives them an API key
+4. They can now chat on their channel AND the web UI with their own isolated experience
+
+### For users
+
+- Chat via Telegram, WhatsApp, or web — the bot knows who you are
+- Your conversations, memory, and files are private to you
+- You can view your sessions, usage, and cron jobs at `/my/`
 
 ---
 
 ## User Roles
 
-| Role | Config | Tools | Sessions | User Mgmt |
-|------|--------|-------|----------|-----------|
-| **admin** | Full access | All tools | See all | Manage all users |
-| **user** | Read-only | Safe tools only | Own only | None |
-| **user + elevated** | Read-only | All tools | Own only | None |
+| | Admin | Power User | User |
+|---|---|---|---|
+| **Chat with the bot** | Yes | Yes | Yes |
+| **Admin dashboard** (`/admin`) | Full access | No | No |
+| **User dashboard** (`/my`) | Redirects to /admin | Yes | Yes |
+| **See all sessions** | Yes | Own only | Own only |
+| **See all users** | Yes | No | No |
+| **Configure channels** | Yes | No | No |
+| **Configure providers/models** | Yes | No | No |
+| **Install plugins/MCP** | Yes | No | No |
+| **Tool permissions** | Full control | N/A | N/A |
+| **Shell commands (exec)** | Unrestricted | Sandboxed | Denied |
+| **Write/create files** | Unrestricted | Scoped | Denied |
+| **Edit files** | Unrestricted | Scoped | Denied |
+| **Manage cron jobs** | All crons | Own crons | Denied |
+| **Manage plugins** | Yes | Denied | Denied |
+| **Read files** | All | Own scope + shared | Own scope + shared |
+| **Web search/fetch** | Yes | Yes | Yes |
+| **Send messages** | Yes | Yes | Yes |
+| **Memory search** | All | Own scope + global | Own scope + global |
 
-### Dangerous Tools (require admin or elevated)
+### How to assign roles
 
-- `exec` — shell command execution
-- `manage_cron` — create/edit/delete scheduled jobs
-- `write_file` — write files to workspace
-- `delete_file` — delete workspace files
-
-All other tools (web_search, read_file, memory, media, etc.) are available to all users.
-
-### Elevated Toggle
-
-Admin can grant the "elevated" flag to specific users, giving them access to dangerous tools without making them admin. Useful for tech-savvy friends who need exec but shouldn't manage config.
-
----
-
-## Sender Linking
-
-Sender linking maps channel identities (Telegram user ID, WhatsApp phone number) to KairoClaw user accounts. This is how the system knows "Telegram user 67890 = Manoj."
-
-### How It Works
-
-```
-Telegram message arrives
-        │
-        ▼
-Extract sender_id (e.g., "67890")
-        │
-        ▼
-Lookup sender_links table:
-  WHERE channel_type = 'telegram' AND sender_id = '67890'
-        │
-        ├── FOUND → user_id = "usr_manoj"
-        │     │
-        │     ▼
-        │   Load user: Manoj, role=user, elevated=false
-        │     │
-        │     ▼
-        │   Create session with user_id = "usr_manoj"
-        │   Apply tool permissions (safe tools only)
-        │   Track usage under Manoj's account
-        │
-        └── NOT FOUND → session created with user_id = NULL
-              │
-              ▼
-            Sender appears in pending_senders queue
-            Admin can onboard or link later
-```
-
-### Unified Identity
-
-One user can be linked to multiple channels:
-
-```
-User: Manoj
-  ├── sender_link: telegram → 67890
-  ├── sender_link: whatsapp → 971501234567
-  └── webchat: authenticated via API key
-
-All sessions from all channels → same user_id → same permissions
-```
-
-### Schema
-
-```sql
-sender_links (
-  id            SERIAL PRIMARY KEY,
-  tenant_id     TEXT NOT NULL REFERENCES tenants(id),
-  channel_type  TEXT NOT NULL,          -- 'telegram', 'whatsapp'
-  sender_id     TEXT NOT NULL,          -- Telegram user ID, phone number
-  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  linked_at     TEXT NOT NULL,
-  linked_by     TEXT REFERENCES users(id),  -- admin who linked
-  UNIQUE(tenant_id, channel_type, sender_id)
-)
-```
+- **Admin**: Set `role: admin` when creating user. Full access to everything.
+- **Power User**: Set `role: user` + check "Power User" on the Users page. Gets restricted tools with sandboxed access.
+- **User**: Set `role: user`. Safe tools only — can chat, search web, read files, but cannot execute commands or write files.
 
 ---
 
-## User Onboarding
+## Channel Identity Linking
 
-### Flow: New Person Messages the Bot
-
-```
-1. Unknown person messages Telegram/WhatsApp bot
-   └── Not in allowFrom → message rejected
-   └── Added to pending_senders queue
-
-2. Admin sees pending sender in /admin/channels
-   └── Three options:
-       ├── [Onboard]       → Create user + link + approve (recommended)
-       ├── [Approve Only]  → Add to allowFrom, no user account
-       └── [Dismiss]       → Reject
-
-3. Admin clicks "Onboard":
-   ┌──────────────────────────────────────┐
-   │  Onboard New User                    │
-   │                                      │
-   │  [Telegram] John Smith (12345)       │
-   │                                      │
-   │  [Create New User] [Link to Existing]│
-   │                                      │
-   │  Name: [John Smith]  ← pre-filled    │
-   │  Email: [          ]                 │
-   │  Role:  [User ▾]                    │
-   │  Elevated: [ ]                       │
-   │                                      │
-   │  [Cancel]  [Create & Approve]        │
-   └──────────────────────────────────────┘
-
-4. One click does ALL of this:
-   ✓ Creates user account
-   ✓ Generates API key (shown once — for webchat access)
-   ✓ Creates sender_link (Telegram ID → user)
-   ✓ Adds sender to allowFrom config
-   ✓ Marks pending sender as approved
-   ✓ Backfills existing sessions with user_id
-
-5. Next message from John → fully attributed, permissions applied
-```
-
-### Flow: Same Person on Second Channel
+One person can message from multiple channels — Telegram AND WhatsApp — and it's all linked to one account with one memory.
 
 ```
-1. Manoj already onboarded via Telegram
-2. Manoj messages WhatsApp bot → new pending sender
-
-3. Admin clicks "Onboard" on WhatsApp sender:
-   ┌──────────────────────────────────────┐
-   │  [Create New User] [Link to Existing]│
-   │                                      │
-   │  Select User:                        │
-   │  [Manoj (telegram:67890)     ▾]      │
-   │                                      │
-   │  [Cancel]  [Link & Approve]          │
-   └──────────────────────────────────────┘
-
-4. Links WhatsApp number to existing Manoj account
-   → Both channels now resolve to same user
+  Telegram user 8606526093 ──┐
+                              ├── same user account ── same memory
+  WhatsApp +6580961895 ──────┘
 ```
+
+### How it works
+
+1. Person messages your bot on Telegram → appears in Pending Senders
+2. Admin clicks "Add as User" → account created + Telegram linked
+3. Same person messages on WhatsApp → appears in Pending again
+4. Admin clicks "Link to Existing" → WhatsApp linked to same account
+5. Both channels now share one memory profile, one session history
+
+### Onboarding options
+
+| In Channels page | For individuals | For groups |
+|---|---|---|
+| **"Add as User"** | Creates account + links channel + approves | N/A |
+| **"Approve"** | N/A | Approves group for bot access |
+| **"Dismiss"** | Ignores sender | Ignores group |
 
 ---
 
-## User Management
+## Per-User Workspace
 
-### Admin UI: /admin/users
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Users                                    [+ Add User]       │
-│                                                             │
-│ Name    │ Role         │ Status │ Links        │ Actions    │
-│─────────│──────────────│────────│──────────────│────────────│
-│ Binny   │ admin        │ Active │ tg:12345     │ Edit Key   │
-│         │              │        │ wa:+6512345  │            │
-│ Manoj   │ user         │ Active │ tg:67890     │ Edit Key   │
-│         │              │        │ wa:+6567890  │ Link Deact │
-│ Mom     │ user elevated│ Active │ wa:+6511111  │ Edit Key   │
-│         │              │        │              │ Link Deact │
-│ OldUser │ user         │ Deact  │ (none)       │ React Del  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Creating a User
-
-1. Click "+ Add User"
-2. Fill: name, email (optional), role, elevated toggle
-3. Click "Create User"
-4. API key shown **once** — copy it now
-5. Give the API key to the user (for webchat login)
-
-### Regenerating API Keys
-
-Regeneration requires typing "REGENERATE" to prevent accidental invalidation:
+Each user gets their own isolated folder structure. Files created by one user are invisible to others.
 
 ```
-┌──────────────────────────────────────────┐
-│  Regenerate API Key                      │
-│                                          │
-│  ⚠ The current API key for Manoj will   │
-│  be permanently invalidated. The user    │
-│  will be locked out until they receive   │
-│  the new key.                            │
-│                                          │
-│  Type REGENERATE to confirm:             │
-│  [                    ]                  │
-│                                          │
-│  [Cancel]  [Regenerate Key] (disabled)   │
-└──────────────────────────────────────────┘
+workspace/
+├── IDENTITY.md              Shared bot personality (all users see same bot)
+├── SOUL.md                  Shared
+├── RULES.md                 Shared
+│
+├── shared/                  TEAM SPACE — all users can read/write
+│   ├── documents/           Team reports, exports, shared files
+│   └── media/               Shared images
+│
+└── scopes/                  PRIVATE — one folder per user
+    ├── {admin-uuid}/
+    │   ├── documents/       Admin's personal files
+    │   ├── media/           Admin's uploads
+    │   └── memory/
+    │       ├── PROFILE.md   "Prefers concise answers, works at Company X"
+    │       └── sessions/    Daily conversation summaries
+    │
+    ├── {sruthi-uuid}/
+    │   ├── documents/       Sruthi's personal files
+    │   ├── media/           Sruthi's uploads
+    │   └── memory/
+    │       ├── PROFILE.md   "Name is Sruthi, interested in cooking"
+    │       └── sessions/
+    │
+    └── group_telegram_.../
+        └── memory/          Group conversation memory
+            ├── PROFILE.md   "This group discusses project updates"
+            └── sessions/
 ```
 
-### Deactivation vs Deletion
+### What each user can access
 
-| Action | Reversible | Sessions | Sender Links | Audit Log |
-|--------|-----------|----------|-------------|-----------|
-| **Deactivate** | Yes (reactivate) | Preserved | Removed | Preserved |
-| **Permanently Delete** | No | Nullified (user_id set to NULL) | Deleted | Preserved |
+| Path | Admin | User (own) | User (other) |
+|---|---|---|---|
+| Persona files (IDENTITY.md, etc.) | Read | Read | Read |
+| `shared/documents/` | Read/Write | Read/Write | Read/Write |
+| `scopes/{my-uuid}/` | Read/Write | Read/Write | — |
+| `scopes/{other-uuid}/` | Read/Write | **Blocked** | **Blocked** |
+| `scopes/` (directory listing) | Yes | **Blocked** | **Blocked** |
 
-**Deactivation:** User can't log in (API key rejected with 403), can't message via channels (sender links removed). Sessions preserved for audit. Admin can reactivate anytime.
+### Personal vs shared files
 
-**Permanent deletion:** User record deleted, sessions remain but with `user_id = NULL`. Usage records deleted. Audit log entries preserved (hash chain integrity).
+When a user asks the agent to create a file:
+- **Default**: saved to their personal `documents/` folder
+- **"Save to shared"**: saved to `shared/documents/` (team-accessible)
+- The agent is instructed about this distinction in its system prompt
 
 ---
 
-## Session Isolation
+## Tool Permissions
 
-- **Admin** sees all sessions across all users
-- **Non-admin users** see only their own sessions (filtered by `user_id`)
-- Sessions list includes user name column for admin view
-- Each session shows which user owns it
+Admin controls which tools each role can use from **Settings → Tool Permissions**.
 
-### How Sessions Get User Attribution
+### Four permission levels
 
-| Channel | How user_id is set |
-|---------|-------------------|
-| Webchat | From authenticated API key (direct user.id) |
-| REST API | From authenticated API key (direct user.id) |
-| Telegram | Via sender_links lookup (sender_id → user.id) |
-| WhatsApp | Via sender_links lookup (sender_id → user.id) |
+| Level | What happens |
+|---|---|
+| **Allow** | Tool available to everyone with this role |
+| **Power User only** | Only admin + users with Power User flag |
+| **Confirm first** | Agent asks user for confirmation before running |
+| **Deny** | Tool hidden from agent + blocked at execution |
 
-If no sender_link exists for a channel sender, session gets `user_id = NULL` (unowned). Once admin links the sender, existing sessions are **backfilled** retroactively.
+### Default configuration
+
+| Tool | Default for "User" role |
+|---|---|
+| `exec` | Power User only |
+| `write_file` | Power User only |
+| `edit_file` | Power User only |
+| `manage_cron` | Power User only |
+| `manage_plugins` | Power User only |
+| All other tools (20+) | Allow |
+
+### How to customize
+
+1. Go to **Settings → Tool Permissions**
+2. Select role: User
+3. Change any tool's dropdown: Allow / Power User only / Confirm first / Deny
+4. Click **Save Permissions**
+5. Changes apply immediately to all users with that role
+
+### Exec safety modes
+
+| User type | Exec mode | What's blocked |
+|---|---|---|
+| **Admin** | Unrestricted | Only catastrophic commands (rm -rf /, shutdown, curl\|sh) |
+| **Power User** | Sandboxed | Above + persona files + source code + secrets + cross-scope access + confirmation for risky commands |
+| **Regular User** | Denied | Cannot use exec at all |
 
 ---
 
-## Usage Tracking
+## Cron Jobs
 
-Usage is tracked per-user automatically:
+Cron jobs are stored in the database with per-user ownership.
 
-- Every LLM call records: `user_id`, model, tokens, cost
-- Admin can view per-user usage breakdown via `/admin/usage?groupBy=user`
-- Health endpoint returns total user count and active user count
+| User type | Can create crons? | Can see? |
+|---|---|---|
+| **Admin** | Yes (via UI + agent) | All crons in admin page |
+| **Power User** | Yes (via agent) | Own crons at `/my/cron` |
+| **Regular User** | No (manage_cron denied) | N/A |
 
-### Future: Per-User Token Limits
-
-Schema is ready (`token_limit` column) but enforcement is deferred. When enabled:
-- Admin sets monthly token cap per user
-- Agent checks limit before each LLM call
-- Friendly message when limit reached: "Usage limit reached for this month"
+When a Power User creates a cron via the agent, it runs with **their permissions** — not admin. Their cron jobs can only use tools they have access to.
 
 ---
 
-## API Endpoints
+## User Dashboard (`/my/`)
 
-### User Management (admin only)
+Non-admin users see a personal dashboard instead of the admin panel:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/admin/users` | List all users with stats |
-| POST | `/api/v1/admin/users` | Create user (returns API key once) |
-| GET | `/api/v1/admin/users/:id` | User detail + links + usage |
-| PATCH | `/api/v1/admin/users/:id` | Update name/email/role/elevated |
-| DELETE | `/api/v1/admin/users/:id` | Deactivate (soft delete) |
-| DELETE | `/api/v1/admin/users/:id/permanent` | Hard delete |
-| POST | `/api/v1/admin/users/:id/reactivate` | Reactivate |
-| POST | `/api/v1/admin/users/:id/api-key` | Regenerate API key |
+| Page | What it shows |
+|---|---|
+| **Dashboard** (`/my/`) | Session count, token usage, cost summary |
+| **My Sessions** (`/my/sessions`) | Own chat sessions with message viewer |
+| **My Usage** (`/my/usage`) | Token breakdown by model, input/output, cost |
+| **My Cron Jobs** (`/my/cron`) | Cron jobs created via the agent |
 
-### Sender Links (admin only)
+- **Admin** → chat sidebar shows "Admin Dashboard" → `/admin/` (14 pages)
+- **Non-admin** → chat sidebar shows "My Dashboard" → `/my/` (4 pages)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/admin/users/:id/sender-links` | List linked senders |
-| POST | `/api/v1/admin/users/:id/sender-links` | Link a sender |
-| DELETE | `/api/v1/admin/users/:id/sender-links/:linkId` | Unlink |
+---
 
-### Onboarding (admin only)
+## User Management (Admin)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/admin/channels/pending-senders/:id/onboard` | Create user + approve + link in one step |
-| POST | `/api/v1/admin/channels/pending-senders/:id/approve` | Approve only (optional userId to link) |
+### Users page (`/admin/users`)
+
+| Action | Description |
+|---|---|
+| **Create user** | Name, email, role, Power User flag. API key shown once. |
+| **Edit user** | Change name, email, role, Power User flag |
+| **Link sender** | Connect Telegram/WhatsApp identity → shows unlinked sessions to click |
+| **Regenerate API key** | Requires typing "REGENERATE" to confirm. Old key invalidated. |
+| **Deactivate** | Soft delete — reversible. All access blocked. Sender links removed. |
+| **Reactivate** | Restores access |
+| **Permanent delete** | Irreversible — sessions preserved for audit, user row deleted |
+| **Self-protection** | Cannot deactivate/delete/demote yourself |
+
+### What happens when a user is deactivated
+
+1. All API calls return 403 "Account deactivated"
+2. Login returns 403 (key is valid but account disabled)
+3. WebSocket auth rejects immediately
+4. Channel links removed (can't message via Telegram/WhatsApp)
+5. Sessions preserved for audit
+6. Reversible — admin can reactivate anytime
+
+---
+
+## Group Chats
+
+Groups (Telegram groups, WhatsApp groups) work differently from individual users:
+
+| Aspect | Individual | Group |
+|---|---|---|
+| Session ownership | Linked to user account | No owner (user_id = NULL) |
+| Memory | Personal (per user UUID) | Shared group memory |
+| Tool permissions | Per the user's role | Per the individual sender's role |
+| Onboarding | "Add as User" | "Approve" |
+| Scope directory | `scopes/{uuid}/` | `scopes/group_{channel}_{chatId}/` |
+
+The bot remembers group context across sessions ("last week we discussed X in this group").
+
+---
+
+## Security Summary
+
+| Layer | What it does |
+|---|---|
+| **API key auth** | SHA-256 hashed, per-user, shown once |
+| **Active check** | Deactivated users blocked at middleware + WebSocket + login |
+| **Admin guard** | Non-admin redirected from `/admin/*` pages |
+| **scopedSafePath** | File tools enforce per-user scope boundaries |
+| **Exec sandboxing** | Admin=unrestricted, Power User=pattern blocks+scoped cwd, User=denied |
+| **Memory isolation** | Search returns only own scope + global memory |
+| **Tool permissions** | DB-driven, double-enforced (prompt + execution), admin-configurable |
+| **Output redaction** | API keys, tokens, secrets auto-stripped from agent responses |
+| **Audit trail** | Every tool call logged with tamper-evident hash chain |
 
 ---
 
 ## Migration from Single-User
 
-When deploying this update to an existing instance:
+If upgrading from a single-user deployment:
 
-1. **Migration runs automatically** — `008_multi_user.sql` adds `sender_links` table and new user columns
-2. **Existing admin works as before** — admin role bypasses all new permission checks
-3. **Existing sessions stay as-is** — `user_id = NULL` for channel sessions (unlinked)
-4. **allowFrom still works** — backward compatible, sender_links is an additional layer
-
-### To set up existing users:
-
-```
-1. Go to /admin/users → "Add User" for each person
-2. For each user, click "Link" → enter their Telegram ID or WhatsApp number
-3. Existing sessions from that sender get backfilled with user_id
-4. Future messages automatically resolve to the linked user
-```
-
-Or use the onboarding flow from `/admin/channels` if they appear in pending senders.
-
----
-
-## Security
-
-### Tenant Isolation
-All sender_links queries enforce `tenant_id`. No cross-tenant data leakage.
-
-### Auth Middleware
-- Deactivated users get 403 on any API request
-- Elevated flag loaded from DB on each request (not cached)
-
-### Tool Permissions
-- Dangerous tools hardcoded (not configurable — prevents bypass)
-- Admin always bypasses permission checks
-- Elevated check happens before DB rule check
-
-### API Key Security
-- Keys stored as SHA-256 hash (irreversible)
-- Keys shown only once on creation/regeneration
-- Regeneration requires typed confirmation ("REGENERATE")
-- Old key immediately invalidated on regeneration
-
-### Audit Trail
-- User creation/deletion logged in audit_log
-- Tool denials logged (tool.denied action)
-- All admin actions logged with user_id and IP
+1. **Database**: Migrations run automatically on startup (SQLite 008-010, Postgres 002-004)
+2. **Documents**: `documents/` and `media/` auto-migrate to `shared/` on first startup
+3. **Cron jobs**: `cron-jobs.json` auto-migrates to database, file renamed to `.migrated`
+4. **Scopes**: Old `channel:senderId` scopes auto-migrate to user UUID scopes when senders are linked
+5. **Existing admin**: Keeps working — `active=1`, `elevated=0` defaults are safe
+6. **No downtime**: All migrations are non-destructive and run on startup
