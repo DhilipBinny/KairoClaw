@@ -38,7 +38,9 @@ export const memoryTools: ToolRegistration[] = [
       }
 
       // Scope isolation: non-admin users only see own scope + global memory
-      const scopeFilter = context.user?.role === 'admin' ? undefined : context.scopeKey;
+      // If non-admin has no scope (unlinked/anonymous), use sentinel to show global-only
+      const isAdmin = context.user?.role === 'admin';
+      const scopeFilter = isAdmin ? undefined : (context.scopeKey || '__no_scope__');
       const results = await memorySystem.search(query, topN, scopeFilter);
       const stats = await memorySystem.getStats();
 

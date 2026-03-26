@@ -822,6 +822,7 @@
                   <select class="input input-sm" bind:value={permMap[tool.name]}>
                     <option value="allow">Allow</option>
                     <option value="power_user">Power User only</option>
+                    <option value="confirm">Confirm first</option>
                     <option value="deny">Deny</option>
                   </select>
                 </div>
