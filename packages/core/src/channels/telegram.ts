@@ -173,7 +173,7 @@ class TelegramChannel implements Channel {
         await this.handleMessage(ctx, text, [{ data: imageData, mimeType: 'image/jpeg' }]);
       } else {
         // Fallback: save to disk
-        const localPath = await this.downloadFile(largest.file_id, 'photo.jpg');
+        const localPath = await this.downloadFile(largest.file_id, 'photo.jpg', ctx.from?.id ? String(ctx.from.id) : undefined);
         const workspace = this.config.agent.workspace;
         const text = localPath
           ? `[Image saved to ${path.relative(workspace, localPath)}] ${caption}`.trim()
@@ -205,7 +205,7 @@ class TelegramChannel implements Channel {
       }
 
       // Non-image document or image download failed: save to disk
-      const localPath = await this.downloadFile(doc.file_id, doc.file_name || 'document');
+      const localPath = await this.downloadFile(doc.file_id, doc.file_name || 'document', ctx.from?.id ? String(ctx.from.id) : undefined);
       const caption = ctx.message.caption || '';
       const workspace = this.config.agent.workspace;
 
@@ -230,7 +230,7 @@ class TelegramChannel implements Channel {
     this.bot.on('message:voice', async (ctx) => {
       const voice = ctx.message.voice;
       if (!voice) return;
-      const localPath = await this.downloadFile(voice.file_id, 'voice.ogg');
+      const localPath = await this.downloadFile(voice.file_id, 'voice.ogg', ctx.from?.id ? String(ctx.from.id) : undefined);
       if (!localPath) {
         await this.handleMessage(ctx, '[Voice message received but download failed]');
         return;
@@ -541,11 +541,18 @@ class TelegramChannel implements Channel {
 
   // ── File download ──────────────────────────────────────
 
-  private async downloadFile(fileId: string, filename: string): Promise<string | null> {
+  private async downloadFile(fileId: string, filename: string, senderId?: string): Promise<string | null> {
     if (!this.bot) return null;
     try {
-      const mediaDir = path.join(this.config.agent.workspace, 'media');
-      fs.mkdirSync(mediaDir, { recursive: true });
+      // Save to sender's scoped media dir if linked, otherwise shared/media
+      let mediaDir: string;
+      if (senderId) {
+        const { getScopedMediaDir } = await import('../media/scoped-dir.js');
+        mediaDir = await getScopedMediaDir(this.config.agent.workspace, 'telegram', senderId, this.db, this.tenantId);
+      } else {
+        mediaDir = path.join(this.config.agent.workspace, 'shared', 'media');
+        fs.mkdirSync(mediaDir, { recursive: true });
+      }
 
       const file = await this.bot.api.getFile(fileId);
       const filePath = file.file_path;
