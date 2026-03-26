@@ -343,6 +343,8 @@ ACTIONS:
                 const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
                 if (match) {
                   await page.getByRole(match[1] as any, { name: match[2] }).first().selectOption(value, { timeout: 10_000 });
+                } else {
+                  await page.getByText(element, { exact: false }).first().selectOption(value, { timeout: 10_000 });
                 }
               } else {
                 await page.selectOption(element, value, { timeout: 10_000 });
@@ -409,10 +411,14 @@ ACTIONS:
             const mediaDir = user?.id
               ? path.join(workspace, 'scopes', user.id, 'media')
               : path.join(workspace, 'shared', 'media');
-            fs.mkdirSync(mediaDir, { recursive: true });
             const filename = `screenshot-${Date.now()}.jpg`;
             const filePath = path.join(mediaDir, filename);
-            fs.writeFileSync(filePath, buffer);
+            try {
+              fs.mkdirSync(mediaDir, { recursive: true });
+              fs.writeFileSync(filePath, buffer);
+            } catch (e: unknown) {
+              return { error: `Failed to save screenshot: ${e instanceof Error ? e.message : 'disk error'}` };
+            }
 
             return {
               success: true,
@@ -488,6 +494,8 @@ ACTIONS:
                 const match = selector.match(/^role=(\w+)\[name="(.+)"\]$/);
                 if (match) {
                   await page.getByRole(match[1] as any, { name: match[2] }).first().hover({ timeout: 10_000 });
+                } else {
+                  await page.getByText(element, { exact: false }).first().hover({ timeout: 10_000 });
                 }
               } else {
                 await page.hover(element, { timeout: 10_000 });
