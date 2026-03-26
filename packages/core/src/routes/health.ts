@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
-import type { DatabaseAdapter } from '../db/index.js';
 import type { SecretsStore } from '../secrets/store.js';
+import { getDb } from './utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, '../../package.json'), 'utf8')) as { version: string };
@@ -18,10 +18,12 @@ export const registerHealthRoutes: FastifyPluginAsync<{ secretsStore?: SecretsSt
 
   // GET /api/v1/health — detailed health check (legacy)
   app.get('/api/v1/health', async (request) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.db;
-    const config = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.config;
+    const db = getDb(request);
+    const config = (request as unknown as { ctx: { config: Record<string, unknown> } }).ctx.config;
+    const warnings: string[] = [];
 
-    // First-run detection and user stats
+    // Database connectivity check
+    let dbOk = true;
     let firstRun = false;
     let totalUsers = 0;
     let activeUsers = 0;
@@ -32,12 +34,20 @@ export const registerHealthRoutes: FastifyPluginAsync<{ secretsStore?: SecretsSt
       totalUsers = userCount?.count ?? 0;
       activeUsers = activeCount?.count ?? 0;
       firstRun = totalUsers <= 1 && (sessionCount?.count ?? 0) === 0;
-    } catch { /* non-critical */ }
+    } catch {
+      dbOk = false;
+      warnings.push('Database connection failed');
+    }
 
     const secretsDegraded = secretsStore?.isDegraded ?? false;
+    if (secretsDegraded) {
+      warnings.push('Secrets store decrypt failed — API keys unavailable. Check AGW_MASTER_KEY.');
+    }
+
+    const status = !dbOk ? 'unhealthy' : secretsDegraded ? 'degraded' : 'ok';
 
     return {
-      status: secretsDegraded ? 'degraded' : 'ok',
+      status,
       version: APP_VERSION,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
@@ -46,9 +56,10 @@ export const registerHealthRoutes: FastifyPluginAsync<{ secretsStore?: SecretsSt
         heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       },
       model: (config as Record<string, Record<string, string>>)?.model?.primary || 'not configured',
+      database: dbOk ? 'connected' : 'disconnected',
       firstRun,
       users: { total: totalUsers, active: activeUsers },
-      ...(secretsDegraded ? { warnings: ['Secrets store decrypt failed — API keys unavailable. Check AGW_MASTER_KEY.'] } : {}),
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
   });
 
@@ -63,7 +74,7 @@ export const registerHealthRoutes: FastifyPluginAsync<{ secretsStore?: SecretsSt
 
   // GET /api/v1/my/dashboard — authenticated user's own stats
   app.get('/api/v1/my/dashboard', async (request) => {
-    const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const db = getDb(request);
     const userId = request.user?.id;
     if (!userId) return { error: 'Not authenticated' };
 
