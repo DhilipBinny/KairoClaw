@@ -29,12 +29,40 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
   app.get('/api/v1/media/:filename', async (request, reply) => {
     const { filename } = request.params as { filename: string };
 
-    // Sanitize: only allow simple filenames (uuid.ext)
-    if (!/^[a-f0-9-]+\.[a-z0-9]+$/i.test(filename)) {
+    // Sanitize: only allow simple filenames (uuid.ext or timestamp-name.ext)
+    if (!/^[a-zA-Z0-9._-]+\.[a-z0-9]+$/i.test(filename)) {
       return reply.code(400).send({ error: 'Invalid filename' });
     }
 
-    const filePath = mediaStore.getPath(filename);
+    // 1. Check MediaStore (legacy /data/media/ + agent-generated)
+    let filePath = mediaStore.getPath(filename);
+
+    // 2. If not found, search workspace scoped media dirs
+    if (!filePath) {
+      const config = (request as any).ctx?.config as { agent?: { workspace?: string } } | undefined;
+      const workspace = config?.agent?.workspace;
+      if (workspace) {
+        const safe = path.basename(filename); // prevent traversal
+        // Check shared/media/
+        const sharedPath = path.join(workspace, 'shared', 'media', safe);
+        if (fs.existsSync(sharedPath)) {
+          filePath = sharedPath;
+        } else {
+          // Search scoped media dirs
+          const scopesDir = path.join(workspace, 'scopes');
+          if (fs.existsSync(scopesDir)) {
+            for (const scope of fs.readdirSync(scopesDir)) {
+              const scopedPath = path.join(scopesDir, scope, 'media', safe);
+              if (fs.existsSync(scopedPath)) {
+                filePath = scopedPath;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!filePath) {
       return reply.code(404).send({ error: 'Not found' });
     }
@@ -77,29 +105,23 @@ export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }>
     const ext = path.extname(originalName).slice(1).toLowerCase() || 'bin';
 
     // Save to user's scoped media dir if authenticated, otherwise shared/media
-    let mediaDir: string;
-    if (request.user?.id) {
-      const { getScopedMediaDir } = await import('../media/scoped-dir.js');
-      const db = (request as any).ctx?.db;
-      const tenantId = request.tenantId || 'default';
-      // Web uploads: user is authenticated by API key, use their UUID directly
-      const scopeDir = path.join(workspace, 'scopes', request.user.id, 'media');
-      fs.mkdirSync(scopeDir, { recursive: true });
-      mediaDir = scopeDir;
-    } else {
-      mediaDir = path.join(workspace, 'shared', 'media');
-      fs.mkdirSync(mediaDir, { recursive: true });
+    if (!request.user?.id) {
+      return reply.code(401).send({ error: 'Authentication required for uploads' });
     }
+    const mediaDir = path.join(workspace, 'scopes', request.user.id, 'media');
+    fs.mkdirSync(mediaDir, { recursive: true });
     const safeExt = ext.replace(/[^a-z0-9]/gi, '').slice(0, 10) || 'bin';
     const savedName = `${Date.now()}-${originalName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 60)}.${safeExt}`;
     const filePath = path.join(mediaDir, savedName);
     fs.writeFileSync(filePath, new Uint8Array(buffer));
 
+    const relativePath = path.relative(workspace, filePath);
     return {
       success: true,
       filename: savedName,
       originalName,
-      filePath,
+      filePath: relativePath, // relative to workspace (not absolute server path)
+      mediaUrl: `/api/v1/media/${encodeURIComponent(savedName)}`,
       mimeType: data.mimetype || 'application/octet-stream',
       sizeBytes: buffer.length,
     };
