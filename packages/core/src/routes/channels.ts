@@ -14,7 +14,10 @@ import type { GatewayConfig } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
 import type { DatabaseAdapter } from '../db/index.js';
 import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
+import { SenderLinkRepository } from '../db/repositories/sender-link.js';
+import { UserRepository } from '../db/repositories/user.js';
 import { requireRole } from '../auth/middleware.js';
+import { generateApiKey, hashApiKey } from '../auth/keys.js';
 import { setNestedPath } from './utils.js';
 
 export interface ChannelRoutesOptions {
@@ -123,8 +126,9 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
     const { id } = request.params as { id: string };
 
+    const tenantId = request.tenantId || 'default';
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id));
+    const sender = await repo.getById(Number(id), tenantId);
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -170,22 +174,136 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(500).send({ error: 'Failed to update config' });
     }
 
-    await repo.updateStatus(Number(id), 'approved');
+    await repo.updateStatus(Number(id), 'approved', tenantId);
+
+    // If userId provided, create sender_link (maps this sender to a user account)
+    const { userId: linkUserId } = (request.body as { userId?: string }) || {};
+    if (linkUserId && !isGroup) {
+      const senderLinkRepo = new SenderLinkRepository(db);
+      await senderLinkRepo.link({
+        tenantId,
+        channelType: sender.channel,
+        senderId: sender.sender_id,
+        userId: linkUserId,
+        linkedBy: request.user?.id,
+      });
+    }
+
     return { success: true };
   });
 
   // POST /api/v1/admin/channels/pending-senders/:id/reject
   app.post('/api/v1/admin/channels/pending-senders/:id/reject', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const tenantId = request.tenantId || 'default';
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id));
+    const sender = await repo.getById(Number(id), tenantId);
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    await repo.updateStatus(Number(id), 'rejected');
+    await repo.updateStatus(Number(id), 'rejected', tenantId);
     return { success: true };
+  });
+
+  // POST /api/v1/admin/channels/pending-senders/:id/onboard — one-click: create user + approve + link
+  app.post('/api/v1/admin/channels/pending-senders/:id/onboard', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: GatewayConfig } }).ctx.db;
+    const liveConfig = (request as unknown as { ctx: { config: GatewayConfig } }).ctx.config;
+    const { id } = request.params as { id: string };
+    const { name, email, role, elevated } = (request.body as {
+      name: string; email?: string; role?: string; elevated?: boolean;
+    }) || {};
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return reply.code(400).send({ error: 'Name is required' });
+    }
+
+    const tenantId = request.tenantId || 'default';
+
+    const pendingRepo = new PendingSenderRepository(db);
+    const sender = await pendingRepo.getById(Number(id), tenantId);
+    if (!sender) {
+      return reply.code(404).send({ error: 'Sender not found' });
+    }
+    const validRoles = ['admin', 'user'];
+    const userRole = role && validRoles.includes(role) ? role : 'user';
+
+    // 1. Create user account
+    const apiKey = generateApiKey();
+    const apiKeyHash = hashApiKey(apiKey);
+    const userRepo = new UserRepository(db);
+    const user = await userRepo.create({
+      tenantId,
+      name: name.trim(),
+      email: email?.trim() || undefined,
+      role: userRole,
+      apiKeyHash,
+    });
+    if (elevated) {
+      await userRepo.update(user.id, tenantId, { elevated: 1 });
+    }
+
+    // 2. Create sender_link
+    const senderLinkRepo = new SenderLinkRepository(db);
+    await senderLinkRepo.link({
+      tenantId,
+      channelType: sender.channel,
+      senderId: sender.sender_id,
+      userId: user.id,
+      linkedBy: request.user?.id,
+    });
+
+    // 3. Add to allowFrom config (same logic as approve)
+    const isGroup = (sender.channel === 'telegram' && sender.sender_id.startsWith('-'))
+      || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'));
+    const stateDir = liveConfig._stateDir || '';
+    const configPath = path.join(stateDir, 'config.json');
+
+    try {
+      const raw = fs.readFileSync(configPath, 'utf8');
+      const rawConfig = JSON.parse(raw) as Record<string, unknown>;
+      let dotPath: string;
+      if (sender.channel === 'telegram') {
+        dotPath = isGroup ? 'channels.telegram.groupAllowFrom' : 'channels.telegram.allowFrom';
+      } else if (sender.channel === 'whatsapp') {
+        dotPath = isGroup ? 'channels.whatsapp.groupAllowFrom' : 'channels.whatsapp.allowFrom';
+      } else {
+        dotPath = `channels.${sender.channel}.allowFrom`;
+      }
+
+      const parts = dotPath.split('.');
+      let current: unknown = rawConfig;
+      for (const part of parts) {
+        if (current && typeof current === 'object') current = (current as Record<string, unknown>)[part];
+        else { current = undefined; break; }
+      }
+      const existingList = Array.isArray(current) ? [...current] : [];
+      if (!existingList.includes(sender.sender_id)) {
+        existingList.push(sender.sender_id);
+      }
+      setNestedPath(rawConfig, dotPath, existingList);
+      setNestedPath(liveConfig as unknown as Record<string, unknown>, dotPath, existingList);
+      fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
+    } catch {
+      // Config update failed, but user + link created — not critical
+    }
+
+    // 4. Mark sender as approved (after DB operations succeed, before return)
+    try { await pendingRepo.updateStatus(Number(id), 'approved', tenantId); } catch { /* non-critical */ }
+
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        elevated: !!elevated,
+        active: true,
+      },
+      api_key: apiKey,
+    };
   });
 };

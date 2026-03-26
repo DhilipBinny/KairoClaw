@@ -12,6 +12,7 @@ const MAX_RECONNECT_DELAY = 30000;
 const handlers = new Map<string, Set<MessageHandler>>();
 let isConnected = false;
 let connectPromiseResolve: (() => void) | null = null;
+let authFailed = false; // Stop reconnect loop when auth is rejected
 
 function getToken(): string | null {
   return localStorage.getItem('agw_api_key');
@@ -48,6 +49,7 @@ function dispatch(msg: Record<string, unknown>): void {
 }
 
 export function connect(): Promise<void> {
+  authFailed = false; // Reset on explicit connect (e.g., after fresh login)
   return new Promise((resolve) => {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
       if (isConnected) {
@@ -64,6 +66,7 @@ export function connect(): Promise<void> {
 
     socket.onopen = () => {
       reconnectDelay = 1000;
+      authFailed = false;
       // Send auth
       const token = getToken();
       if (token) {
@@ -81,6 +84,10 @@ export function connect(): Promise<void> {
           // Request chat history for the current session after auth succeeds
           const sessionKey = localStorage.getItem('agw_session_key') || 'main';
           socket?.send(JSON.stringify({ type: 'chat.history', sessionKey, limit: 50 }));
+        } else if (msg.type === 'auth.error') {
+          // Auth rejected — don't reconnect, this won't fix itself
+          authFailed = true;
+          connectPromiseResolve = null;
         }
         dispatch(msg);
       } catch {
@@ -92,7 +99,7 @@ export function connect(): Promise<void> {
       isConnected = false;
       socket = null;
       dispatch({ type: 'connection.lost' });
-      scheduleReconnect();
+      if (!authFailed) scheduleReconnect();
     };
 
     socket.onerror = () => {

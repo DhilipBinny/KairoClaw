@@ -179,17 +179,21 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           const token = msg.token as string | undefined;
           // Check against gateway token first
           let authValid = safeTokenCompare(token, gatewayToken);
-          // If gateway token didn't match, check against user API keys in the DB
-          if (!authValid && token) {
+          // Always try to resolve user from API key — sets stable UUID for scoping
+          if (token) {
             const keyHash = hashApiKey(token);
-            const user = await db.get<{ id: string }>(
-              'SELECT id FROM users WHERE api_key_hash = ?',
+            const user = await db.get<{ id: string; active: number }>(
+              'SELECT id, active FROM users WHERE api_key_hash = ?',
               [keyHash],
             );
             if (user) {
+              if (!user.active) {
+                safeSend({ type: 'auth.error', message: 'Account deactivated' });
+                return;
+              }
               authValid = true;
-              // Use stable user ID for scoped memory (not ephemeral clientId)
-              clientId = (user as Record<string, unknown>).id as string || clientId;
+              // Use stable user UUID for scoped memory (not ephemeral web-{timestamp})
+              clientId = user.id;
             }
           }
           if (authValid) {

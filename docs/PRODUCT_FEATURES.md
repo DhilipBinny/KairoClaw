@@ -1,8 +1,8 @@
-# AGW — Product Features
+# KairoClaw — Product Features
 
-> **Agentic Gateway** — A self-hosted personal AI gateway that connects LLMs to messaging channels, tools, and scheduled tasks.
+> **KairoClaw** — A self-hosted personal AI gateway that connects LLMs to messaging channels, tools, and scheduled tasks. Multi-user, multi-channel, fully self-hosted.
 >
-> Version: 2.0 | Updated: 2026-03-19 | Audited from source code
+> Version: 2.1 | Updated: 2026-03-25 | Audited from source code
 
 ---
 
@@ -10,12 +10,12 @@
 
 | Metric | Value |
 |--------|-------|
-| API endpoints | 40+ REST + 1 WebSocket |
-| Built-in tools | 10 (files, exec, web, messaging, memory) |
+| API endpoints | 55+ REST + 1 WebSocket |
+| Built-in tools | 19 (files, exec, web, messaging, memory, email, agents, PDF, plugins) |
 | Channels | 3 (Telegram, WhatsApp, Web Chat) |
 | LLM providers | 3 (Anthropic, OpenAI, Ollama) |
 | Known models | 9 built-in + unlimited custom |
-| Database tables | 10 |
+| Database tables | 12 |
 | Config options | 20+ across 8 sections |
 | Slash commands | 7 |
 | Log categories | 12 structured categories |
@@ -24,7 +24,7 @@
 
 ## 1. Agent System (ReAct Loop)
 
-The core of AGW — a multi-round agent that calls LLMs, executes tools, and manages context.
+The core of KairoClaw — a multi-round agent that calls LLMs, executes tools, and manages context.
 
 ### How It Works
 1. User sends a message via any channel
@@ -117,7 +117,7 @@ Built from workspace persona files, automatically loaded:
 
 ## 3. Tool System
 
-### Built-in Tools (10)
+### Built-in Tools (19)
 
 | Tool | Description | Security |
 |------|-------------|----------|
@@ -129,8 +129,17 @@ Built from workspace persona files, automatically loaded:
 | `web_fetch` | Fetch URL content (max 50K chars) | SSRF protection (blocks private IPs) |
 | `web_search` | Brave Search API | Requires API key |
 | `send_message` | Send to Telegram/WhatsApp/Web | Requires explicit target |
+| `send_file` | Send file to channel | Path traversal protection |
+| `session_status` | Get current session info | Read-only |
 | `manage_cron` | Create/list/update/delete/run cron jobs | Validates delivery targets |
 | `memory_search` | Semantic search over memory files | Top-N with relevance scoring |
+| `memory_read` | Read specific memory file | Workspace-restricted |
+| `inspect_image` | Analyze image via vision model | Path traversal protection |
+| `manage_plugins` | List/enable/disable plugins | Admin or elevated only |
+| `read_pdf` | Parse and extract PDF content | Path traversal protection |
+| `send_email` | Send email via configured SMTP | Requires SMTP config |
+| `spawn_agent` | Launch a sub-agent for parallel tasks | Inherits caller permissions |
+| `kill_agent` | Terminate a running sub-agent | Must own the agent |
 
 ### MCP (Model Context Protocol)
 - Install tool servers from curated catalog or custom config
@@ -151,8 +160,6 @@ Built from workspace persona files, automatically loaded:
 
 ### Limitations
 - No HTTP POST/PUT/PATCH tool (only GET via web_fetch)
-- No email sending tool
-- No PDF/document parsing tool
 - No parallel tool execution
 - Tool approval workflow UI not built (backend exists)
 - No custom tool registration via API (only MCP or built-in)
@@ -208,6 +215,8 @@ Built from workspace persona files, automatically loaded:
 - **Validation**: Cron syntax, interval minimum, date format checked on creation
 - **Auto-disable**: Jobs with missing delivery targets disabled with clear error
 - **LLM-managed**: Agent can create/update/delete cron jobs via `manage_cron` tool
+- **DB-backed**: Cron jobs stored in database with per-user ownership
+- **Auto-migration**: Legacy JSON-file cron jobs automatically migrated to DB on startup
 - **Admin UI**: Dynamic delivery target editor with per-channel inputs
 
 ### Heartbeat Service
@@ -290,16 +299,22 @@ Built from workspace persona files, automatically loaded:
 
 ### Authentication & Authorization
 - API key authentication (Bearer token)
-- Role-based access: admin, user, viewer
-- Session ownership enforcement (non-admins see only their sessions)
+- Role-based access: **admin**, **user** (+ optional `elevated` toggle per user)
+  - admin: full access — all tools, config, user management
+  - user: safe tools only (no exec, cron, write_file, delete_file)
+  - user + elevated: all tools (admin grants per user)
+- Session ownership enforcement (non-admins see only their own sessions)
+- Deactivated users rejected with 403 on every request
 - Login rate limiting with map cap and expiry eviction
 - Runtime role validation (invalid DB roles rejected)
 
 ### Secrets Management
-- **Unified SecretsStore** (`secrets.json`, mode 0600)
-- Single file for ALL secrets: provider keys, MCP tokens, channel tokens, tool API keys
+- **Unified SecretsStore** (`secrets.enc`) — **encrypted at rest** with AES-256-GCM
+- Envelope encryption: master KEK encrypts per-namespace DEKs; each namespace encrypted separately
+- HMAC-SHA256 tamper detection over the entire store
+- Master key: `AGW_MASTER_KEY` env var (cloud) or auto-generated `master.key` file (local)
 - Namespaced: `providers.anthropic`, `mcp.github`, `channels.telegram`, etc.
-- Auto-migration from `.env` + `mcp-secrets.json` on first boot
+- Auto-migration from legacy `.env` + `mcp-secrets.json` on first boot
 - Credentials editable from admin UI (no file editing needed)
 
 ### Data Protection
@@ -316,30 +331,45 @@ Built from workspace persona files, automatically loaded:
 - Chain integrity verification function
 
 ### Limitations
-- No encryption at rest for secrets.json or SQLite
+- SQLite not encrypted at rest (secrets.enc is; SQLite encryption planned via SQLCipher)
 - No OAuth2/OIDC SSO
 - No PII detection/redaction before LLM calls
-- No token budgets or cost kill-switch
+- No token budgets or cost kill-switch per user (schema ready, enforcement deferred)
 - Prompt injection detection is heuristic (flags, doesn't block)
 
 ---
 
 ## 9. Admin UI
 
-### Pages (10)
+### Admin Pages (14)
 
 | Group | Page | Purpose |
 |-------|------|---------|
-| **Configuration** | Dashboard | System overview |
+| **Configuration** | Dashboard | System overview — health, user count, active users |
 | | Personas | Edit persona files (IDENTITY, SOUL, USER, AGENTS) |
 | | Providers & Models | Credentials, test, set default/fallback, capabilities |
-| | Channels | Enable/disable, configure, monitor Telegram + WhatsApp |
+| | Channels | Enable/disable, configure, monitor Telegram + WhatsApp; manage pending senders |
+| | Users | Create/manage users, roles, elevated toggle, sender linking, API key management |
 | | Settings | Agent, session, tools, heartbeat, raw JSON |
 | | MCP Servers | Install, configure, enable/disable tool servers |
+| | Plugins | Plugin management |
 | **Operations** | Cron Jobs | Create/edit/delete with multi-target delivery |
-| | Sessions | View conversations, messages, delete |
+| | Sessions | View conversations, messages, delete; filter by user |
+| | Scoped Channels | Per-user memory scope viewer |
 | | Logs | Live + search + expandable structured entries |
-| | Usage (Beta) | Token usage and cost tracking |
+| | Usage (Beta) | Token usage and cost tracking; per-user breakdown |
+| | Database | DB type, row counts, SQLite→PostgreSQL migration |
+
+### User Portal (`/my/`) — 4 pages
+
+| Page | Purpose |
+|------|---------|
+| Dashboard | Personal overview — sessions, usage summary |
+| Sessions | View own conversations and messages |
+| Usage | Personal token usage and cost tracking |
+| Cron | View and manage own cron jobs |
+
+**Total: 14 admin + 4 user portal = 18 pages**
 
 ### Design
 - SvelteKit SPA with dark theme (warm indigo-black palette)
@@ -360,25 +390,35 @@ Built from workspace persona files, automatically loaded:
 ### Stack
 - **Runtime**: Node.js + TypeScript
 - **Framework**: Fastify (HTTP) + SvelteKit (UI)
-- **Database**: SQLite via better-sqlite3 (10 tables, 5 migrations)
+- **Database**: SQLite (default) or PostgreSQL — 12 data tables, 10 SQLite + 4 Postgres migrations
 - **Monorepo**: pnpm workspaces — `@agw/types`, `@agw/core`, `@agw/ui`
 
 ### Deployment
 - Single process, single `start.sh` command
 - Docker support (Dockerfile + docker-compose)
-- State directory: `~/.agw/` (config, secrets, database, logs, WhatsApp auth)
+- State directory: `~/.agw/` (config, secrets.enc, database, logs, WhatsApp auth)
 - Graceful shutdown (channels, scheduler, heartbeat, MCP, memory, DB)
 - Process-level crash protection (uncaughtException/unhandledRejection caught)
 
+### Multi-User
+- Multiple users per deployment — each with their own sessions, permissions, usage, channel identity
+- Admin manages users: create, deactivate, delete, regenerate API keys
+- Channel sender linking: Telegram user IDs and WhatsApp numbers mapped to user accounts
+- One-click onboarding: pending sender → user account + channel link + allowFrom in one step
+- Tool permissions enforced per user: unified DB-driven tool permissions table
+- Per-user documents/shared workspace — each user has isolated file workspace
+- Tiered exec safety: admin unrestricted, regular users sandboxed
+- Soft delete (deactivate/reactivate) and hard delete with confirmation
+
 ### Limitations
-- Single-tenant only (multi-tenant schema exists but not enforced)
-- SQLite limits (~100 concurrent sessions)
+- Single org per deployment (multi-org: run separate Docker instances)
+- SQLite: ~4 concurrent writers (use PostgreSQL for teams or higher concurrency)
 - No horizontal scaling
 - No zero-downtime restart
 
 ---
 
-## What Makes AGW Different
+## What Makes KairoClaw Different
 
 ### vs ChatGPT / Claude.ai
 - **Self-hosted**: Complete control, zero vendor lock-in, your data stays local
@@ -388,12 +428,14 @@ Built from workspace persona files, automatically loaded:
 - **Your subscription**: Use Claude Pro/Max OAuth token — no separate API billing
 
 ### vs OpenWebUI / LobeChat / LibreChat
+- **Multi-user**: Multiple users on one deployment — each with isolated sessions, permissions, usage tracking, and channel identity. No competitor has this done well.
+- **Channel identity linking**: Telegram users and WhatsApp numbers linked to user accounts. One person = one account across all channels.
 - **Persistent layered memory**: Profile (permanent) + Sessions (7-day) — not just chat history
 - **Context compaction**: LLM-based summarization when context fills up — not just truncation
 - **Multi-provider failover**: Seamless switching between Anthropic, OpenAI, Ollama on errors
 - **MCP integration**: Full Model Context Protocol support out-of-box
 - **Cron + delivery**: Scheduled AI tasks with multi-channel delivery targets
-- **Cost tracking**: Per-call cost estimation and recording
+- **Cost tracking**: Per-call cost estimation and recording, per-user breakdown
 - **Audit trail**: Tamper-evident logging of all tool calls and actions
-- **RBAC**: Tool-level permissions (allow/deny/confirm per role)
-- **Unified secrets**: Single encrypted-permissions file for all API keys
+- **RBAC**: Tool-level permissions (allow/deny/confirm per role) + dangerous tool gating
+- **Encrypted secrets**: AES-256-GCM envelope encryption for all API keys at rest

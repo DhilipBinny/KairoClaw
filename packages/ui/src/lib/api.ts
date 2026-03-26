@@ -433,8 +433,12 @@ export async function getPendingSenders(): Promise<{ senders: PendingSender[] }>
   return request('/admin/channels/pending-senders');
 }
 
-export async function approveSender(id: number): Promise<{ success: boolean }> {
-  return request(`/admin/channels/pending-senders/${id}/approve`, { method: 'POST', body: {} });
+export async function approveSender(id: number, userId?: string): Promise<{ success: boolean }> {
+  return request(`/admin/channels/pending-senders/${id}/approve`, { method: 'POST', body: userId ? { userId } : {} });
+}
+
+export async function onboardSender(id: number, data: { name: string; email?: string; role?: string; elevated?: boolean }): Promise<{ user: UserInfo; api_key: string }> {
+  return request(`/admin/channels/pending-senders/${id}/onboard`, { method: 'POST', body: data });
 }
 
 export async function rejectSender(id: number): Promise<{ success: boolean }> {
@@ -516,4 +520,107 @@ export async function getPlugins(): Promise<{ plugins: Record<string, unknown> }
 
 export async function savePlugins(plugins: Record<string, unknown>): Promise<{ success: boolean }> {
   return request('/admin/plugins', { method: 'PUT', body: { plugins } });
+}
+
+// ── Users ──────────────────────────────────────
+
+export interface UserInfo {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string;
+  elevated: boolean;
+  active: boolean;
+  deactivated_at: string | null;
+  created_at: string;
+  updated_at: string;
+  session_count: number;
+  sender_links: Array<{ id: number; channel_type: string; sender_id: string }>;
+  usage: { total_input: number; total_output: number; total_cost: number; request_count: number };
+}
+
+export async function getUsers(): Promise<UserInfo[]> {
+  return request('/admin/users');
+}
+
+export async function getUser(id: string): Promise<UserInfo> {
+  return request(`/admin/users/${id}`);
+}
+
+export async function createUser(data: { name: string; email?: string; role?: string; elevated?: boolean }): Promise<{ user: UserInfo; api_key: string }> {
+  return request('/admin/users', { method: 'POST', body: data });
+}
+
+export async function updateUser(id: string, data: { name?: string; email?: string; role?: string; elevated?: boolean }): Promise<{ success: boolean }> {
+  return request(`/admin/users/${id}`, { method: 'PATCH', body: data });
+}
+
+export async function deactivateUser(id: string): Promise<{ success: boolean }> {
+  return request(`/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export async function reactivateUser(id: string): Promise<{ success: boolean }> {
+  return request(`/admin/users/${id}/reactivate`, { method: 'POST' });
+}
+
+export async function permanentDeleteUser(id: string): Promise<{ success: boolean }> {
+  return request(`/admin/users/${id}/permanent`, { method: 'DELETE' });
+}
+
+export async function regenerateApiKey(id: string): Promise<{ api_key: string }> {
+  return request(`/admin/users/${id}/api-key`, { method: 'POST' });
+}
+
+export interface UnlinkedSession {
+  chat_id: string;
+  channel: string;
+  sender_id: string;
+  sender_name: string | null;
+  turns: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getUnlinkedSessions(): Promise<UnlinkedSession[]> {
+  return request('/admin/users/unlinked-sessions');
+}
+
+export async function linkSender(userId: string, channelType: string, senderId: string): Promise<Record<string, unknown>> {
+  return request(`/admin/users/${userId}/sender-links`, { method: 'POST', body: { channelType, senderId } });
+}
+
+export async function unlinkSender(userId: string, linkId: number): Promise<{ success: boolean }> {
+  return request(`/admin/users/${userId}/sender-links/${linkId}`, { method: 'DELETE' });
+}
+
+// Tool permissions
+export async function getToolList(): Promise<Array<{ name: string; description: string }>> {
+  return request('/admin/tool-definitions');
+}
+
+export interface ToolPermRule { id?: number; tool_pattern: string; permission: string }
+
+export async function getToolPermissions(role: string): Promise<{ role: string; rules: ToolPermRule[] }> {
+  return request(`/admin/tool-permissions/${role}`);
+}
+
+export async function saveToolPermissions(role: string, permissions: Array<{ toolPattern: string; permission: string }>): Promise<{ success: boolean }> {
+  return request(`/admin/tool-permissions/${role}`, { method: 'PUT', body: { permissions } });
+}
+
+// User portal (/my/) endpoints
+export async function getMyDashboard(): Promise<{
+  user: { id: string; name: string; role: string };
+  sessions: number;
+  usage: { tokens: number; cost: number };
+}> {
+  return request('/my/dashboard');
+}
+
+export async function getMyUsage(days = 30): Promise<Record<string, unknown>> {
+  return request(`/my/usage?days=${days}`);
+}
+
+export async function getMyCrons(): Promise<{ jobs: Array<Record<string, unknown>> }> {
+  return request('/my/cron');
 }

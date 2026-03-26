@@ -15,6 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Logger } from 'pino';
+import type { DatabaseAdapter } from '../db/index.js';
+import { CronJobRepository, type CronJobRow } from '../db/repositories/cron-job.js';
 
 // ---------------------------------------------------------------------------
 // Cron expression parser
@@ -107,6 +109,7 @@ export interface CronJob {
   lastDelivered: boolean | null;
   lastDeliveryChannel: string | null;
   runCount: number;
+  userId?: string | null; // owner — crons run with this user's permissions
 }
 
 export type JobExecutor = (job: CronJob) => Promise<{ text?: string; media?: import('@agw/types').MediaAttachment[] }>;
@@ -132,43 +135,188 @@ export class CronScheduler {
   private log: Logger;
   private executor?: JobExecutor;
   private deliverer?: JobDeliverer;
+  private repo?: CronJobRepository;
+  private tenantId: string;
 
-  constructor(opts: { stateDir: string; logger: Logger; executor?: JobExecutor; deliverer?: JobDeliverer }) {
+  constructor(opts: {
+    stateDir: string;
+    logger: Logger;
+    executor?: JobExecutor;
+    deliverer?: JobDeliverer;
+    db?: DatabaseAdapter;
+    tenantId?: string;
+  }) {
     this.jobsPath = path.join(opts.stateDir, 'cron-jobs.json');
     this.log = opts.logger;
     this.executor = opts.executor;
     this.deliverer = opts.deliverer;
-    this._load();
+    this.tenantId = opts.tenantId || 'default';
+    if (opts.db) {
+      this.repo = new CronJobRepository(opts.db);
+    }
   }
 
   // -- Persistence ----------------------------------------------------------
 
-  private _load(): void {
+  /** Load jobs from DB. Falls back to JSON for migration. */
+  async load(): Promise<void> {
+    // Try DB first
+    if (this.repo) {
+      try {
+        const rows = await this.repo.listByTenant(this.tenantId);
+        if (rows.length > 0) {
+          for (const row of rows) {
+            this.jobs.set(row.id, this._rowToJob(row));
+          }
+          this.log.info({ count: this.jobs.size }, 'Cron jobs loaded from DB');
+          return;
+        }
+      } catch (e) {
+        this.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to load cron jobs from DB');
+      }
+
+      // DB is empty — check for JSON migration
+      if (fs.existsSync(this.jobsPath)) {
+        await this._migrateJsonToDb();
+        return;
+      }
+    }
+
+    // No DB — fall back to JSON (legacy)
+    this._loadJson();
+  }
+
+  private _loadJson(): void {
     try {
       if (fs.existsSync(this.jobsPath)) {
         const data: CronJob[] = JSON.parse(fs.readFileSync(this.jobsPath, 'utf8'));
         for (const job of data) {
           this.jobs.set(job.id, job);
         }
-        this.log.info({ count: this.jobs.size }, 'Cron jobs loaded');
+        this.log.info({ count: this.jobs.size }, 'Cron jobs loaded from JSON (legacy)');
       }
     } catch (e) {
       this.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to load cron jobs');
     }
   }
 
-  private _save(): void {
+  private async _migrateJsonToDb(): Promise<void> {
+    if (!this.repo) return;
+    try {
+      const data: CronJob[] = JSON.parse(fs.readFileSync(this.jobsPath, 'utf8'));
+      for (const job of data) {
+        const delivery = typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery);
+        await this.repo.create({
+          id: job.id,
+          tenantId: this.tenantId,
+          userId: job.userId ?? null,
+          name: job.name || '',
+          scheduleType: job.schedule?.type || 'cron',
+          scheduleValue: String(job.schedule?.value || ''),
+          timezone: job.schedule?.tz,
+          prompt: job.prompt,
+          delivery,
+          enabled: job.enabled !== false,
+        });
+        this.jobs.set(job.id, job);
+      }
+      // Rename JSON file (backup)
+      const migratedPath = this.jobsPath + '.migrated';
+      fs.renameSync(this.jobsPath, migratedPath);
+      this.log.info({ count: data.length }, 'Migrated cron jobs from JSON to DB');
+    } catch (e) {
+      this.log.error({ err: e instanceof Error ? e.message : String(e) }, 'Failed to migrate cron jobs from JSON to DB');
+      this._loadJson(); // fall back
+    }
+  }
+
+  /** Persist a single job change to DB (or JSON fallback). */
+  private async _saveJob(job: CronJob): Promise<void> {
+    if (this.repo) {
+      try {
+        const existing = await this.repo.getById(job.id, this.tenantId);
+        if (existing) {
+          await this.repo.update(job.id, this.tenantId, {
+            name: job.name,
+            scheduleType: job.schedule?.type,
+            scheduleValue: String(job.schedule?.value || ''),
+            timezone: job.schedule?.tz,
+            prompt: job.prompt,
+            delivery: typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery),
+            enabled: job.enabled,
+          });
+        } else {
+          await this.repo.create({
+            id: job.id,
+            tenantId: this.tenantId,
+            userId: job.userId ?? null,
+            name: job.name || '',
+            scheduleType: job.schedule?.type || 'cron',
+            scheduleValue: String(job.schedule?.value || ''),
+            timezone: job.schedule?.tz,
+            prompt: job.prompt,
+            delivery: typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery),
+            enabled: job.enabled,
+          });
+        }
+        return;
+      } catch (e) {
+        this.log.error({ err: e instanceof Error ? e.message : String(e) }, 'Failed to save cron job to DB');
+      }
+    }
+    // JSON fallback
+    this._saveAllJson();
+  }
+
+  private _saveAllJson(): void {
     try {
       const data = Array.from(this.jobs.values());
       fs.writeFileSync(this.jobsPath, JSON.stringify(data, null, 2));
     } catch (e) {
-      this.log.error({ err: e instanceof Error ? e.message : String(e) }, 'Failed to save cron jobs');
+      this.log.error({ err: e instanceof Error ? e.message : String(e) }, 'Failed to save cron jobs JSON');
     }
+  }
+
+  /** Backward-compatible sync save — persists all jobs (fire-and-forget for DB). */
+  private _save(): void {
+    if (this.repo) {
+      // Fire-and-forget DB writes for each job
+      for (const job of this.jobs.values()) {
+        this._saveJob(job).catch(e =>
+          this.log.error({ err: e instanceof Error ? e.message : String(e), jobId: job.id }, 'Failed to persist cron job'));
+      }
+    } else {
+      this._saveAllJson();
+    }
+  }
+
+  /** Convert a DB row to a CronJob object. */
+  private _rowToJob(row: CronJobRow): CronJob {
+    let delivery: CronJobDelivery | string;
+    try { delivery = JSON.parse(row.delivery); } catch { delivery = row.delivery; }
+    return {
+      id: row.id,
+      name: row.name,
+      schedule: { type: row.schedule_type as CronJobSchedule['type'], value: row.schedule_value, tz: row.timezone || undefined },
+      prompt: row.prompt,
+      delivery,
+      enabled: !!row.enabled,
+      createdAt: row.created_at,
+      lastRun: row.last_run,
+      lastResult: row.last_result,
+      lastError: null,
+      lastDelivered: null,
+      lastDeliveryChannel: null,
+      runCount: row.run_count,
+      userId: row.user_id,
+    };
   }
 
   // -- Lifecycle ------------------------------------------------------------
 
-  start(): void {
+  async start(): Promise<void> {
+    // Load jobs from DB (or JSON fallback) before starting timers
+    await this.load();
     for (const job of this.jobs.values()) {
       if (job.enabled !== false) {
         this._scheduleJob(job);
@@ -373,6 +521,7 @@ export class CronScheduler {
     payload?: { message?: string };
     delivery?: CronJobDelivery | string;
     enabled?: boolean;
+    userId?: string | null;
   }): CronJob {
     const schedule = jobSpec.schedule || ({} as any);
     const scheduleType = (schedule.type || schedule.kind) as CronJob['schedule']['type'];
@@ -430,6 +579,7 @@ export class CronScheduler {
       lastError: null,
       lastDelivered: null,
       lastDeliveryChannel: null,
+      userId: jobSpec.userId ?? null,
       runCount: 0,
     };
 
@@ -482,7 +632,13 @@ export class CronScheduler {
       this.timers.delete(id);
     }
     this.jobs.delete(id);
-    this._save();
+    // Delete from DB
+    if (this.repo) {
+      this.repo.delete(id, this.tenantId).catch(e =>
+        this.log.error({ err: e instanceof Error ? e.message : String(e), jobId: id }, 'Failed to delete cron job from DB'));
+    } else {
+      this._saveAllJson();
+    }
     this.log.info({ jobId: id }, 'Cron job removed');
     return true;
   }

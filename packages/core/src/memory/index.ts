@@ -74,7 +74,7 @@ export class MemorySystem {
    * Returns top-N results ranked by term frequency with bonuses for
    * heading matches and exact phrase matches.
    */
-  async search(query: string, topN = 5): Promise<MemoryChunk[]> {
+  async search(query: string, topN = 5, scopeKey?: string | null): Promise<MemoryChunk[]> {
     if (!this.initialized) return [];
 
     const queryTerms = query
@@ -88,10 +88,19 @@ export class MemorySystem {
       // Pre-filter with SQL LIKE to avoid loading all chunks into memory
       const likeConditions = queryTerms.map(() => 'content LIKE ?');
       const likeParams = queryTerms.map((t) => `%${t}%`);
-      const whereClause = likeConditions.length > 0 ? `WHERE ${likeConditions.join(' OR ')}` : '';
+      const conditions = likeConditions.length > 0 ? [likeConditions.join(' OR ')] : [];
+      const params = [...likeParams];
+
+      // Scope isolation: non-admin users only see own scope + global memory
+      if (scopeKey) {
+        conditions.push('(file_path LIKE ? OR file_path NOT LIKE ?)');
+        params.push(`scopes/${scopeKey}/%`, 'scopes/%');
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.map(c => `(${c})`).join(' AND ')}` : '';
       const allChunks = await this.db.query<ChunkRow>(
         `SELECT * FROM memory_chunks ${whereClause} ORDER BY updated_at DESC`,
-        likeParams,
+        params,
       );
 
       const queryLower = query.toLowerCase();
@@ -320,6 +329,23 @@ export class MemorySystem {
     for (const file of files) {
       await this.indexFile(file);
     }
+
+    // Clean up orphaned chunks whose files no longer exist on disk (e.g., after scope migration)
+    try {
+      const indexed = await this.db.query<{ file_path: string }>(
+        'SELECT DISTINCT file_path FROM memory_chunks',
+      );
+      const fileSet = new Set(files);
+      let removed = 0;
+      for (const row of indexed) {
+        if (!fileSet.has(row.file_path)) {
+          await this.db.run('DELETE FROM memory_chunks WHERE file_path = ?', [row.file_path]);
+          removed++;
+        }
+      }
+      if (removed > 0) log.info({ removed }, 'Cleaned up orphaned memory chunks');
+    } catch { /* non-critical */ }
+
     log.info({ files: files.length }, 'Memory files indexed');
   }
 

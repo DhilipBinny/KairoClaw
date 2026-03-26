@@ -45,6 +45,7 @@ export class ToolRegistry {
     userRole?: string;
     db?: DatabaseAdapter;
     tenantId?: string;
+    elevated?: boolean;
   }): Promise<ToolDefinition[]> {
     const definitions: ToolDefinition[] = [];
 
@@ -55,6 +56,7 @@ export class ToolRegistry {
           opts.userRole,
           opts.db,
           opts.tenantId,
+          opts.elevated ?? false,
         );
         if (perm === 'deny') continue;
       }
@@ -84,11 +86,12 @@ export class ToolRegistry {
     // RBAC check
     let permission: ToolPermissionLevel = 'allow';
     const db = context.db as DatabaseAdapter | undefined;
-    const tenantId = context.tenant || 'default';
-    const userRole = (context.user as Record<string, unknown>)?.role as string || 'user';
+    const tenantId = context.tenant || (context as Record<string, unknown>).tenantId as string || 'default';
+    const userRole = context.user?.role || 'user';
+    const userElevated = !!context.user?.elevated;
 
     if (db) {
-      permission = await checkToolPermission(name, userRole, db, tenantId);
+      permission = await checkToolPermission(name, userRole, db, tenantId, userElevated);
       if (permission === 'deny') {
         // Audit: tool denied by RBAC
         try {

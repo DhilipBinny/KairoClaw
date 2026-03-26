@@ -6,10 +6,18 @@ The auto-memory system gives the AI agent continuity across sessions. Without it
 
 ## Architecture
 
+Memory is **per-user scoped**. Each user gets an isolated memory directory derived from their user UUID, so no user can read or write another user's memories. Groups similarly get their own scope.
+
+- **Per-user memory:** `workspace/scopes/{user-uuid}/memory/`
+- **Per-group memory:** `workspace/scopes/group_{channel}_{chatId}/memory/`
+- **Global memory:** `workspace/memory/` — used only by cron jobs and system sessions
+
+The scope key is derived from the user's UUID (not `channel:senderId`), so a user who chats via both Telegram and WhatsApp shares a single memory scope.
+
 ```
 ┌─────────────────────────────────────────┐
 │          Long-Term Memory               │
-│      memory/PROFILE.md                  │
+│      {scope}/memory/PROFILE.md          │
 │                                         │
 │  Permanent user profile:                │
 │  - Name, role, expertise                │
@@ -24,7 +32,7 @@ The auto-memory system gives the AI agent continuity across sessions. Without it
                     │
 ┌─────────────────────────────────────────┐
 │          Short-Term Memory              │
-│    memory/sessions/YYYY-MM-DD.md        │
+│  {scope}/memory/sessions/YYYY-MM-DD.md  │
 │                                         │
 │  Daily session notes:                   │
 │  - What was discussed                   │
@@ -86,14 +94,20 @@ Session files older than 7 days are automatically deleted when a new session sum
 
 ```
 workspace/
-  memory/
-    PROFILE.md              ← long-term user profile (permanent)
+  memory/                                  ← global (cron/system only)
+    PROFILE.md
     sessions/
-      2026-03-19.md         ← today's session notes
-      2026-03-18.md         ← yesterday's notes
-      2026-03-17.md         ← ...
-      (files older than 7 days auto-deleted)
-  MEMORY.md                 ← legacy curated notes (still loaded)
+  scopes/
+    {user-uuid}/memory/                    ← per-user
+      PROFILE.md
+      sessions/
+        2026-03-19.md                      ← today's session notes
+        2026-03-18.md                      ← yesterday's notes
+        (files older than 7 days auto-deleted)
+    group_telegram_{chatId}/memory/        ← per-group
+      PROFILE.md
+      sessions/
+  MEMORY.md                                ← legacy curated notes (still loaded)
 ```
 
 ## What the Agent Sees
@@ -119,6 +133,12 @@ At the start of every conversation, the system prompt includes:
 ```
 
 This gives the agent context without wasting tokens on duplicates.
+
+---
+
+## Memory Search Isolation
+
+Non-admin users can only search their own scope plus global memory. Admin users can search all scopes. This means a user's memories are never leaked to other users — even if two users discuss the same topic, their session notes and profiles remain isolated.
 
 ---
 

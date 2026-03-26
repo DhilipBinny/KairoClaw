@@ -19,12 +19,17 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
     const db = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.db;
     const config = (request as unknown as { ctx: { db: DatabaseAdapter; config: Record<string, unknown> } }).ctx.config;
 
-    // First-run detection: only 1 user (the seeded admin) and no active sessions
+    // First-run detection and user stats
     let firstRun = false;
+    let totalUsers = 0;
+    let activeUsers = 0;
     try {
       const userCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM users');
+      const activeCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM users WHERE active = 1');
       const sessionCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM sessions');
-      firstRun = (userCount?.count ?? 0) <= 1 && (sessionCount?.count ?? 0) === 0;
+      totalUsers = userCount?.count ?? 0;
+      activeUsers = activeCount?.count ?? 0;
+      firstRun = totalUsers <= 1 && (sessionCount?.count ?? 0) === 0;
     } catch { /* non-critical */ }
 
     return {
@@ -38,6 +43,7 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       },
       model: (config as Record<string, Record<string, string>>)?.model?.primary || 'not configured',
       firstRun,
+      users: { total: totalUsers, active: activeUsers },
     };
   });
 
@@ -48,5 +54,25 @@ export const registerHealthRoutes: FastifyPluginAsync = async (app) => {
       version: APP_VERSION,
       timestamp: new Date().toISOString(),
     });
+  });
+
+  // GET /api/v1/my/dashboard — authenticated user's own stats
+  app.get('/api/v1/my/dashboard', async (request) => {
+    const db = (request as unknown as { ctx: { db: DatabaseAdapter } }).ctx.db;
+    const userId = request.user?.id;
+    if (!userId) return { error: 'Not authenticated' };
+
+    const sessions = await db.get<{ count: number }>(
+      'SELECT COUNT(*) as count FROM sessions WHERE user_id = ?', [userId]);
+    const usage = await db.get<{ tokens: number; cost: number }>(
+      `SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as tokens,
+              COALESCE(SUM(cost_usd), 0) as cost
+       FROM usage_records WHERE user_id = ?`, [userId]);
+
+    return {
+      user: { id: request.user!.id, name: request.user!.name, role: request.user!.role },
+      sessions: sessions?.count || 0,
+      usage: { tokens: usage?.tokens || 0, cost: usage?.cost || 0 },
+    };
   });
 };

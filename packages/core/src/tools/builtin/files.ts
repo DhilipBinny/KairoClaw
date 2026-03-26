@@ -1,23 +1,27 @@
-import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR } from '../../constants.js';
+import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHARED_DIR } from '../../constants.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
+import type { ToolExecutionContext } from '@agw/types';
 import { getWorkspace } from './utils.js';
 
 /**
- * Enforce workspace file organization.
- * - Persona files in root (IDENTITY.md, SOUL.md, etc.) are protected from agent writes
- * - Files written to workspace root are redirected to documents/
- * - Subdirectory writes (documents/x.md, media/x.png) pass through unchanged
+ * Enforce workspace file organization with per-user scoping.
+ * - Persona files in root are protected from agent writes
+ * - Root-level writes redirect to user's personal documents/ (if scoped) or shared/documents/
+ * - Writes to shared/ pass through (team space)
+ * - Writes to user's own scope pass through
  */
-function enforceFileOrganization(filePath: string, workspace: string): { path: string; redirected: boolean } {
+function enforceFileOrganization(
+  filePath: string,
+  workspace: string,
+  scopeKey?: string | null,
+): { path: string; redirected: boolean; note?: string } {
   const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(workspace, filePath);
   const relative = path.relative(workspace, resolved);
 
   // If writing to a subdirectory, allow as-is
   if (relative.includes(path.sep)) {
-    // Scoped directories — agent can read and write freely
-    // (USER.md, memory/PROFILE.md, memory/sessions/ are all agent-managed per user)
     return { path: resolved, redirected: false };
   }
 
@@ -27,10 +31,17 @@ function enforceFileOrganization(filePath: string, workspace: string): { path: s
     throw new Error(`Cannot overwrite "${fileName}" — this is a protected persona file. Edit it from the admin UI.`);
   }
 
-  // Redirect other root-level files to documents/
-  const docsDir = path.join(workspace, DOCUMENTS_DIR);
-  const redirected = path.join(docsDir, fileName);
-  return { path: redirected, redirected: true };
+  // Redirect root-level files to user's personal documents/ (or shared/ if no scope)
+  if (scopeKey) {
+    const userDocsDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey, DOCUMENTS_DIR);
+    fs.mkdirSync(userDocsDir, { recursive: true });
+    return { path: path.join(userDocsDir, fileName), redirected: true, note: 'Saved to your personal documents folder' };
+  }
+
+  // No scope (admin/system) — redirect to shared/documents/
+  const sharedDocsDir = path.join(workspace, SHARED_DIR, DOCUMENTS_DIR);
+  fs.mkdirSync(sharedDocsDir, { recursive: true });
+  return { path: path.join(sharedDocsDir, fileName), redirected: true, note: 'Saved to shared documents folder' };
 }
 
 const MAX_WRITE_SIZE = FILE_MAX_WRITE_SIZE;
@@ -73,6 +84,48 @@ export function safePath(p: string | undefined, baseDir: string): string {
   return resolved;
 }
 
+/**
+ * Scope-aware path validation for multi-user isolation.
+ * - Admin: unrestricted (same as safePath)
+ * - User with scopeKey: can access own scope + shared dirs, blocked from other scopes
+ * - Unscoped: can access everything except scopes/{other}/
+ */
+export function scopedSafePath(
+  p: string | undefined,
+  workspace: string,
+  context: ToolExecutionContext,
+): string {
+  const resolved = safePath(p, workspace);
+
+  // Admin bypasses scope restrictions
+  if (context.user?.role === 'admin') return resolved;
+
+  const scopeKey = context.scopeKey;
+  const scopesDir = path.join(workspace, SCOPE_DIR_NAME);
+
+  // Check if path is within the scopes/ directory
+  if (resolved.startsWith(scopesDir + path.sep) || resolved === scopesDir) {
+    // Listing scopes/ root → blocked for non-admin
+    if (resolved === scopesDir) {
+      throw new Error('Access denied: cannot list other users\' directories');
+    }
+
+    // Inside scopes/ — extract the scope from the path
+    const relToScopes = path.relative(scopesDir, resolved);
+    const targetScope = relToScopes.split(path.sep)[0]; // e.g. "telegram:12345"
+
+    // Allow only own scope
+    if (scopeKey && targetScope === scopeKey) {
+      return resolved;
+    }
+
+    throw new Error('Access denied: cannot access other users\' files');
+  }
+
+  // Outside scopes/ — shared global files, documents/, media/, /tmp → allowed
+  return resolved;
+}
+
 export const fileTools: ToolRegistration[] = [
   {
     definition: {
@@ -90,7 +143,7 @@ export const fileTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const filePath = safePath(args.path as string, workspace);
+      const filePath = scopedSafePath(args.path as string, workspace, context);
       if (!fs.existsSync(filePath)) return { error: `File not found: ${args.path}` };
       const content = fs.readFileSync(filePath, 'utf8');
       const lines = content.split('\n');
@@ -117,22 +170,20 @@ export const fileTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const rawPath = safePath(args.path as string, workspace);
+      const rawPath = scopedSafePath(args.path as string, workspace, context);
       const fileContent = (args.content as string) || '';
       const contentSize = Buffer.byteLength(fileContent);
       if (contentSize > MAX_WRITE_SIZE) {
         return { error: `Content too large: ${(contentSize / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_WRITE_SIZE / 1024 / 1024}MB limit` };
       }
 
-      // Enforce file organization — redirect root files to documents/, protect persona files
+      // Enforce file organization — redirect root files to user's documents/, protect persona files
       let filePath = rawPath;
       let note: string | undefined;
       try {
-        const result = enforceFileOrganization(rawPath, workspace);
+        const result = enforceFileOrganization(rawPath, workspace, context.scopeKey);
         filePath = result.path;
-        if (result.redirected) {
-          note = `File saved to documents/ (workspace root is reserved for system files)`;
-        }
+        note = result.note;
       } catch (e) {
         return { error: e instanceof Error ? e.message : String(e) };
       }
@@ -161,7 +212,7 @@ export const fileTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const filePath = safePath(args.path as string, workspace);
+      const filePath = scopedSafePath(args.path as string, workspace, context);
 
       // Protect persona files from agent edits
       const relative = path.relative(workspace, filePath);
@@ -197,7 +248,7 @@ export const fileTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
-      const dirPath = safePath(args.path as string | undefined, workspace);
+      const dirPath = scopedSafePath(args.path as string | undefined, workspace, context);
       if (!fs.existsSync(dirPath)) return { error: `Directory not found: ${args.path || '.'}` };
       const entries = fs.readdirSync(dirPath, { withFileTypes: true });
       return {

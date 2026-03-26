@@ -9,7 +9,7 @@ import { runMigrations } from './db/migrate.js';
 import { seedDatabase } from './db/seed.js';
 import { migrateV1Data, migrateDbMcpToConfig } from './db/migrate-v1.js';
 import { createServer } from './server.js';
-import { authPlugin } from './auth/middleware.js';
+import { authPlugin, requireRole } from './auth/middleware.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
 import { builtinTools } from './tools/builtin/index.js';
@@ -24,7 +24,9 @@ import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
 import { SessionRepository } from './db/repositories/session.js';
-import { deriveScopeKey, ensureScopeDir } from './agent/scope.js';
+import { SenderLinkRepository } from './db/repositories/sender-link.js';
+import { UserRepository } from './db/repositories/user.js';
+import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir } from './agent/scope.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -53,6 +55,7 @@ import { registerDatabaseRoutes } from './routes/database.js';
 import { registerMediaRoutes } from './routes/media.js';
 import { registerWhatsAppRoutes } from './routes/whatsapp.js';
 import { registerChannelRoutes } from './routes/channels.js';
+import { registerUserRoutes } from './routes/users.js';
 import { webchatPlugin } from './channels/webchat.js';
 import { AuditService } from './security/audit.js';
 
@@ -235,7 +238,27 @@ async function main(): Promise<void> {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
 
-  // 7b. Initialize memory system
+  // 7b. Migrate old channel-based scopes to user UUID scopes (one-time)
+  try {
+    const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
+    if (scopeResult.migrated > 0) {
+      console.log(`[scope] Migrated ${scopeResult.migrated} scope dirs from channel:sender to user UUID`);
+    }
+  } catch (e) {
+    console.error('[scope] Scope migration failed:', e instanceof Error ? e.message : e);
+  }
+
+  // 7b2. Migrate old documents/ and media/ to shared/ (one-time)
+  try {
+    const sharedResult = migrateToSharedDir(config.agent.workspace);
+    if (sharedResult.migrated) {
+      console.log('[scope] Migrated documents/ and media/ to shared/');
+    }
+  } catch (e) {
+    console.error('[scope] Shared dir migration failed:', e instanceof Error ? e.message : e);
+  }
+
+  // 7c. Initialize memory system
   const memorySystem = new MemorySystem(db, config.agent.workspace);
   await memorySystem.init();
   setMemorySystem(memorySystem);
@@ -259,6 +282,8 @@ async function main(): Promise<void> {
 
   // 10. Create the agent runner factory — resolves sessions and builds AgentContext
   const sessionRepo = new SessionRepository(db);
+  const senderLinkRepo = new SenderLinkRepository(db);
+  const userRepo = new UserRepository(db);
 
   // Shared services — populated later, referenced by closures
   const sharedServices: {
@@ -273,11 +298,30 @@ async function main(): Promise<void> {
   ): Promise<AgentResult> => {
     // Resolve or create a session for this chat
     const chatIdStr = String(inbound.chatId);
-    // Only use userId if it's a real user ID from the users table, not a channel-generated ID
-    const userRow = inbound.userId
-      ? await db.get<{ id: string }>('SELECT id FROM users WHERE id = ?', [String(inbound.userId)])
-      : undefined;
-    const validUserId = userRow?.id ?? undefined;
+
+    // Resolve user: try direct lookup first (webchat/API), then sender_links (Telegram/WhatsApp)
+    let validUserId: string | undefined;
+    let resolvedUser: { id: string; role: string; elevated: number; active: number } | undefined;
+    if (inbound.userId) {
+      resolvedUser = await db.get<{ id: string; role: string; elevated: number; active: number }>(
+        'SELECT id, role, elevated, active FROM users WHERE id = ? AND active = 1',
+        [String(inbound.userId)],
+      );
+    }
+    if (!resolvedUser && inbound.userId && inbound.channel !== 'web' && inbound.channel !== 'api') {
+      // Channel sender — look up sender_links
+      const link = await senderLinkRepo.findByChannelSender(tenantId, inbound.channel, String(inbound.userId));
+      if (link) {
+        resolvedUser = await db.get<{ id: string; role: string; elevated: number; active: number }>(
+          'SELECT id, role, elevated, active FROM users WHERE id = ? AND active = 1',
+          [link.user_id],
+        );
+      }
+    }
+    // Group sessions must never be owned by a single user — multiple people share them.
+    // resolvedUser is still used for per-request permission checking (AgentContext.user).
+    const isGroupChat = chatIdStr.startsWith('telegram:-') || chatIdStr.includes('@g.us');
+    validUserId = isGroupChat ? undefined : resolvedUser?.id;
 
     const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
     let sessionRow = existingSessions.find(
@@ -305,8 +349,12 @@ async function main(): Promise<void> {
       } catch { /* audit should not break session creation */ }
     }
 
-    // Derive scope key for per-user memory isolation
-    const scopeKey = deriveScopeKey(inbound.channel, inbound.userId);
+    // Derive scope key for memory isolation:
+    // - Group chats → group scope (shared group memory)
+    // - Individual chats → user scope (personal memory by UUID)
+    const scopeKey = isGroupChat
+      ? deriveGroupScopeKey(inbound.channel, chatIdStr)
+      : deriveScopeKey(inbound.channel, inbound.userId, resolvedUser?.id);
     if (scopeKey) ensureScopeDir(config.agent.workspace, scopeKey, {
       name: inbound.senderName,
       channel: inbound.channel,
@@ -319,9 +367,24 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
+      // User context for tool permissions + scope isolation:
+      // - Resolved user → their actual role from DB
+      // - Cron/internal/system → admin (needs all tools)
+      // - Unlinked real channel sender → restricted user (safe default)
+      user: resolvedUser
+        ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated }
+        : (['cron', 'internal', 'heartbeat'].includes(inbound.channel)
+          ? { id: 'system', role: 'admin', elevated: true }
+          : { id: 'anonymous', role: 'user', elevated: false }),
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
-      tools: await toolRegistry.getDefinitions(),
+      tools: await toolRegistry.getDefinitions({
+        userRole: resolvedUser?.role
+          || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),
+        db,
+        tenantId,
+        elevated: !!resolvedUser?.elevated,
+      }),
       executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
@@ -330,7 +393,12 @@ async function main(): Promise<void> {
           config,
           tenantId,
           callLLM: (llmArgs: any) => providerRegistry.callWithFailover(llmArgs),
-          tools: await toolRegistry.getDefinitions(),
+          tools: await toolRegistry.getDefinitions({
+            userRole: (ctx as Record<string, any>).user?.role || 'user',
+            db,
+            tenantId,
+            elevated: !!(ctx as Record<string, any>).user?.elevated,
+          }),
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
@@ -421,8 +489,15 @@ async function main(): Promise<void> {
     }
   };
 
+  // Admin endpoint: list all registered tool definitions (for permission management UI)
+  server.get('/api/v1/admin/tool-definitions', { preHandler: [requireRole('admin')] }, async () => {
+    const allTools = await toolRegistry.getDefinitions();
+    return allTools.map(t => ({ name: t.name, description: t.description }));
+  });
+
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
   await server.register(registerUsageRoutes);
+  await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
   await server.register(registerAuditRoutes);
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
@@ -435,14 +510,18 @@ async function main(): Promise<void> {
   // 13. Start cron scheduler
   const scheduler = new CronScheduler({
     stateDir,
+    db,
+    tenantId,
     logger: (server.log as unknown as Logger).child({ category: 'cron' }),
     executor: async (job) => {
+      // Use job owner's userId if set — cron runs with their permissions
+      const cronUserId = job.userId || 'system';
       const inbound: InboundMessage = {
         text: job.prompt,
-        channel: 'cron',
+        channel: job.userId ? 'internal' : 'cron', // user-owned crons use 'internal' channel
         chatId: `cron:${job.id}`,
         chatType: 'private',
-        userId: 'system',
+        userId: cronUserId,
         senderName: 'Cron',
       };
       const result = await createRunner(inbound);
@@ -488,7 +567,7 @@ async function main(): Promise<void> {
       }
     },
   });
-  scheduler.start();
+  await scheduler.start();
   sharedServices.cronScheduler = scheduler;
 
   // Migrate: seed outbound allowlists from existing active cron targets

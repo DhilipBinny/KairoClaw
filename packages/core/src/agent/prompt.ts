@@ -58,16 +58,28 @@ export function buildSystemPrompt(
   // Safety — product-level guardrails from constants.ts (not user-editable)
   sections.push(`## Safety\n${SAFETY_RULES.map(r => `- ${r}`).join('\n')}`);
 
-  // Workspace
-  sections.push(`## Workspace
-Your working directory is: ${workspace}
+  // Workspace — do NOT expose absolute server path or other users' scopes
+  const workspaceSection = scopeKey
+    ? `## Workspace
+You have two file areas:
+- **documents/** — your personal documents (only you can access). Files you create go here by default.
+- **shared/documents/** — team-shared documents (all users can access). Use when user explicitly asks to share.
+- **media/** — your personal media and uploads
+- **shared/media/** — team-shared media
+- Your memory files are managed by the system automatically.
+- Do NOT create .md files in the workspace root — reserved for system files.
 
-File organization rules:
-- **documents/** — save any generated documents, research, reports, plans, or exports here
-- **media/** — images and media files (managed by the system)
-- **scopes/** — per-user memory (managed by the system, do not write here directly)
-- Do NOT create .md files in the workspace root — the root is reserved for system persona files
-- When the user asks you to create a file, save it to documents/ unless they specify a different path`);
+When the user asks to create/save a file → save to documents/ (personal).
+When the user says "save to shared" or "share this" → save to shared/documents/.
+
+SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.`
+    : `## Workspace
+File organization:
+- **shared/documents/** — save documents, research, reports, plans here
+- **shared/media/** — images and media files
+- Do NOT create .md files in the workspace root — reserved for system files.
+- When the user asks to create a file, save it to shared/documents/.`;
+  sections.push(workspaceSection);
 
   // Time
   sections.push(`## Current Date & Time

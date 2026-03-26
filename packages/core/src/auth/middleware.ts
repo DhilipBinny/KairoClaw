@@ -9,6 +9,7 @@ export interface AuthUser {
   tenantId: string;
   name: string;
   role: 'admin' | 'user' | 'viewer';
+  elevated: boolean;
 }
 
 // Extend Fastify request type
@@ -53,13 +54,19 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     const keyHash = hashApiKey(apiKey);
 
     // Look up user by hashed API key
-    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string }>(
-      'SELECT id, tenant_id, name, role FROM users WHERE api_key_hash = ?',
+    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; elevated: number; active: number }>(
+      'SELECT id, tenant_id, name, role, elevated, active FROM users WHERE api_key_hash = ?',
       [keyHash]
     );
 
     if (!user) {
       reply.code(401).send({ error: 'Invalid API key', statusCode: 401 });
+      return;
+    }
+
+    // Reject deactivated users
+    if (!user.active) {
+      reply.code(403).send({ error: 'Account deactivated', statusCode: 403 });
       return;
     }
 
@@ -74,6 +81,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
       tenantId: user.tenant_id,
       name: user.name,
       role: user.role as 'admin' | 'user' | 'viewer',
+      elevated: !!user.elevated,
     };
     request.tenantId = user.tenant_id;
 

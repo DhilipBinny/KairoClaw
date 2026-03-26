@@ -61,11 +61,15 @@ export class ToolPermissionRepository {
     );
   }
 
-  async delete(id: number): Promise<void> {
-    await this.db.run('DELETE FROM tool_permissions WHERE id = ?', [id]);
+  async delete(id: number, tenantId?: string): Promise<void> {
+    if (tenantId) {
+      await this.db.run('DELETE FROM tool_permissions WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    } else {
+      await this.db.run('DELETE FROM tool_permissions WHERE id = ?', [id]);
+    }
   }
 
-  async checkPermission(tenantId: string, role: string, toolName: string): Promise<'allow' | 'deny' | 'confirm'> {
+  async checkPermission(tenantId: string, role: string, toolName: string): Promise<'allow' | 'deny' | 'confirm' | 'power_user'> {
     const permissions = await this.listByTenantAndRole(tenantId, role);
 
     // Find all matching permissions and pick the most specific
@@ -82,8 +86,9 @@ export class ToolPermissionRepository {
       }
     }
 
-    if (!bestMatch) return 'deny';
+    // No matching rule → allow (tools are allowed unless explicitly denied)
+    if (!bestMatch) return 'allow';
 
-    return bestMatch.permission as 'allow' | 'deny' | 'confirm';
+    return bestMatch.permission as 'allow' | 'deny' | 'confirm' | 'power_user';
   }
 }
