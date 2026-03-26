@@ -54,21 +54,6 @@ export function buildSystemPrompt(
       '\nCall tools by returning tool_use blocks. Wait for results before proceeding.',
     );
 
-    // Tool selection guidance (only if browse tool is available)
-    if (tools.some(t => t.name === 'browse')) {
-      sections.push(`
-### Web Content Tools
-- **web_fetch**: Fast, lightweight. Use for static pages, articles, docs, APIs.
-- **browse**: Full browser with JavaScript rendering. Use when you need to:
-  - Interact with a page (click, type, login, fill forms)
-  - View JS-rendered content (SPAs, dashboards, dynamic sites like Amazon, Gmail)
-  - Navigate multi-step flows (search → results → details)
-  - Access authenticated content (login required)
-
-Choose based on the TASK:
-- Reading a static page → web_fetch
-- Doing something on a page or site needs JS → browse`);
-    }
   }
 
   // Safety — product-level guardrails from constants.ts (not user-editable)
