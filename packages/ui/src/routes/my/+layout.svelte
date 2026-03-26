@@ -146,4 +146,38 @@
     overflow-y: auto;
     padding: 24px 32px;
   }
+
+  @media (max-width: 768px) {
+    .portal-layout {
+      flex-direction: column;
+    }
+    .portal-nav {
+      width: 100%;
+      min-width: unset;
+      border-right: none;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 8px 0;
+    }
+    .portal-brand {
+      padding: 0 12px 8px;
+      margin-bottom: 4px;
+    }
+    .portal-nav-items {
+      flex-direction: row;
+      overflow-x: auto;
+      padding: 0 8px;
+      gap: 4px;
+    }
+    .portal-nav-item {
+      white-space: nowrap;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+    .portal-nav-footer {
+      display: none;
+    }
+    .portal-content {
+      padding: 16px;
+    }
+  }
 </style>

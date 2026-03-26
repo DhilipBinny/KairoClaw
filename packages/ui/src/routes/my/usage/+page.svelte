@@ -72,4 +72,10 @@
   .model-row { border-bottom: 1px solid var(--border-subtle); }
   .model-row:last-child { border-bottom: none; }
   .model-name { font-family: var(--font-mono, monospace); font-size: 12px; }
+
+  @media (max-width: 768px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .model-table { overflow-x: auto; }
+    .model-header, .model-row { min-width: 400px; }
+  }
 </style>
