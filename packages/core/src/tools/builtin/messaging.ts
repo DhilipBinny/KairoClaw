@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
-import type { MediaAttachment } from '@agw/types';
+import type { ToolExecutionContext, MediaAttachment } from '@agw/types';
+import { scopedSafePath } from './files.js';
 
 export const messagingTools: ToolRegistration[] = [
   {
@@ -106,17 +107,16 @@ export const messagingTools: ToolRegistration[] = [
         ((ctx.config as Record<string, Record<string, string>>)?.agent?.workspace) ||
         process.cwd();
 
-      // Resolve relative paths against workspace
-      const resolved = path.isAbsolute(filePath) ? filePath : path.join(workspace, filePath);
+      // Scope-aware path validation (enforces per-user isolation)
+      let resolved: string;
+      try {
+        resolved = scopedSafePath(filePath, workspace, context as ToolExecutionContext);
+      } catch (e: unknown) {
+        return { error: e instanceof Error ? e.message : 'Path access denied' };
+      }
 
       if (!fs.existsSync(resolved)) {
         return { error: `File not found: ${filePath}` };
-      }
-
-      // Security: ensure file is within workspace or /tmp
-      const real = fs.realpathSync(resolved);
-      if (!real.startsWith(fs.realpathSync(workspace)) && !real.startsWith('/tmp')) {
-        return { error: 'File must be within the workspace directory' };
       }
 
       const stat = fs.statSync(resolved);

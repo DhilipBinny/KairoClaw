@@ -97,8 +97,10 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
   const sessionRepo = new SessionRepository(db);
   const messageRepo = new MessageRepository(db);
 
-  // Ensure @fastify/websocket is registered
-  await app.register(import('@fastify/websocket'));
+  // Ensure @fastify/websocket is registered (1MB max frame size to prevent abuse)
+  await app.register(import('@fastify/websocket'), {
+    options: { maxPayload: 1 * 1024 * 1024 },
+  });
 
   app.get('/ws', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     if (clients.size >= MAX_WS_CONNECTIONS) {
@@ -113,9 +115,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
     let clientId = `web-${Date.now()}`;
+    let clientRole: 'admin' | 'user' = 'user'; // resolved during auth
     let authAttempts = 0;
     let lastActivity = Date.now();
     let boundSessionKey: string | null = null; // set on first chat.send, immutable after
+
+    // Per-connection chat rate limit (30 messages/minute)
+    const CHAT_RATE_LIMIT = 30;
+    const CHAT_RATE_WINDOW = 60_000; // 1 minute
+    const chatTimestamps: number[] = [];
 
     // ── Keepalive + Idle timeout ─────────────────
     const IDLE_TIMEOUT = 15 * 60_000; // 15 minutes
@@ -182,8 +190,8 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           // Always try to resolve user from API key — sets stable UUID for scoping
           if (token) {
             const keyHash = hashApiKey(token);
-            const user = await db.get<{ id: string; active: number }>(
-              'SELECT id, active FROM users WHERE api_key_hash = ?',
+            const user = await db.get<{ id: string; active: number; role: string }>(
+              'SELECT id, active, role FROM users WHERE api_key_hash = ?',
               [keyHash],
             );
             if (user) {
@@ -194,6 +202,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               authValid = true;
               // Use stable user UUID for scoped memory (not ephemeral web-{timestamp})
               clientId = user.id;
+              clientRole = user.role === 'admin' ? 'admin' : 'user';
             }
           }
           if (authValid) {
@@ -216,6 +225,17 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         switch (msg.type) {
           // ── Chat message ─────────────────────
           case 'chat.send': {
+            // Rate limit: max 30 chat messages per minute per connection
+            const now = Date.now();
+            while (chatTimestamps.length > 0 && chatTimestamps[0] < now - CHAT_RATE_WINDOW) {
+              chatTimestamps.shift();
+            }
+            if (chatTimestamps.length >= CHAT_RATE_LIMIT) {
+              safeSend({ type: 'error', message: 'Rate limit exceeded — max 30 messages per minute' });
+              return;
+            }
+            chatTimestamps.push(now);
+
             const sessionKey = (msg.sessionKey as string) || 'main';
             if (typeof sessionKey !== 'string' || sessionKey.length > 200) {
               safeSend({ type: 'error', message: 'Invalid session key' });
@@ -381,6 +401,11 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
               break;
             }
+            // Ownership check: non-admin users can only access their own sessions
+            if (clientRole !== 'admin' && session.user_id && session.user_id !== clientId) {
+              safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
+              break;
+            }
             const limit = (msg.limit as number) || 50;
             const rows = await messageRepo.listBySession(session.id);
             const messages = rows.slice(-limit).map((m) => ({
@@ -395,8 +420,10 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'sessions.list': {
             const sessions = await sessionRepo.listByTenant(tenantId, 100);
             // Show only web chat sessions with actual messages
+            // Non-admin users only see their own sessions
             const webSessions = sessions
-              .filter((s) => s.turns > 0 && s.channel === 'web');
+              .filter((s) => s.turns > 0 && s.channel === 'web')
+              .filter((s) => clientRole === 'admin' || !s.user_id || s.user_id === clientId);
 
             // Batch-fetch first user message for titles
             const sIds = webSessions.map(s => s.id);
