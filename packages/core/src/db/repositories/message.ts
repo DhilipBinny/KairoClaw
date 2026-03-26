@@ -67,22 +67,6 @@ export class MessageRepository {
     return await this.db.query<MessageRow>(sql, params);
   }
 
-  async countBySession(sessionId: string): Promise<number> {
-    const row = await this.db.get<{ count: number }>(
-      'SELECT COUNT(*) as count FROM messages WHERE session_id = ?',
-      [sessionId],
-    );
-    return row?.count ?? 0;
-  }
-
-  async getLatest(sessionId: string, count: number): Promise<MessageRow[]> {
-    const rows = await this.db.query<MessageRow>(
-      'SELECT * FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?',
-      [sessionId, count],
-    );
-    return rows.reverse();
-  }
-
   async deleteBySession(sessionId: string): Promise<void> {
     await this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
   }

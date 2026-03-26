@@ -54,10 +54,6 @@ export class UserRepository {
     return await this.db.get<UserRow>('SELECT * FROM users WHERE id = ?', [id]);
   }
 
-  async getByApiKeyHash(hash: string): Promise<UserRow | undefined> {
-    return await this.db.get<UserRow>('SELECT * FROM users WHERE api_key_hash = ?', [hash]);
-  }
-
   async listByTenant(tenantId: string): Promise<UserRow[]> {
     return await this.db.query<UserRow>('SELECT * FROM users WHERE tenant_id = ?', [tenantId]);
   }

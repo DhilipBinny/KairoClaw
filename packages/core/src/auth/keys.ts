@@ -9,9 +9,3 @@ export function generateApiKey(): string {
 export function hashApiKey(key: string): string {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
-
-/** Verify an API key against a stored hash (constant-time) */
-export function verifyApiKey(key: string, hash: string): boolean {
-  const keyHash = hashApiKey(key);
-  return crypto.timingSafeEqual(new Uint8Array(Buffer.from(keyHash)), new Uint8Array(Buffer.from(hash)));
-}
