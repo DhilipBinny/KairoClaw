@@ -36,7 +36,6 @@
   }
 
   const navItems = [
-    { href: '/my', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
     { href: '/my/sessions', label: 'My Sessions', icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z' },
     { href: '/my/usage', label: 'My Usage', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     { href: '/my/cron', label: 'My Cron Jobs', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
@@ -50,7 +49,7 @@
       <a href="/">
         <img src="/logo.png" alt="Kairo" class="portal-logo" />
       </a>
-      <span class="portal-title">My Dashboard</span>
+      <span class="portal-title">My Portal</span>
     </div>
     <div class="portal-nav-items">
       {#each navItems as item}
