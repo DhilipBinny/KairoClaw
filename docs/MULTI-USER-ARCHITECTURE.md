@@ -38,17 +38,25 @@ How KairoClaw isolates users, scopes workspace access, and enforces permissions.
 | **user + power** | Blocked | Yes | Yes (elevated flag) | Own only |
 | **unlinked sender** | No access | Safe only | No | N/A |
 
-### Dangerous Tools (require admin or power user)
+### Power User Tools (require admin or power user by default)
+
+Configured via **Settings → Tool Permissions**. Default Power User tools:
 
 ```
-exec, manage_cron, write_file
+exec, write_file, edit_file, manage_cron, manage_plugins
 ```
 
-### Safe Tools (available to all users including unlinked senders)
+> Admin can change any tool to any permission level (allow / deny / power_user / confirm)
+> from the Settings page. The list above is just the default seed — nothing is hardcoded.
+
+### Open Tools (available to all users including unlinked senders by default)
+
+14 built-in tools open by default:
 
 ```
-read_file, edit_file, list_directory, memory_search, memory_read,
-inspect_image, web_fetch, web_search, send_message, send_file, session_status
+read_file, list_directory, memory_search, memory_read, inspect_image,
+web_fetch, web_search, send_message, send_file, send_email, session_status,
+read_pdf, spawn_agent, kill_agent
 ```
 
 ### Tool Permission Admin (Settings page)
@@ -284,14 +292,23 @@ scopedSafePath(path, workspace, context)
 
 ## 4. Tool Permission Pipeline
 
-### Layer 1: Hardcoded dangerous tools gate
+### Layer 1: DB-driven permission check (unified, no hardcoded list)
 
 ```
-DANGEROUS_TOOLS = ['exec', 'manage_cron', 'write_file']
+checkToolPermission(toolName, userRole, db, tenantId, elevated)
 
-admin?              → always ALLOW
-dangerous + !elevated → DENY (hidden from LLM + blocked at execution)
+admin?                          → always ALLOW
+DB rule = 'allow'               → ALLOW
+DB rule = 'deny'                → DENY (hidden from LLM + blocked at execution)
+DB rule = 'power_user' + elevated → ALLOW
+DB rule = 'power_user' + !elevated → DENY
+DB rule = 'confirm'             → ALLOW (flagged for confirmation)
+No matching rule                → ALLOW (open by default)
 ```
+
+All permission logic is driven by the `tool_permissions` table.
+There is no hardcoded dangerous-tools list in the code — admin controls
+everything from Settings → Tool Permissions.
 
 ### Layer 2: DB permission rules (admin-configurable)
 
@@ -300,7 +317,7 @@ tool_permissions table:
   (tenant_id, role, tool_pattern, permission)
 
   tool_pattern supports glob: "mcp__*", "web_*", exact match
-  permission: allow | deny | confirm
+  permission: allow | deny | power_user | confirm
   No matching rule → ALLOW (tools allowed unless explicitly denied)
 ```
 
@@ -330,24 +347,31 @@ registry.execute() → checkToolPermission() → denied tools return error + aud
   ------------------+-------+------+------------+-----------------+
   read_file         |  all  |scoped| scoped     | scoped          |
   write_file        |  all  |DENIED| scoped     | DENIED          |
-  edit_file         |  all  |scoped| scoped     | scoped          |
+  edit_file         |  all  |DENIED| scoped     | DENIED          |
   list_directory    |  all  |scoped| scoped     | scoped          |
   exec              |  all  |DENIED| scoped     | DENIED          |
   manage_cron       |  all  |DENIED| scoped     | DENIED          |
+  manage_plugins    |  all  |DENIED| scoped     | DENIED          |
   memory_search     |  all  |scoped| scoped     | scoped          |
   memory_read       |  all  |scoped| scoped     | scoped          |
+  inspect_image     |  all  |scoped| scoped     | scoped          |
+  read_pdf          |  all  |scoped| scoped     | scoped          |
   web_fetch         |  all  | all  | all        | all             |
   web_search        |  all  | all  | all        | all             |
   send_message      |  all  | all  | all        | all             |
   send_file         |  all  | all  | all        | all             |
+  send_email        |  all  | all  | all        | all             |
   session_status    |  all  | all  | all        | all             |
-  inspect_image     |  all  |scoped| scoped     | scoped          |
+  spawn_agent       |  all  | all  | all        | all             |
+  kill_agent        |  all  | all  | all        | all             |
   MCP tools         |  all  | per DB rules      | per DB rules    |
   ------------------+-------+------+------------+-----------------+
 
   "scoped" = scopedSafePath enforced (own scope + shared globals only)
   "all"    = no path restriction (web/messaging tools don't access filesystem)
-  "DENIED" = tool hidden from LLM prompt AND blocked at execution
+  "DENIED" = default power_user permission (hidden + blocked unless elevated)
+
+  NOTE: All defaults above are DB-seeded and fully configurable by admin.
 ```
 
 ---

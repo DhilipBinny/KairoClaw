@@ -11,11 +11,11 @@
 | Metric | Value |
 |--------|-------|
 | API endpoints | 55+ REST + 1 WebSocket |
-| Built-in tools | 10 (files, exec, web, messaging, memory) |
+| Built-in tools | 19 (files, exec, web, messaging, memory, email, agents, PDF, plugins) |
 | Channels | 3 (Telegram, WhatsApp, Web Chat) |
 | LLM providers | 3 (Anthropic, OpenAI, Ollama) |
 | Known models | 9 built-in + unlimited custom |
-| Database tables | 11 |
+| Database tables | 12 |
 | Config options | 20+ across 8 sections |
 | Slash commands | 7 |
 | Log categories | 12 structured categories |
@@ -117,7 +117,7 @@ Built from workspace persona files, automatically loaded:
 
 ## 3. Tool System
 
-### Built-in Tools (10)
+### Built-in Tools (19)
 
 | Tool | Description | Security |
 |------|-------------|----------|
@@ -129,8 +129,17 @@ Built from workspace persona files, automatically loaded:
 | `web_fetch` | Fetch URL content (max 50K chars) | SSRF protection (blocks private IPs) |
 | `web_search` | Brave Search API | Requires API key |
 | `send_message` | Send to Telegram/WhatsApp/Web | Requires explicit target |
+| `send_file` | Send file to channel | Path traversal protection |
+| `session_status` | Get current session info | Read-only |
 | `manage_cron` | Create/list/update/delete/run cron jobs | Validates delivery targets |
 | `memory_search` | Semantic search over memory files | Top-N with relevance scoring |
+| `memory_read` | Read specific memory file | Workspace-restricted |
+| `inspect_image` | Analyze image via vision model | Path traversal protection |
+| `manage_plugins` | List/enable/disable plugins | Admin or elevated only |
+| `read_pdf` | Parse and extract PDF content | Path traversal protection |
+| `send_email` | Send email via configured SMTP | Requires SMTP config |
+| `spawn_agent` | Launch a sub-agent for parallel tasks | Inherits caller permissions |
+| `kill_agent` | Terminate a running sub-agent | Must own the agent |
 
 ### MCP (Model Context Protocol)
 - Install tool servers from curated catalog or custom config
@@ -151,8 +160,6 @@ Built from workspace persona files, automatically loaded:
 
 ### Limitations
 - No HTTP POST/PUT/PATCH tool (only GET via web_fetch)
-- No email sending tool
-- No PDF/document parsing tool
 - No parallel tool execution
 - Tool approval workflow UI not built (backend exists)
 - No custom tool registration via API (only MCP or built-in)
@@ -208,6 +215,8 @@ Built from workspace persona files, automatically loaded:
 - **Validation**: Cron syntax, interval minimum, date format checked on creation
 - **Auto-disable**: Jobs with missing delivery targets disabled with clear error
 - **LLM-managed**: Agent can create/update/delete cron jobs via `manage_cron` tool
+- **DB-backed**: Cron jobs stored in database with per-user ownership
+- **Auto-migration**: Legacy JSON-file cron jobs automatically migrated to DB on startup
 - **Admin UI**: Dynamic delivery target editor with per-channel inputs
 
 ### Heartbeat Service
@@ -332,7 +341,7 @@ Built from workspace persona files, automatically loaded:
 
 ## 9. Admin UI
 
-### Pages (14)
+### Admin Pages (14)
 
 | Group | Page | Purpose |
 |-------|------|---------|
@@ -350,6 +359,17 @@ Built from workspace persona files, automatically loaded:
 | | Logs | Live + search + expandable structured entries |
 | | Usage (Beta) | Token usage and cost tracking; per-user breakdown |
 | | Database | DB type, row counts, SQLite→PostgreSQL migration |
+
+### User Portal (`/my/`) — 4 pages
+
+| Page | Purpose |
+|------|---------|
+| Dashboard | Personal overview — sessions, usage summary |
+| Sessions | View own conversations and messages |
+| Usage | Personal token usage and cost tracking |
+| Cron | View and manage own cron jobs |
+
+**Total: 14 admin + 4 user portal = 18 pages**
 
 ### Design
 - SvelteKit SPA with dark theme (warm indigo-black palette)
@@ -370,7 +390,7 @@ Built from workspace persona files, automatically loaded:
 ### Stack
 - **Runtime**: Node.js + TypeScript
 - **Framework**: Fastify (HTTP) + SvelteKit (UI)
-- **Database**: SQLite (default) or PostgreSQL — 11 data tables, 8 migrations
+- **Database**: SQLite (default) or PostgreSQL — 12 data tables, 10 SQLite + 4 Postgres migrations
 - **Monorepo**: pnpm workspaces — `@agw/types`, `@agw/core`, `@agw/ui`
 
 ### Deployment
@@ -385,7 +405,9 @@ Built from workspace persona files, automatically loaded:
 - Admin manages users: create, deactivate, delete, regenerate API keys
 - Channel sender linking: Telegram user IDs and WhatsApp numbers mapped to user accounts
 - One-click onboarding: pending sender → user account + channel link + allowFrom in one step
-- Tool permissions enforced per user: dangerous tools (exec, cron, write_file, delete_file) require admin or elevated flag
+- Tool permissions enforced per user: unified DB-driven tool permissions table
+- Per-user documents/shared workspace — each user has isolated file workspace
+- Tiered exec safety: admin unrestricted, regular users sandboxed
 - Soft delete (deactivate/reactivate) and hard delete with confirmation
 
 ### Limitations
