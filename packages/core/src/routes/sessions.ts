@@ -1,13 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { DatabaseAdapter } from '../db/index.js';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
+import { getDb, getTenantId, assertSessionAccess } from './utils.js';
 
 export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/sessions — list sessions for current tenant
   app.get('/api/v1/sessions', async (request) => {
-    const db = (request as any).ctx.db as DatabaseAdapter;
-    const tenantId = request.tenantId || 'default';
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
     const repo = new SessionRepository(db);
     const limit = parseInt((request.query as any)?.limit || '50');
     let sessions = await repo.listByTenant(tenantId, limit);
@@ -77,19 +77,15 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /api/v1/sessions/:id — get session with messages
   app.get('/api/v1/sessions/:id', async (request, reply) => {
-    const db = (request as any).ctx.db as DatabaseAdapter;
-    const tenantId = request.tenantId || 'default';
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
 
     const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
-
-    // Ownership check: non-admin users can only access their own sessions
-    if (request.user?.id && request.user.role !== 'admin' && session.user_id !== request.user.id) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
+    if (!assertSessionAccess(session, request, reply)) return;
 
     const messages = await messageRepo.listBySession(id);
     return { session, messages };
@@ -97,19 +93,15 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
   // PATCH /api/v1/sessions/:id — update session (rename)
   app.patch('/api/v1/sessions/:id', async (request, reply) => {
-    const db = (request as any).ctx.db as DatabaseAdapter;
-    const tenantId = request.tenantId || 'default';
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
     const { title } = request.body as { title?: string };
     const sessionRepo = new SessionRepository(db);
 
     const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
-
-    // Ownership check
-    if (request.user?.id && request.user.role !== 'admin' && session.user_id !== request.user.id) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
+    if (!assertSessionAccess(session, request, reply)) return;
 
     if (title !== undefined) {
       // Store title in metadata JSON
@@ -123,19 +115,15 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /api/v1/sessions/:id/messages/:messageId — delete a specific message
   app.delete('/api/v1/sessions/:id/messages/:messageId', async (request, reply) => {
-    const db = (request as any).ctx.db as DatabaseAdapter;
-    const tenantId = request.tenantId || 'default';
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
     const { id, messageId } = request.params as { id: string; messageId: string };
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
 
     const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
-
-    // Ownership check
-    if (request.user?.id && request.user.role !== 'admin' && session.user_id !== request.user.id) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
+    if (!assertSessionAccess(session, request, reply)) return;
 
     // Delete the message and any subsequent messages (to keep context clean)
     const msgId = parseInt(messageId);
@@ -152,22 +140,16 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
   // DELETE /api/v1/sessions/:id — delete session
   app.delete('/api/v1/sessions/:id', async (request, reply) => {
-    const db = (request as any).ctx.db as DatabaseAdapter;
-    const tenantId = request.tenantId || 'default';
+    const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
-    const sessionRepo = new SessionRepository(db);
+    const sessionRepo = new SessionRepository(getDb(request));
 
     const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
-
-    // Ownership check: only session owner or admin can delete
-    if (request.user?.id && session.user_id !== request.user.id && request.user.role !== 'admin') {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
+    if (!assertSessionAccess(session, request, reply)) return;
 
     // Delete session and all child records
     await sessionRepo.deleteWithCascade(id);
-    // TODO: clean up scoped memory entries related to this session's date
     return { success: true };
   });
 };

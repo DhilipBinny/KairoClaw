@@ -7,6 +7,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { CronScheduler } from '../cron/scheduler.js';
 import { requireRole } from '../auth/middleware.js';
+import { getDb } from './utils.js';
 
 export interface CronRoutesOptions {
   scheduler: CronScheduler;
@@ -19,7 +20,7 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
   app.get('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async (request) => {
     const jobs = scheduler.list();
     // Enrich with user names
-    const db = (request as any).ctx?.db;
+    const db = getDb(request);
     if (db) {
       const userIds = [...new Set(jobs.map(j => j.userId).filter(Boolean))] as string[];
       if (userIds.length > 0) {
