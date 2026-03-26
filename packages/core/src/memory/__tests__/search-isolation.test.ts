@@ -51,7 +51,7 @@ function searchWithScope(query: string, scopeKey?: string | null) {
     params.push(`scopes/${scopeKey}/%`, 'scopes/%');
   }
   const whereClause = `WHERE ${conditions.map(c => `(${c})`).join(' AND ')}`;
-  return db.query<{ file_path: string; content: string }>(`SELECT file_path, content FROM memory_chunks ${whereClause}`, params);
+  return db.query(`SELECT file_path, content FROM memory_chunks ${whereClause}`, params) as { file_path: string; content: string }[];
 }
 
 beforeEach(() => { db = createDb(); });
