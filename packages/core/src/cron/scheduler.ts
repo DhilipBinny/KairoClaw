@@ -244,6 +244,7 @@ export class CronScheduler {
             prompt: job.prompt,
             delivery: typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery),
             enabled: job.enabled,
+            userId: job.userId ?? null,
           });
         } else {
           await this.repo.create({

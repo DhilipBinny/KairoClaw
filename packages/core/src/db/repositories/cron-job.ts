@@ -72,6 +72,7 @@ export class CronJobRepository {
     prompt: string;
     delivery: string;
     enabled: boolean;
+    userId: string | null;
   }>): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -83,6 +84,7 @@ export class CronJobRepository {
     if (data.prompt !== undefined) { fields.push('prompt = ?'); values.push(data.prompt); }
     if (data.delivery !== undefined) { fields.push('delivery = ?'); values.push(data.delivery); }
     if (data.enabled !== undefined) { fields.push('enabled = ?'); values.push(data.enabled ? 1 : 0); }
+    if (data.userId !== undefined) { fields.push('user_id = ?'); values.push(data.userId); }
 
     if (fields.length === 0) return;
     fields.push('updated_at = ?');
