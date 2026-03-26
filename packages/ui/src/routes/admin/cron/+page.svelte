@@ -475,6 +475,7 @@
                 <div class="job-header">
                   <div class="job-title-row">
                     <h3 class="job-name">{job.name || 'Untitled'}</h3>
+                    {#if job.userName}<span class="job-owner">{job.userName}</span>{/if}
                     <Badge variant={statusVariant(job)}>{statusLabel(job)}</Badge>
                   </div>
                   <div class="job-schedule">{formatSchedule(job)}</div>
@@ -658,6 +659,11 @@
   }
   .job-name {
     font-size: 14px;
+    font-weight: 600;
+  }
+  .job-owner {
+    font-size: 11px;
+    color: var(--accent);
     font-weight: 600;
   }
   .job-schedule {
