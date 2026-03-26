@@ -11,7 +11,7 @@
 | Metric | Value |
 |--------|-------|
 | API endpoints | 55+ REST + 1 WebSocket |
-| Built-in tools | 19 (files, exec, web, messaging, memory, email, agents, PDF, plugins) |
+| Built-in tools | 20 (files, exec, web, browser, messaging, memory, email, agents, PDF, plugins) |
 | Channels | 3 (Telegram, WhatsApp, Web Chat) |
 | LLM providers | 3 (Anthropic, OpenAI, Ollama) |
 | Known models | 9 built-in + unlimited custom |
@@ -138,6 +138,7 @@ Built from workspace persona files, automatically loaded:
 | `manage_plugins` | List/enable/disable plugins | Admin or elevated only |
 | `read_pdf` | Parse and extract PDF content | Path traversal protection |
 | `send_email` | Send email via configured SMTP | Requires SMTP config |
+| `browse` | Full browser automation (22 actions) | SSRF + ad blocking + per-user isolation |
 | `spawn_agent` | Launch a sub-agent for parallel tasks | Inherits caller permissions |
 | `kill_agent` | Terminate a running sub-agent | Must own the agent |
 
@@ -158,11 +159,112 @@ Built from workspace persona files, automatically loaded:
 - **Permissions**: RBAC per tool — allow, deny, or confirm (requires approval)
 - **Audit**: every tool call recorded with name, args, result, status, duration
 
+### Browser Tool (`browse`)
+
+Full headless Chromium browser for the AI agent — enables JavaScript-rendered pages, form filling, login flows, and multi-step web automation.
+
+**Architecture:**
+- **Playwright-core** + system Chromium (bundled in Docker image)
+- Single tool with flat schema (22 actions) — compatible with all LLM providers
+- Per-user isolated `BrowserContext` (cookies, storage, tabs never shared)
+- Numbered element refs for unambiguous targeting (no CSS selectors or coordinates)
+
+**Actions (22):**
+
+| Action | Purpose |
+|--------|---------|
+| `navigate` | Go to URL, return page snapshot with numbered refs |
+| `click` | Click element by ref number |
+| `type` | Type into input by ref, optional submit |
+| `press` | Press keyboard key (Enter, Tab, Escape, etc.) |
+| `select` | Select dropdown option by ref |
+| `fill` | Batch fill multiple form fields at once |
+| `snapshot` | Get current page content with refs |
+| `screenshot` | Capture page as JPEG image |
+| `wait` | Wait for text, URL, or duration |
+| `scroll` | Scroll page up/down |
+| `back` | Navigate back in history |
+| `tabs` | List open tabs |
+| `hover` | Hover element by ref |
+| `forms` | Detect all forms — structured field list with refs |
+| `saveSession` | Save cookies/login state to named profile |
+| `loadSession` | Restore saved session (stay logged in) |
+| `listSessions` | List saved session profiles |
+| `deleteSession` | Delete a saved profile |
+| `close` | End browser session |
+
+**Numbered Refs (key differentiator):**
+```
+Snapshot returns:
+  [ref=1] [input type=text] "Search"
+  [ref=2] [button] "Go"
+  [ref=3] [link] "Sign In"
+
+Agent calls: click(ref=2) → unambiguous, no text matching
+```
+
+**Session Persistence:**
+- Save cookies + localStorage after login → reuse across conversations
+- Stored per-user in `scopes/{userId}/browser-sessions/{name}.json`
+- File permission 0600, path traversal impossible (name sanitized)
+- Navigate with `session` param auto-restores saved cookies
+
+**Form Detection:**
+- `forms` action returns structured form data:
+  ```json
+  {
+    "name": "Login",
+    "fields": [
+      {"ref": 3, "type": "email", "label": "Email", "required": true},
+      {"ref": 4, "type": "password", "label": "Password", "required": true}
+    ],
+    "submitButton": {"ref": 5, "text": "Sign In"}
+  }
+  ```
+- Combined with `fill` for one-shot form completion
+
+**Performance:**
+- Network resource blocking: ads, trackers, fonts auto-blocked (~2-3x faster page loads)
+- `networkidle` wait instead of fixed timeouts
+- Auto-retry with fuzzy fallback chain when elements not found
+- Max 100 interactive elements per snapshot (prevents token explosion)
+
+**Security:**
+- SSRF protection: blocks private IPs, cloud metadata endpoints, DNS rebinding check
+- Request interception blocks all sub-resource requests to private networks
+- Password values redacted in snapshots and form responses (`[REDACTED]`)
+- Dialog auto-dismiss (alert/confirm/prompt) prevents agent getting stuck
+- Pre-existing `data-kc-ref` attributes cleared before each snapshot (prevents ref spoofing)
+- Session files validated on load (schema checks)
+- Per-user browser context — cookies never cross users
+- Permission: `power_user` by default (admin + elevated users only)
+
+**Resource Management:**
+- Max 5 concurrent browser sessions (oldest evicted)
+- Max 5 tabs per context (popups auto-closed beyond limit)
+- 5-minute idle timeout, 30-minute absolute timeout
+- JS heap limited to 256MB per renderer
+- Downloads disabled (prevents disk filling)
+- Browser process auto-closed when no sessions active
+
+**vs `web_fetch`:**
+
+| | `web_fetch` | `browse` |
+|--|-------------|----------|
+| Speed | Fast (~1-2s) | Slower (~5-10s per action) |
+| JavaScript | No (static HTML only) | Full rendering |
+| Interaction | Read-only | Click, type, fill, navigate |
+| Login flows | Not possible | Save/restore sessions |
+| Token cost | Low | Higher (snapshot per action) |
+| Best for | Static pages, docs, APIs | SPAs, dashboards, forms, authenticated sites |
+
 ### Limitations
 - No HTTP POST/PUT/PATCH tool (only GET via web_fetch)
 - No parallel tool execution
 - Tool approval workflow UI not built (backend exists)
 - No custom tool registration via API (only MCP or built-in)
+- Browser sessions not encrypted at rest (file permission 0600 only)
+- No iframe or shadow DOM support in snapshots
 
 ---
 
