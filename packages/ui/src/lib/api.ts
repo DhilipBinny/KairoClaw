@@ -624,3 +624,11 @@ export async function getMyUsage(days = 30): Promise<Record<string, unknown>> {
 export async function getMyCrons(): Promise<{ jobs: Array<Record<string, unknown>> }> {
   return request('/my/cron');
 }
+
+export async function toggleMyCron(id: string, enabled: boolean): Promise<{ success: boolean }> {
+  return request(`/my/cron/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) });
+}
+
+export async function deleteMyCron(id: string): Promise<{ success: boolean }> {
+  return request(`/my/cron/${id}`, { method: 'DELETE' });
+}

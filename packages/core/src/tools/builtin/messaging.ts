@@ -274,9 +274,18 @@ IMPORTANT delivery rules:
         return { error: 'Cron scheduler not available' };
       }
 
+      // Ownership context — non-admin users can only manage their own crons
+      const cronUser = ctx.user as { id?: string; role?: string } | undefined;
+      const isAdmin = cronUser?.role === 'admin';
+      const ownerId = cronUser?.id;
+
       switch (action) {
         case 'list': {
-          const jobs = cronScheduler.list();
+          let jobs = cronScheduler.list();
+          // Non-admin: only show own crons
+          if (!isAdmin && ownerId) {
+            jobs = jobs.filter(j => (j as Record<string, unknown>).userId === ownerId);
+          }
           return {
             count: jobs.length,
             jobs: jobs.map(j => ({
@@ -370,12 +379,14 @@ IMPORTANT delivery rules:
             delete delivery.to;
           }
 
+          const user = (ctx.user as { id?: string; role?: string } | undefined);
           const job = cronScheduler.add({
             name: args.name,
             schedule: args.schedule,
             prompt: args.prompt,
             delivery: delivery || 'none',
             enabled: args.enabled !== false,
+            userId: user?.id || null,
           });
           return {
             success: true,
@@ -385,6 +396,13 @@ IMPORTANT delivery rules:
         }
         case 'update': {
           if (!args.id) return { error: 'id is required for update' };
+          // Ownership check: non-admin can only update own crons
+          if (!isAdmin && ownerId) {
+            const existing = cronScheduler.list().find(j => j.id === args.id);
+            if (existing && (existing as Record<string, unknown>).userId !== ownerId) {
+              return { error: 'You can only update your own cron jobs' };
+            }
+          }
           const updates: Record<string, unknown> = {};
           if (args.name !== undefined) updates.name = args.name;
           if (args.schedule !== undefined) updates.schedule = args.schedule;
@@ -397,11 +415,25 @@ IMPORTANT delivery rules:
         }
         case 'remove': {
           if (!args.id) return { error: 'id is required for remove' };
+          // Ownership check
+          if (!isAdmin && ownerId) {
+            const existing = cronScheduler.list().find(j => j.id === args.id);
+            if (existing && (existing as Record<string, unknown>).userId !== ownerId) {
+              return { error: 'You can only delete your own cron jobs' };
+            }
+          }
           const removed = cronScheduler.remove(args.id as string);
           return removed ? { success: true } : { error: `Job not found: ${args.id}` };
         }
         case 'run': {
           if (!args.id) return { error: 'id is required for run' };
+          // Ownership check
+          if (!isAdmin && ownerId) {
+            const existing = cronScheduler.list().find(j => j.id === args.id);
+            if (existing && (existing as Record<string, unknown>).userId !== ownerId) {
+              return { error: 'You can only run your own cron jobs' };
+            }
+          }
           const result = await cronScheduler.run(args.id as string);
           return result;
         }
