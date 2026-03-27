@@ -154,6 +154,7 @@ const agentSchema = z.object({
   workspace: z.string().default('workspace'),
   maxToolRounds: z.number().int().min(1).default(25),
   compactionThreshold: z.number().min(0).max(1).default(0.75),
+  softCompactionThreshold: z.number().min(0).max(1).default(0.50),
   keepRecentMessages: z.number().int().min(0).default(10),
   thinking: withObjectDefault(thinkingSchema),
 });
@@ -345,6 +346,7 @@ export const configDefaults: GatewayConfig = {
     workspace: 'workspace',
     maxToolRounds: 25,
     compactionThreshold: 0.75,
+    softCompactionThreshold: 0.50,
     keepRecentMessages: 10,
     thinking: {
       enabled: false,
