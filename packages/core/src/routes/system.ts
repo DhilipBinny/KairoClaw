@@ -852,4 +852,34 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       return reply.code(500).send({ error: `Import failed: ${message}` });
     }
   });
+
+  // GET /api/v1/admin/extension — download browser extension as ZIP
+  app.get('/api/v1/admin/extension', { preHandler: [requireRole('admin')] }, async (_request, reply) => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    const extensionDir = path.resolve(process.cwd(), 'packages', 'extension');
+
+    if (!fs.existsSync(path.join(extensionDir, 'manifest.json'))) {
+      return reply.code(404).send({ error: 'Browser extension not bundled in this deployment' });
+    }
+
+    const tmpZip = path.join(os.tmpdir(), `kairoclaw-extension-${Date.now()}.zip`);
+    try {
+      await execFileAsync('zip', ['-r', tmpZip, '.', '-x', '*.DS_Store'], { cwd: extensionDir, timeout: 10_000 });
+      const stream = fs.createReadStream(tmpZip);
+      const stat = fs.statSync(tmpZip);
+
+      stream.on('close', () => { try { fs.unlinkSync(tmpZip); } catch {} });
+
+      return reply
+        .header('Content-Type', 'application/zip')
+        .header('Content-Disposition', 'attachment; filename="kairoclaw-browser-bridge.zip"')
+        .header('Content-Length', stat.size)
+        .send(stream);
+    } catch {
+      try { fs.unlinkSync(tmpZip); } catch {}
+      return reply.code(500).send({ error: 'Failed to package extension' });
+    }
+  });
 };
