@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getSessions, getSession, deleteSession } from '$lib/api';
+  import { getSessions, getSession, getSessionToolCalls, deleteSession, type ToolCallInfo } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface SessionRow {
@@ -28,6 +28,13 @@
     sessionCount: number;
   }
 
+  interface TimelineEntry {
+    type: 'message' | 'tool_call';
+    timestamp: string;
+    message?: SessionMessage;
+    toolCall?: ToolCallInfo;
+  }
+
   let sessions: SessionRow[] = $state([]);
   let loading = $state(true);
   let searchQuery = $state('');
@@ -37,6 +44,7 @@
   let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedSession: string | null = $state(null);
   let selectedMessages: SessionMessage[] = $state([]);
+  let timeline: TimelineEntry[] = $state([]);
   let loadingMessages = $state(false);
   let deleteInProgress = $state('');
 
@@ -95,12 +103,30 @@
     }
   }
 
+  function formatJson(json: string): string {
+    try { return JSON.stringify(JSON.parse(json), null, 2); } catch { return json; }
+  }
+
   async function viewSession(id: string) {
     selectedSession = id;
     loadingMessages = true;
     try {
-      const data = await getSession(id);
-      selectedMessages = data.messages;
+      const [msgData, tcData] = await Promise.all([
+        getSession(id),
+        getSessionToolCalls(id).catch(() => ({ toolCalls: [] })),
+      ]);
+      selectedMessages = msgData.messages;
+
+      // Build interleaved timeline
+      const entries: TimelineEntry[] = [];
+      for (const msg of msgData.messages) {
+        entries.push({ type: 'message', timestamp: msg.created_at, message: msg });
+      }
+      for (const tc of tcData.toolCalls) {
+        entries.push({ type: 'tool_call', timestamp: tc.created_at, toolCall: tc });
+      }
+      entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      timeline = entries;
     } catch (e) {
       console.error('Failed to load session:', e);
     } finally {
@@ -265,13 +291,37 @@
           <div class="loading"><span class="spinner"></span> Loading messages...</div>
         {:else}
           <div class="messages-list">
-            {#each selectedMessages as msg}
-              <div class="message-row" class:user={msg.role === 'user'} class:assistant={msg.role === 'assistant'}>
-                <div class="message-role">
-                  <Badge variant={msg.role === 'user' ? 'blue' : 'green'}>{msg.role}</Badge>
+            {#each timeline as entry}
+              {#if entry.type === 'message' && entry.message}
+                <div class="message-row" class:user={entry.message.role === 'user'} class:assistant={entry.message.role === 'assistant'} class:system={entry.message.role === 'system'}>
+                  <div class="message-role">
+                    <Badge variant={entry.message.role === 'user' ? 'blue' : entry.message.role === 'system' ? 'yellow' : 'green'}>{entry.message.role}</Badge>
+                  </div>
+                  <div class="message-content">{entry.message.content?.slice(0, 2000) || ''}{(entry.message.content?.length ?? 0) > 2000 ? '...' : ''}</div>
                 </div>
-                <div class="message-content">{msg.content?.slice(0, 2000) || ''}{msg.content?.length > 2000 ? '...' : ''}</div>
-              </div>
+              {:else if entry.type === 'tool_call' && entry.toolCall}
+                <div class="tool-call-row" class:error={entry.toolCall.status === 'error'}>
+                  <div class="tool-call-header">
+                    <Badge variant={entry.toolCall.status === 'error' ? 'red' : entry.toolCall.status === 'denied' ? 'yellow' : 'default'}>
+                      {entry.toolCall.tool_name}
+                    </Badge>
+                    {#if entry.toolCall.duration_ms}
+                      <span class="tool-duration">{entry.toolCall.duration_ms}ms</span>
+                    {/if}
+                    <span class="tool-status" class:success={entry.toolCall.status === 'success'} class:err={entry.toolCall.status === 'error'}>{entry.toolCall.status}</span>
+                  </div>
+                  <details class="tool-details">
+                    <summary>Arguments</summary>
+                    <pre class="tool-json">{formatJson(entry.toolCall.arguments)}</pre>
+                  </details>
+                  {#if entry.toolCall.result}
+                    <details class="tool-details">
+                      <summary>Result</summary>
+                      <pre class="tool-json">{formatJson(entry.toolCall.result)}</pre>
+                    </details>
+                  {/if}
+                </div>
+              {/if}
             {:else}
               <div class="empty">No messages in this session</div>
             {/each}
@@ -451,6 +501,44 @@
   .message-row.assistant { background: var(--bg-raised); }
   .message-role { margin-bottom: 6px; }
   .message-content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .message-row.system { background: var(--bg-surface); border-left: 3px solid var(--text-ghost); }
+
+  /* Tool call rows */
+  .tool-call-row {
+    padding: 8px 14px;
+    margin-bottom: 4px;
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    border-left: 3px solid var(--accent);
+    font-size: 12px;
+  }
+  .tool-call-row.error { border-left-color: var(--red, #ef4444); }
+  .tool-call-header { display: flex; align-items: center; gap: 8px; }
+  .tool-duration { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+  .tool-status { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .tool-status.success { color: var(--green, #22c55e); }
+  .tool-status.err { color: var(--red, #ef4444); }
+  .tool-details { margin-top: 6px; }
+  .tool-details summary {
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .tool-details summary:hover { color: var(--text-secondary); }
+  .tool-json {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    background: var(--bg-void);
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-top: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
   .loading, .empty, .no-selection {
     padding: 40px;
     text-align: center;
