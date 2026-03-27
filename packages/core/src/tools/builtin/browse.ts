@@ -15,6 +15,7 @@ import type { ToolRegistration } from '../types.js';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
 import { hasRemoteBrowser, sendBrowserCommand } from '../../browser/bridge.js';
+import { getWorkspace } from './utils.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB
@@ -320,7 +321,7 @@ ACTIONS:
 
       const ctx = context as Record<string, unknown>;
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
-      const workspace = (ctx.workspace as string) || process.cwd();
+      const workspace = getWorkspace(ctx);
 
       // ── Remote browser mode: route through Chrome extension bridge ──
       // Session management actions always use local (they're about local files)
