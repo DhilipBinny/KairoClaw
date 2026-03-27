@@ -36,7 +36,7 @@ The core of KairoClaw — a multi-round agent that calls LLMs, executes tools, a
 ### Features
 - **Streaming**: Token-by-token streaming via WebSocket (text only, not tool calls)
 - **Vision**: Detects model capabilities, builds multimodal content with base64 images
-- **Context compaction**: When conversation exceeds 75% of context window, auto-summarizes older messages via LLM
+- **Smart context compaction**: Two-stage — soft clean at 50% (strips old tool results, no LLM call) + hard compact at 75% (structured LLM summary with Active Tasks / Resolved Topics / Key Facts)
 - **Content-aware token estimation**: Code = 3.2 chars/token, text = 3.8 (not fixed 4)
 - **Tool output budget**: 10KB per tool, 30KB per round — prevents context overflow
 - **LLM metrics**: Every call logged with inputTokens, outputTokens, latencyMs, costUsd, stopReason
@@ -67,7 +67,7 @@ Built from workspace persona files, automatically loaded:
 
 ### Limitations
 - Token estimation is heuristic (not an actual tokenizer)
-- Compaction requires an LLM call (can fail, falls back to extraction)
+- Hard compaction requires an LLM call (can fail, falls back to structured extraction)
 - No parallel tool execution (sequential only)
 - No multi-agent routing
 - No structured output / JSON mode enforcement
@@ -533,7 +533,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 - **Multi-user**: Multiple users on one deployment — each with isolated sessions, permissions, usage tracking, and channel identity. No competitor has this done well.
 - **Channel identity linking**: Telegram users and WhatsApp numbers linked to user accounts. One person = one account across all channels.
 - **Persistent layered memory**: Profile (permanent) + Sessions (7-day) — not just chat history
-- **Context compaction**: LLM-based summarization when context fills up — not just truncation
+- **Smart compaction**: Two-stage (soft + hard), structured summaries with topic status — prevents cross-topic hallucination
 - **Multi-provider failover**: Seamless switching between Anthropic, OpenAI, Ollama on errors
 - **MCP integration**: Full Model Context Protocol support out-of-box
 - **Cron + delivery**: Scheduled AI tasks with multi-channel delivery targets
