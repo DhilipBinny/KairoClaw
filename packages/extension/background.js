@@ -128,6 +128,9 @@ async function executeCommand(msg) {
     switch (action) {
       case 'navigate': {
         const url = params.url;
+        // Show label on existing tab if we have one
+        const existingTab = await getActiveAgentTab();
+        if (existingTab) await showActionLabel(existingTab, `Navigating to ${new URL(url).hostname}...`).catch(() => {});
         if (!url) return { error: 'url is required' };
 
         // Check if we already have an agent-opened tab (never reuse user's tabs)
@@ -167,6 +170,7 @@ async function executeCommand(msg) {
       }
 
       case 'screenshot': {
+        { const t = params.tabId || await getActiveAgentTab(); if (t) await showActionLabel(t, 'Taking screenshot...').catch(() => {}); }
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
         // Focus the tab's window first
@@ -183,8 +187,7 @@ async function executeCommand(msg) {
         if (!tabId) return { error: 'No active tab' };
         const ref = params.ref ?? null;
         const element = params.element ?? null;
-        // Visual feedback: highlight + cursor animation
-        await highlightElement(tabId, ref, element);
+        await highlightElement(tabId, ref, element, 'Clicking...');
         const result = await executeInTab(tabId, (ref, element) => {
           let el = null;
           if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
@@ -211,8 +214,7 @@ async function executeCommand(msg) {
         const { text, submit } = params;
         const ref = params.ref ?? null;
         const element = params.element ?? null;
-        // Visual feedback
-        await highlightElement(tabId, ref, element);
+        await highlightElement(tabId, ref, element, 'Typing...');
         const result = await executeInTab(tabId, (ref, element, text) => {
           let el = null;
           if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
@@ -265,6 +267,7 @@ async function executeCommand(msg) {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
         const direction = params.direction || 'down';
+        await showActionLabel(tabId, `Scrolling ${direction}...`).catch(() => {});
         await executeInTab(tabId, (direction) => {
           window.scrollBy(0, direction === 'up' ? -500 : 500);
         }, [direction]);
@@ -274,6 +277,7 @@ async function executeCommand(msg) {
       case 'back': {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
+        await showActionLabel(tabId, 'Going back...').catch(() => {});
         await chrome.tabs.goBack(tabId);
         await sleep(2000);
         const tab = await chrome.tabs.get(tabId);
@@ -383,6 +387,29 @@ async function injectHighlightCSS(tabId) {
           background-color: rgba(239, 68, 68, 0.08) !important;
           animation: kc-highlight-pulse 0.5s ease-in-out 3 !important;
           transition: outline 0.2s, background-color 0.2s !important;
+          position: relative;
+        }
+        .kc-action-label {
+          position: fixed;
+          top: 12px;
+          right: 12px;
+          background: rgba(239, 68, 68, 0.95);
+          color: white;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 8px 16px;
+          border-radius: 8px;
+          z-index: 2147483647;
+          pointer-events: none;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+          animation: kc-label-fade 2s ease forwards;
+        }
+        @keyframes kc-label-fade {
+          0% { opacity: 0; transform: translateY(-8px); }
+          10% { opacity: 1; transform: translateY(0); }
+          80% { opacity: 1; }
+          100% { opacity: 0; }
         }
       `,
     });
@@ -392,7 +419,7 @@ async function injectHighlightCSS(tabId) {
   }
 }
 
-async function highlightElement(tabId, ref, element) {
+async function highlightElement(tabId, ref, element, actionName) {
   // Focus the agent window so user can see it
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -403,17 +430,26 @@ async function highlightElement(tabId, ref, element) {
   // Inject CSS (once per tab)
   await injectHighlightCSS(tabId);
 
-  // Add highlight class to target element
   const safeRef = ref ?? null;
   const safeElement = element ?? null;
+  const safeAction = actionName ?? 'action';
+
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      func: (ref, element) => {
-        // Remove previous highlight
+      func: (ref, element, actionLabel) => {
+        // Remove previous highlight + label
         document.querySelectorAll('.kc-highlight').forEach(el => el.classList.remove('kc-highlight'));
+        document.querySelectorAll('.kc-action-label').forEach(el => el.remove());
 
-        // Find target
+        // Show action label in top-right corner
+        const label = document.createElement('div');
+        label.className = 'kc-action-label';
+        label.textContent = `Kairo: ${actionLabel}`;
+        document.body.appendChild(label);
+        setTimeout(() => label.remove(), 2000);
+
+        // Find target element
         let el = null;
         if (ref) el = document.querySelector(`[data-kc-ref="${ref}"]`);
         if (!el && element) {
@@ -431,17 +467,35 @@ async function highlightElement(tabId, ref, element) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('kc-highlight');
 
-        // Remove after 2.5s
-        setTimeout(() => el.classList.remove('kc-highlight'), 2500);
+        // Remove after 2s
+        setTimeout(() => el.classList.remove('kc-highlight'), 2000);
       },
-      args: [safeRef, safeElement],
+      args: [safeRef, safeElement, safeAction],
     });
   } catch (e) {
     console.warn('[KairoClaw] Highlight failed:', e.message);
   }
 
-  // Wait so user can actually see the highlight before action executes
-  await sleep(1500);
+  await sleep(1200);
+}
+
+/** Show a non-element action label (navigate, scroll, etc.) */
+async function showActionLabel(tabId, text) {
+  await injectHighlightCSS(tabId);
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (text) => {
+        document.querySelectorAll('.kc-action-label').forEach(el => el.remove());
+        const label = document.createElement('div');
+        label.className = 'kc-action-label';
+        label.textContent = `Kairo: ${text}`;
+        document.body.appendChild(label);
+        setTimeout(() => label.remove(), 2000);
+      },
+      args: [text],
+    });
+  } catch { /* non-critical */ }
 }
 
 // ── Helpers ──────────────────────────────────────────────────
