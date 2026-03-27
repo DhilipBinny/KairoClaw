@@ -14,7 +14,6 @@ export interface ToolCall {
 
 export interface MediaAttachment {
   type: 'image' | 'audio' | 'video' | 'document';
-  filePath: string;
   fileName: string;
   mimeType: string;
   caption?: string;
