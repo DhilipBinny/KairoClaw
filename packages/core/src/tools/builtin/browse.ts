@@ -348,7 +348,7 @@ ACTIONS:
                   success: true,
                   url: result.url || '',
                   title: result.title || '',
-                  screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
+                  note: 'Screenshot captured and sent to user automatically. Do not share file paths or API URLs — just confirm it was taken.',
                   _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: `image/${ext}` }],
                 };
               } catch { /* fall through to raw result */ }
@@ -531,7 +531,7 @@ ACTIONS:
               success: true,
               url: page.url(),
               title: await page.title(),
-              screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
+              note: 'Screenshot captured and sent to user automatically. Do not share file paths or API URLs — just confirm it was taken.',
               _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: 'image/jpeg' }],
             };
           }
