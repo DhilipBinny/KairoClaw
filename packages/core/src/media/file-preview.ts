@@ -175,39 +175,31 @@ async function readFileEdges(
   firstN: number,
   lastN: number,
 ): Promise<{ lineCount: number; firstLines: string[]; lastLines: string[] }> {
-  return new Promise((resolve, reject) => {
-    const firstLines: string[] = [];
-    const lastLines: string[] = []; // circular buffer
-    let lineCount = 0;
+  const firstLines: string[] = [];
+  const lastLines: string[] = []; // circular buffer
+  let lineCount = 0;
 
-    const rl = readline.createInterface({
-      input: fs.createReadStream(filePath, { encoding: 'utf8' }),
-      crlfDelay: Infinity,
-    });
-
-    rl.on('line', (line) => {
-      lineCount++;
-      // Safety: if a single line is >100KB, this is likely binary — truncate
-      const safeLine = line.length > 1000 ? line.slice(0, 1000) + '...' : line;
-      if (firstLines.length < firstN) {
-        firstLines.push(safeLine);
-      }
-      if (lastN > 0) {
-        lastLines.push(safeLine);
-        if (lastLines.length > lastN) {
-          lastLines.shift();
-        }
-      }
-    });
-
-    rl.on('close', () => {
-      // Don't return lastLines if they overlap with firstLines
-      const effectiveLastLines = lineCount > firstN + lastN ? lastLines : [];
-      resolve({ lineCount, firstLines, lastLines: effectiveLastLines });
-    });
-
-    rl.on('error', reject);
+  const rl = readline.createInterface({
+    input: fs.createReadStream(filePath, { encoding: 'utf8' }),
+    crlfDelay: Infinity,
   });
+
+  for await (const line of rl) {
+    lineCount++;
+    const safeLine = (line as string).length > 1000 ? (line as string).slice(0, 1000) + '...' : (line as string);
+    if (firstLines.length < firstN) {
+      firstLines.push(safeLine);
+    }
+    if (lastN > 0) {
+      lastLines.push(safeLine);
+      if (lastLines.length > lastN) {
+        lastLines.shift();
+      }
+    }
+  }
+
+  const effectiveLastLines = lineCount > firstN + lastN ? lastLines : [];
+  return { lineCount, firstLines, lastLines: effectiveLastLines };
 }
 
 /**
