@@ -348,8 +348,7 @@ ACTIONS:
                   success: true,
                   url: result.url || '',
                   title: result.title || '',
-                  screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
-                  note: 'Screenshot is auto-delivered to messaging channels. For web chat, embed as: ![Screenshot](screenshot_url). Keep your response brief — do not explain paths or internals.',
+                  note: 'Screenshot captured and delivered to the user automatically. Just confirm it was taken — do not share file paths or URLs.',
                   _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: `image/${ext}` }],
                 };
               } catch { /* fall through to raw result */ }
@@ -532,8 +531,7 @@ ACTIONS:
               success: true,
               url: page.url(),
               title: await page.title(),
-              screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
-              note: 'Screenshot is auto-delivered to messaging channels. For web chat, embed as: ![Screenshot](screenshot_url). Keep your response brief — do not explain paths or internals.',
+              note: 'Screenshot captured and delivered to the user automatically. Just confirm it was taken — do not share file paths or URLs.',
               _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: 'image/jpeg' }],
             };
           }

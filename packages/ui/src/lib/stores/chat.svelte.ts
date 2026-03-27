@@ -12,6 +12,14 @@ export interface ToolCall {
   preview?: string;
 }
 
+export interface MediaAttachment {
+  type: 'image' | 'audio' | 'video' | 'document';
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  caption?: string;
+}
+
 export interface ChatMessage {
   id: string;
   dbId?: number;       // Database message ID for delete API
@@ -25,6 +33,8 @@ export interface ChatMessage {
   thinkingContent?: string;
   /** Whether the model is currently in the thinking phase. */
   isThinking?: boolean;
+  /** Media attachments (screenshots, images, etc.) */
+  media?: MediaAttachment[];
 }
 
 // Persist session key across page refreshes
@@ -173,21 +183,23 @@ export function initChatListeners(): void {
       _isStreaming = false;
       _thinkingLabel = null;
       const text = msg.text as string;
+      const media = Array.isArray(msg.media) ? msg.media as MediaAttachment[] : undefined;
       const lastMsg = _messages[_messages.length - 1];
 
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
         _messages = _messages.map((m, i) =>
           i === _messages.length - 1
-            ? { ...m, content: text || m.content, isStreaming: false }
+            ? { ...m, content: text || m.content, isStreaming: false, ...(media?.length ? { media } : {}) }
             : m
         );
-      } else if (text) {
+      } else if (text || media?.length) {
         _messages = [..._messages, {
           id: `msg-${++_msgCounter}`,
           role: 'assistant',
-          content: text,
+          content: text || '',
           timestamp: Date.now(),
           isStreaming: false,
+          ...(media?.length ? { media } : {}),
         }];
       }
     })
