@@ -233,7 +233,11 @@ export class BrowserSessionManager {
     const filePath = path.join(dir, `${safeName}.json`);
 
     const state = await session.context.storageState();
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    } catch (e: unknown) {
+      throw new Error(`Failed to save session: ${e instanceof Error ? e.message : 'disk error'}`);
+    }
     log.info({ userId, name: safeName }, 'Browser session saved');
     return { success: true, name: safeName };
   }
@@ -251,8 +255,13 @@ export class BrowserSessionManager {
     await this.closeSession(userId);
 
     // Read and validate saved state
-    const stateJson = fs.readFileSync(filePath, 'utf8');
-    const storageState = JSON.parse(stateJson);
+    let storageState: Record<string, unknown>;
+    try {
+      const stateJson = fs.readFileSync(filePath, 'utf8');
+      storageState = JSON.parse(stateJson);
+    } catch {
+      throw new Error(`Failed to read session file "${name}" — may be corrupted.`);
+    }
     // Basic schema validation — Playwright expects { cookies: [], origins: [] }
     if (!storageState || typeof storageState !== 'object') {
       throw new Error(`Corrupted session file "${name}".`);
