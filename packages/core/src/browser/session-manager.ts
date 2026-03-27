@@ -255,7 +255,7 @@ export class BrowserSessionManager {
     await this.closeSession(userId);
 
     // Read and validate saved state
-    let storageState: Record<string, unknown>;
+    let storageState: unknown;
     try {
       const stateJson = fs.readFileSync(filePath, 'utf8');
       storageState = JSON.parse(stateJson);
@@ -266,10 +266,11 @@ export class BrowserSessionManager {
     if (!storageState || typeof storageState !== 'object') {
       throw new Error(`Corrupted session file "${name}".`);
     }
-    if (storageState.cookies && !Array.isArray(storageState.cookies)) {
+    const state = storageState as Record<string, unknown>;
+    if (state.cookies && !Array.isArray(state.cookies)) {
       throw new Error(`Invalid session file "${name}" — cookies must be an array.`);
     }
-    if (storageState.origins && !Array.isArray(storageState.origins)) {
+    if (state.origins && !Array.isArray(state.origins)) {
       throw new Error(`Invalid session file "${name}" — origins must be an array.`);
     }
 
@@ -288,7 +289,7 @@ export class BrowserSessionManager {
         viewport: DEFAULT_VIEWPORT,
         userAgent: 'KairoClaw/1.0 (Browser Tool)',
         acceptDownloads: false,
-        storageState,
+        storageState: storageState as any,
       });
       context.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
       context.setDefaultTimeout(NAV_TIMEOUT_MS);

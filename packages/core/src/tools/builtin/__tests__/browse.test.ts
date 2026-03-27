@@ -56,7 +56,7 @@ describe('Browse tool', () => {
     });
 
     it('text type should not redact', () => {
-      const type = 'text';
+      const type: string = 'text';
       const value = 'visible value';
       const redacted = type === 'password' ? '[REDACTED]' : value;
       expect(redacted).toBe('visible value');
