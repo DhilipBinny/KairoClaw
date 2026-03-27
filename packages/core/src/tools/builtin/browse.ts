@@ -491,7 +491,7 @@ ACTIONS:
               success: true,
               url: page.url(),
               title: await page.title(),
-              screenshot: `/api/v1/media/${encodeURIComponent(filename)}`,
+              note: 'Screenshot captured and delivered to the user automatically. Just confirm it was taken — do not share file paths or URLs.',
               _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: 'image/jpeg' }],
             };
           }

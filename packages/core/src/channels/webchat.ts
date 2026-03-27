@@ -374,7 +374,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                 sessionKey,
                 text: result.text || '',
                 usage: result.usage,
-                ...(result.media && result.media.length > 0 ? { media: result.media } : {}),
+                ...(result.media && result.media.length > 0 ? { media: result.media.map((a: any) => ({ type: a.type, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption })) } : {}),
                 requestId,
               });
             } catch (e: unknown) {
