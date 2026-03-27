@@ -14,6 +14,7 @@ import type { Page, Locator } from 'playwright-core';
 import type { ToolRegistration } from '../types.js';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
+import { getWorkspace } from './utils.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB
@@ -324,7 +325,7 @@ ACTIONS:
       }
 
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
-      const workspace = (ctx.workspace as string) || process.cwd();
+      const workspace = getWorkspace(ctx);
 
       // Actions that don't need an active page
       if (action === 'close') {
