@@ -1,6 +1,7 @@
 <script lang="ts">
   import ToolCall from './ToolCall.svelte';
-  import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType } from '$lib/stores/chat.svelte';
+  import AuthImage from './AuthImage.svelte';
+  import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType, MediaAttachment } from '$lib/stores/chat.svelte';
   import { marked } from 'marked';
   import hljs from 'highlight.js/lib/core';
   import javascript from 'highlight.js/lib/languages/javascript';
@@ -218,6 +219,7 @@
         img.style.cursor = 'pointer';
         img.addEventListener('click', () => openLightbox(img.src, img.alt));
       });
+
     }, 0);
   });
 </script>
@@ -277,6 +279,22 @@
         {:else}
           {@html renderMarkdown(message.content)}
         {/if}
+      </div>
+    {/if}
+
+    {#if message.media && message.media.length > 0}
+      <div class="media-attachments">
+        {#each message.media as attachment}
+          {#if attachment.type === 'image'}
+            <AuthImage
+              fileName={attachment.fileName}
+              alt={attachment.caption || attachment.fileName}
+              className="media-image"
+            />
+          {:else}
+            <span class="media-file-link">{attachment.fileName}</span>
+          {/if}
+        {/each}
       </div>
     {/if}
 
@@ -498,6 +516,41 @@
   }
   :global(pre:hover .copy-code-btn) {
     opacity: 1;
+  }
+
+  /* ── Media attachments from tool results ── */
+  .media-attachments {
+    margin: 8px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .media-image {
+    max-width: 320px;
+    max-height: 240px;
+    border-radius: 10px;
+    object-fit: contain;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: box-shadow 0.2s ease;
+  }
+  .media-image:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+  .media-file-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+    color: var(--accent);
+    font-size: 13px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .media-file-link:hover {
+    background: var(--bg-elevated);
   }
 
   /* ── Generated images: thumbnail ── */

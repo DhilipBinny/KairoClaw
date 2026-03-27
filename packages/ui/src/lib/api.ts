@@ -74,6 +74,21 @@ async function request<T = unknown>(path: string, opts: FetchOptions = {}): Prom
   }
 }
 
+// ── Authenticated Media Fetch ─────────────────────
+/**
+ * Fetch a media file with auth and return a blob URL.
+ * Used by <img> tags to load scoped media without leaking tokens in URLs.
+ */
+export async function fetchMediaBlobUrl(fileName: string): Promise<string> {
+  const apiKey = getApiKey();
+  const res = await fetch(`${API_BASE}/media/${encodeURIComponent(fileName)}`, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+  if (!res.ok) throw new Error(`Failed to load media: ${res.status}`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 // ── File Upload ──────────────────────────────────
 export async function uploadFile(file: File): Promise<{ filename: string; filePath: string; originalName: string; mediaUrl: string; mimeType: string; sizeBytes: number }> {
   const apiKey = getApiKey();
