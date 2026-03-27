@@ -104,8 +104,9 @@ export async function handleSlashCommand(
         context.tenantId,
       );
       if (result.compacted) {
+        const methodLabel = result.method === 'soft-clean' ? 'Soft clean' : 'Compacted';
         return {
-          text: `Compacted: ${result.oldMessageCount} -> ${result.newMessageCount} messages, saved ~${(result.tokensSaved ?? 0).toLocaleString()} tokens`,
+          text: `${methodLabel}: ${result.oldMessageCount} -> ${result.newMessageCount} messages (${result.method}), saved ~${(result.tokensSaved ?? 0).toLocaleString()} tokens`,
         };
       }
       return {
