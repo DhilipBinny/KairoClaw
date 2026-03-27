@@ -1,5 +1,6 @@
 <script lang="ts">
   import ToolCall from './ToolCall.svelte';
+  import AuthImage from './AuthImage.svelte';
   import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType, MediaAttachment } from '$lib/stores/chat.svelte';
   import { marked } from 'marked';
   import hljs from 'highlight.js/lib/core';
@@ -182,7 +183,7 @@
       // Wrap images with thumbnail + action buttons
       const imgs = messageBodyRef!.querySelectorAll('img');
       imgs.forEach(img => {
-        if (img.parentElement?.classList.contains('img-wrap') || img.classList.contains('media-image')) return;
+        if (img.parentElement?.classList.contains('img-wrap')) return;
         const wrap = document.createElement('div');
         wrap.className = 'img-wrap';
         img.parentElement?.insertBefore(wrap, img);
@@ -219,13 +220,6 @@
         img.addEventListener('click', () => openLightbox(img.src, img.alt));
       });
 
-      // Wire lightbox on media-image elements (not wrapped by img-wrap)
-      const mediaImgs = messageBodyRef!.querySelectorAll('img.media-image');
-      mediaImgs.forEach(img => {
-        if ((img as HTMLElement).dataset.lbBound) return;
-        (img as HTMLElement).dataset.lbBound = '1';
-        img.addEventListener('click', () => openLightbox((img as HTMLImageElement).src, (img as HTMLImageElement).alt));
-      });
     }, 0);
   });
 </script>
@@ -292,16 +286,13 @@
       <div class="media-attachments">
         {#each message.media as attachment}
           {#if attachment.type === 'image'}
-            <img
-              src="/api/v1/media/{encodeURIComponent(attachment.fileName)}"
+            <AuthImage
+              fileName={attachment.fileName}
               alt={attachment.caption || attachment.fileName}
-              class="media-image"
-              loading="lazy"
+              className="media-image"
             />
           {:else}
-            <a href="/api/v1/media/{encodeURIComponent(attachment.fileName)}" target="_blank" rel="noopener" class="media-file-link">
-              {attachment.fileName}
-            </a>
+            <span class="media-file-link">{attachment.fileName}</span>
           {/if}
         {/each}
       </div>
