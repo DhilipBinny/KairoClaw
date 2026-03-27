@@ -49,7 +49,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
     // NEVER allow: providers.*apiKey, providers.*authToken, gateway.token, any secret fields
     const allowedPaths = [
       'model.primary', 'model.fallback',
-      'agent.name', 'agent.maxToolRounds', 'agent.compactionThreshold', 'agent.keepRecentMessages',
+      'agent.name', 'agent.maxToolRounds', 'agent.compactionThreshold', 'agent.softCompactionThreshold', 'agent.keepRecentMessages',
       'agent.thinking.enabled', 'agent.thinking.mode', 'agent.thinking.budgetTokens',
       'agent.thinking.showThinking.web', 'agent.thinking.showThinking.telegram', 'agent.thinking.showThinking.whatsapp',
       'session.resetHour', 'session.idleMinutes',

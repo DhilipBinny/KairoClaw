@@ -235,8 +235,10 @@ export interface AgentConfig {
   workspace: string;
   /** Maximum tool-call rounds per agent turn. */
   maxToolRounds: number;
-  /** Context-window usage ratio that triggers compaction (0-1). */
+  /** Context-window usage ratio that triggers hard compaction (0-1). */
   compactionThreshold: number;
+  /** Context-window usage ratio that triggers soft compaction / tool eviction (0-1). */
+  softCompactionThreshold: number;
   /** Number of recent messages to keep after compaction. */
   keepRecentMessages: number;
   /** Extended thinking / chain-of-thought configuration. */

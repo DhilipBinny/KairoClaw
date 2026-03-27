@@ -71,6 +71,11 @@ export class MessageRepository {
     await this.db.run('DELETE FROM messages WHERE session_id = ?', [sessionId]);
   }
 
+  /** Update the content of a single message by id. */
+  async updateContent(id: number, content: string): Promise<void> {
+    await this.db.run('UPDATE messages SET content = ? WHERE id = ?', [content, id]);
+  }
+
   /** Delete a single message by id. */
   async deleteById(id: number): Promise<void> {
     await this.db.run('DELETE FROM messages WHERE id = ?', [id]);
