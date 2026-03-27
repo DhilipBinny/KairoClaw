@@ -60,6 +60,8 @@ async function connect() {
 
       // Command from agent
       if (msg.type === 'command') {
+        // Track activity
+        chrome.storage.local.set({ lastActionAt: new Date().toISOString() });
         const result = await executeCommand(msg);
         ws.send(JSON.stringify({
           type: 'result',

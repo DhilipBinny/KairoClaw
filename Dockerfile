@@ -45,6 +45,9 @@ COPY --from=build /app/packages/core/dist packages/core/dist/
 COPY --from=build /app/packages/core/package.json packages/core/
 COPY --from=build /app/packages/ui/build packages/ui/build/
 
+# Copy browser extension for download
+COPY packages/extension/ packages/extension/
+
 # Copy root config + workspace defaults + entrypoint
 COPY package.json pnpm-workspace.yaml .npmrc tsconfig.base.json ./
 COPY --from=build /app/pnpm-lock.yaml ./
