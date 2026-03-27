@@ -1,6 +1,6 @@
 <script lang="ts">
   import ToolCall from './ToolCall.svelte';
-  import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType } from '$lib/stores/chat.svelte';
+  import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType, MediaAttachment } from '$lib/stores/chat.svelte';
   import { marked } from 'marked';
   import hljs from 'highlight.js/lib/core';
   import javascript from 'highlight.js/lib/languages/javascript';
@@ -182,7 +182,7 @@
       // Wrap images with thumbnail + action buttons
       const imgs = messageBodyRef!.querySelectorAll('img');
       imgs.forEach(img => {
-        if (img.parentElement?.classList.contains('img-wrap')) return;
+        if (img.parentElement?.classList.contains('img-wrap') || img.classList.contains('media-image')) return;
         const wrap = document.createElement('div');
         wrap.className = 'img-wrap';
         img.parentElement?.insertBefore(wrap, img);
@@ -217,6 +217,14 @@
         // Click thumbnail to expand
         img.style.cursor = 'pointer';
         img.addEventListener('click', () => openLightbox(img.src, img.alt));
+      });
+
+      // Wire lightbox on media-image elements (not wrapped by img-wrap)
+      const mediaImgs = messageBodyRef!.querySelectorAll('img.media-image');
+      mediaImgs.forEach(img => {
+        if ((img as HTMLElement).dataset.lbBound) return;
+        (img as HTMLElement).dataset.lbBound = '1';
+        img.addEventListener('click', () => openLightbox((img as HTMLImageElement).src, (img as HTMLImageElement).alt));
       });
     }, 0);
   });
@@ -277,6 +285,25 @@
         {:else}
           {@html renderMarkdown(message.content)}
         {/if}
+      </div>
+    {/if}
+
+    {#if message.media && message.media.length > 0}
+      <div class="media-attachments">
+        {#each message.media as attachment}
+          {#if attachment.type === 'image'}
+            <img
+              src="/api/v1/media/{encodeURIComponent(attachment.fileName)}"
+              alt={attachment.caption || attachment.fileName}
+              class="media-image"
+              loading="lazy"
+            />
+          {:else}
+            <a href="/api/v1/media/{encodeURIComponent(attachment.fileName)}" target="_blank" rel="noopener" class="media-file-link">
+              {attachment.fileName}
+            </a>
+          {/if}
+        {/each}
       </div>
     {/if}
 
@@ -498,6 +525,41 @@
   }
   :global(pre:hover .copy-code-btn) {
     opacity: 1;
+  }
+
+  /* ── Media attachments from tool results ── */
+  .media-attachments {
+    margin: 8px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .media-image {
+    max-width: 320px;
+    max-height: 240px;
+    border-radius: 10px;
+    object-fit: contain;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    transition: box-shadow 0.2s ease;
+  }
+  .media-image:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+  .media-file-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius);
+    background: var(--bg-raised);
+    color: var(--accent);
+    font-size: 13px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .media-file-link:hover {
+    background: var(--bg-elevated);
   }
 
   /* ── Generated images: thumbnail ── */
