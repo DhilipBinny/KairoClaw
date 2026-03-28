@@ -798,7 +798,7 @@
         </svg>
         Tool Permissions
       </h2>
-      <div class="card settings-card">
+      <div class="card settings-card" style="padding: 16px 22px;">
         <p class="field-hint" style="margin-bottom: 12px;">Control which tools the "User" role can access. Changes apply to all users with this role immediately. Tools marked as restricted are only available to admin or users with the Power User flag (toggle per user on the <a href="/admin/users" style="color: var(--accent);">Users page</a>).</p>
         <div class="form-row" style="margin-bottom: 12px;">
           <label class="field-label">Role</label>
