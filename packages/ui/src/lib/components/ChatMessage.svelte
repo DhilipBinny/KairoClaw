@@ -525,7 +525,7 @@
     flex-wrap: wrap;
     gap: 8px;
   }
-  .media-image {
+  :global(.media-image) {
     max-width: 180px;
     max-height: 120px;
     border-radius: 8px;
@@ -534,11 +534,11 @@
     cursor: pointer;
     transition: box-shadow 0.2s ease, transform 0.15s ease;
   }
-  .media-image:hover {
+  :global(.media-image:hover) {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     transform: scale(1.03);
   }
-  .media-file-link {
+  :global(.media-file-link) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -550,7 +550,7 @@
     text-decoration: none;
     transition: background 0.15s;
   }
-  .media-file-link:hover {
+  :global(.media-file-link:hover) {
     background: var(--bg-elevated);
   }
 
