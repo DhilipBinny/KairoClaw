@@ -11,13 +11,16 @@ let serverUrl = '';
 let apiKey = '';
 let connected = false;
 let agentTabIds = new Set(); // tabs opened by the agent
-let debuggerAttached = new Set(); // tabs with debugger attached
 let intentionalDisconnect = false; // true when user clicks Disconnect
+let reconnectDelay = 5000; // starts at 5s, doubles each retry, max 60s
+let authFailed = false; // true when server rejects our API key — stop retrying
 
 // ── Connection management ───────────────────────────────────
 
 async function connect() {
   intentionalDisconnect = false;
+  authFailed = false;
+  reconnectDelay = 5000;
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
   const config = await chrome.storage.local.get(['serverUrl', 'apiKey']);
@@ -49,12 +52,15 @@ async function connect() {
 
       if (msg.type === 'auth.ok') {
         connected = true;
+        reconnectDelay = 5000; // reset backoff on success
         updateStatus('connected');
         return;
       }
       if (msg.type === 'auth.error') {
         connected = false;
+        authFailed = true; // stop auto-reconnect
         updateStatus('auth_failed');
+        ws?.close();
         return;
       }
 
@@ -76,10 +82,11 @@ async function connect() {
 
   ws.onclose = () => {
     connected = false;
-    updateStatus('disconnected');
-    // Auto-reconnect after 5s (only if not intentionally disconnected)
-    if (!intentionalDisconnect) {
-      setTimeout(connect, 5000);
+    if (!intentionalDisconnect && !authFailed) {
+      updateStatus('disconnected');
+      // Exponential backoff: 5s, 10s, 20s, 40s, 60s max
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 60000);
     }
   };
 
@@ -96,11 +103,6 @@ function disconnect() {
     ws = null;
   }
   connected = false;
-  // Detach all debuggers
-  for (const tabId of debuggerAttached) {
-    chrome.debugger.detach({ tabId }).catch(() => {});
-  }
-  debuggerAttached.clear();
   updateStatus('disconnected');
 }
 
@@ -301,7 +303,6 @@ async function executeCommand(msg) {
         const tabId = params.tabId || await getActiveAgentTab();
         if (tabId) {
           agentTabIds.delete(tabId);
-          debuggerAttached.delete(tabId);
           await chrome.tabs.remove(tabId);
         }
         return { success: true };
@@ -627,7 +628,6 @@ async function getTabSnapshot(tabId) {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   agentTabIds.delete(tabId);
-  debuggerAttached.delete(tabId);
   highlightCssInjected.delete(tabId);
 });
 

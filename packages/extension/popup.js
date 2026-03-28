@@ -52,6 +52,8 @@ function updateUI(status) {
     statusDetail.textContent = 'Could not reach server';
   } else if (status === 'connecting') {
     statusDetail.textContent = 'Establishing connection...';
+  } else if (status === 'not_configured') {
+    statusDetail.textContent = 'Enter server URL and API key below';
   } else {
     statusDetail.textContent = 'Click Connect to start';
   }
@@ -72,11 +74,27 @@ function updateUI(status) {
 connectBtn.addEventListener('click', async () => {
   const serverUrl = serverUrlInput.value.trim();
   const apiKey = apiKeyInput.value.trim();
+
+  // Validate inputs
   if (!serverUrl || !apiKey) {
     statusLabel.textContent = 'Fill in both fields';
     statusCard.className = 'status-card error';
+    statusDetail.textContent = 'Server URL and API key are required';
     return;
   }
+  if (!/^https?:\/\/.+/.test(serverUrl)) {
+    statusLabel.textContent = 'Invalid URL';
+    statusCard.className = 'status-card error';
+    statusDetail.textContent = 'Must start with http:// or https://';
+    return;
+  }
+  if (apiKey.length < 10) {
+    statusLabel.textContent = 'Invalid API Key';
+    statusCard.className = 'status-card error';
+    statusDetail.textContent = 'API key is too short';
+    return;
+  }
+
   await chrome.storage.local.set({ serverUrl, apiKey, connectionStatus: 'connecting' });
   updateUI('connecting');
   chrome.runtime.sendMessage({ type: 'connect' });
