@@ -82,10 +82,13 @@ async function connect() {
 
   ws.onclose = () => {
     connected = false;
+    updateStatus('disconnected');
     if (!intentionalDisconnect && !authFailed) {
-      updateStatus('disconnected');
       // Exponential backoff: 5s, 10s, 20s, 40s, 60s max
-      setTimeout(connect, reconnectDelay);
+      setTimeout(() => {
+        updateStatus('connecting');
+        connect();
+      }, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 60000);
     }
   };
@@ -631,6 +634,23 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   highlightCssInjected.delete(tabId);
 });
 
+// ── Heartbeat: sync badge with actual WebSocket state ────────
+// MV3 service workers can sleep — when they wake up, ws is null
+// but storage still says 'connected'. This catches that.
+
+setInterval(() => {
+  const isAlive = ws && ws.readyState === WebSocket.OPEN && connected;
+  chrome.storage.local.get(['connectionStatus'], (data) => {
+    if (data.connectionStatus === 'connected' && !isAlive) {
+      updateStatus('disconnected');
+      // Try to reconnect if we have config
+      if (!intentionalDisconnect && !authFailed) {
+        connect();
+      }
+    }
+  });
+}, 30000); // check every 30s
+
 // ── Auto-connect on startup ─────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -658,6 +678,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   } else if (msg.type === 'disconnect') {
     disconnect();
     sendResponse({ ok: true });
+  } else if (msg.type === 'status') {
+    const isAlive = ws && ws.readyState === WebSocket.OPEN && connected;
+    sendResponse({ connected: isAlive });
   }
   return true; // keep message channel open for async
 });
