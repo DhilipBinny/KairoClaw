@@ -57,6 +57,7 @@ export async function sendBrowserCommand(
 
     pendingCommands.set(id, { resolve, reject, timeout });
 
+    log.debug({ userId, action, cmdId: id, category: 'browser' }, 'Extension command dispatched');
     ws.send(JSON.stringify({ type: 'command', id, action, params }));
   });
 }
@@ -95,12 +96,14 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
         );
 
         if (!user || !user.active) {
+          log.warn({ category: 'browser' }, 'Extension auth failed: invalid or inactive API key');
           socket.send(JSON.stringify({ type: 'auth.error', message: 'Invalid or inactive API key' }));
           return;
         }
 
         // Only admin can use remote browser (beta feature)
         if (user.role !== 'admin') {
+          log.warn({ userId: user.id, role: user.role, category: 'browser' }, 'Extension auth rejected: non-admin user');
           socket.send(JSON.stringify({ type: 'auth.error', message: 'Remote browser is admin-only (beta)' }));
           return;
         }
@@ -132,6 +135,8 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
         if (pending) {
           clearTimeout(pending.timeout);
           pendingCommands.delete(cmdId);
+          const resultStr = JSON.stringify(msg.result);
+          log.debug({ userId, cmdId, resultLen: resultStr.length, category: 'browser' }, 'Extension command result received');
           pending.resolve(msg.result);
         }
         return;

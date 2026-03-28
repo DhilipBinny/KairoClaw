@@ -6,7 +6,6 @@
   "permissions": [
     "tabs",
     "activeTab",
-    "debugger",
     "scripting",
     "webNavigation",
     "storage"
