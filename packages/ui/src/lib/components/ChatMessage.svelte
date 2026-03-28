@@ -526,16 +526,17 @@
     gap: 8px;
   }
   .media-image {
-    max-width: 320px;
-    max-height: 240px;
-    border-radius: 10px;
-    object-fit: contain;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    max-width: 180px;
+    max-height: 120px;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
     cursor: pointer;
-    transition: box-shadow 0.2s ease;
+    transition: box-shadow 0.2s ease, transform 0.15s ease;
   }
   .media-image:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    transform: scale(1.03);
   }
   .media-file-link {
     display: inline-flex;
