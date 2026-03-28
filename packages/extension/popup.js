@@ -15,12 +15,25 @@ const lastActivityEl = document.getElementById('lastActivity');
 
 let showSettings = false;
 
-// Load saved config
+// Load saved config + verify connection is actually alive
 chrome.storage.local.get(['serverUrl', 'apiKey', 'connectionStatus', 'lastActionAt', 'actionCount'], (data) => {
   if (data.serverUrl) serverUrlInput.value = data.serverUrl;
   if (data.apiKey) apiKeyInput.value = data.apiKey;
   if (data.lastActionAt) lastActivityEl.textContent = timeAgo(data.lastActionAt);
   updateUI(data.connectionStatus || 'disconnected');
+
+  // Ask background.js to verify actual WebSocket state
+  chrome.runtime.sendMessage({ type: 'status' }, (response) => {
+    if (chrome.runtime.lastError) {
+      // Service worker not running — definitely disconnected
+      updateUI('disconnected');
+      return;
+    }
+    if (response && response.connected === false && data.connectionStatus === 'connected') {
+      updateUI('disconnected');
+      chrome.storage.local.set({ connectionStatus: 'disconnected' });
+    }
+  });
 });
 
 // Listen for status changes
