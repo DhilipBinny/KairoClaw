@@ -97,7 +97,7 @@
 
   <div class="card">
     <h2 class="section-title">Status</h2>
-    <p class="section-desc">This feature is in <strong>beta</strong> and available to <strong>admin users only</strong>. The extension requires the <code>debugger</code>, <code>tabs</code>, and <code>scripting</code> permissions to control browser tabs.</p>
+    <p class="section-desc">This feature is in <strong>beta</strong> and available to <strong>admin users only</strong>. The extension requires the <code>tabs</code> and <code>scripting</code> permissions to control browser tabs.</p>
   </div>
 </div>
 
