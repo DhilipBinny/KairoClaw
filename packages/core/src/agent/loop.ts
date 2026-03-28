@@ -559,12 +559,21 @@ export async function runAgent(
   }, 'Agent turn completed');
 
   // ── Persist assistant message (skip for ephemeral) ───────
-  if (fullText && messageRepo) {
+  if ((fullText || collectedMedia.length > 0) && messageRepo) {
+    const msgMetadata: Record<string, unknown> = {};
+    if (collectedMedia.length > 0) {
+      msgMetadata.media = collectedMedia.map(m => ({
+        type: m.type,
+        fileName: m.fileName,
+        mimeType: m.mimeType,
+      }));
+    }
     await messageRepo.create({
       sessionId: session.id,
       tenantId,
       role: 'assistant',
-      content: fullText,
+      content: fullText || '',
+      metadata: Object.keys(msgMetadata).length > 0 ? JSON.stringify(msgMetadata) : undefined,
     });
   }
 
