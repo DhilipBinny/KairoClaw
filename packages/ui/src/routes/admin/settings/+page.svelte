@@ -13,7 +13,7 @@
   let toolsMeta: ToolMeta[] = $state([]);
 
   // Tool Permissions
-  const DEFAULT_POWER_USER_TOOLS = ['exec', 'manage_cron', 'write_file'];
+  const DEFAULT_POWER_USER_TOOLS = ['exec', 'manage_cron', 'write_file', 'browse'];
   let allTools: Array<{ name: string; description: string }> = $state([]);
   let permRole = $state('user');
   let permMap: Record<string, string> = $state({}); // toolName → 'allow'|'deny'
@@ -51,9 +51,8 @@
     permSaving = true;
     permMsg = '';
     try {
-      // Save all non-allow rules (deny + power_user)
+      // Save ALL permission rules (including allow) so explicit settings are preserved
       const permissions = Object.entries(permMap)
-        .filter(([, perm]) => perm !== 'allow')
         .map(([toolPattern, permission]) => ({ toolPattern, permission }));
       await saveToolPermissions(permRole, permissions);
       permMsg = 'Saved';
