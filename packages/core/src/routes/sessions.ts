@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
+import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { getDb, getTenantId, assertSessionAccess } from './utils.js';
 
 export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
@@ -89,6 +90,34 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
     const messages = await messageRepo.listBySession(id);
     return { session, messages };
+  });
+
+  // GET /api/v1/sessions/:id/tool-calls — get tool calls for a session
+  app.get('/api/v1/sessions/:id/tool-calls', async (request, reply) => {
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
+    const { id } = request.params as { id: string };
+    const sessionRepo = new SessionRepository(db);
+    const toolCallRepo = new ToolCallRepository(db);
+
+    const session = await sessionRepo.getById(id, tenantId);
+    if (!session) return reply.code(404).send({ error: 'Session not found' });
+    if (!assertSessionAccess(session, request, reply)) return;
+
+    const toolCalls = await toolCallRepo.listBySession(id, 500);
+
+    // Truncate large args/results to prevent multi-MB API responses
+    const truncated = toolCalls.map(tc => ({
+      ...tc,
+      arguments: tc.arguments && tc.arguments.length > 2000
+        ? tc.arguments.slice(0, 2000) + '...[truncated]'
+        : tc.arguments,
+      result: tc.result && tc.result.length > 2000
+        ? tc.result.slice(0, 2000) + '...[truncated]'
+        : tc.result,
+    }));
+
+    return { toolCalls: truncated };
   });
 
   // PATCH /api/v1/sessions/:id — update session (rename)
