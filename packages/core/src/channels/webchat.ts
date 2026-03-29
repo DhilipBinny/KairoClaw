@@ -418,6 +418,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const messages = rows.slice(-limit).map((m) => ({
               role: m.role,
               content: m.content?.slice(0, 5000),
+              metadata: m.metadata ?? undefined,
             }));
             safeSend({ type: 'chat.history.result', sessionKey, sessionId: session.id, messages, requestId });
             break;

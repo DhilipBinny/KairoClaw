@@ -138,6 +138,20 @@ export async function getSession(id: string): Promise<{ session: Record<string, 
   return request(`/sessions/${id}`);
 }
 
+export interface ToolCallInfo {
+  id: string;
+  tool_name: string;
+  arguments: string;
+  result: string | null;
+  status: string;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export async function getSessionToolCalls(sessionId: string): Promise<{ toolCalls: ToolCallInfo[] }> {
+  return request(`/sessions/${sessionId}/tool-calls`);
+}
+
 export async function deleteSession(id: string): Promise<{ success: boolean }> {
   return request(`/sessions/${id}`, { method: 'DELETE' });
 }

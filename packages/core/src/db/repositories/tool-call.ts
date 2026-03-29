@@ -50,7 +50,7 @@ export class ToolCallRepository {
 
   async listBySession(sessionId: string, limit = 100): Promise<ToolCallRow[]> {
     return await this.db.query<ToolCallRow>(
-      'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at DESC LIMIT ?',
+      'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY created_at ASC LIMIT ?',
       [sessionId, limit],
     );
   }
