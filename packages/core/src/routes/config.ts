@@ -65,6 +65,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.email.maxRecipientsPerMessage',
       'tools.email.rateLimit.perMinute', 'tools.email.rateLimit.perHour', 'tools.email.rateLimit.perDay', 'tools.email.rateLimit.perRecipientPerHour',
       'tools.transcription.enabled', 'tools.transcription.baseUrl', 'tools.transcription.model', 'tools.transcription.language',
+      'tools.browse.enabled',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
@@ -182,6 +183,14 @@ export const registerConfigRoutes: FastifyPluginAsync<{
             { key: 'baseUrl', type: 'text', label: 'STT Endpoint URL', hint: 'e.g. http://10.0.2.20:5007', showWhen: 'enabled' },
             { key: 'model', type: 'text', label: 'Model', hint: 'Model name sent in requests (e.g. whisper-small)', showWhen: 'enabled' },
             { key: 'language', type: 'text', label: 'Language', hint: 'ISO 639-1 code (e.g. en). Leave empty for auto-detect.', showWhen: 'enabled' },
+          ],
+        },
+        {
+          key: 'browse',
+          label: 'Browser',
+          hint: 'Allow the agent to browse websites, take screenshots, fill forms (uses headless Chromium or Chrome extension)',
+          fields: [
+            { key: 'enabled', type: 'boolean' },
           ],
         },
       ],

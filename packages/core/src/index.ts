@@ -218,6 +218,7 @@ async function main(): Promise<void> {
     web_search: config.tools?.webSearch?.enabled !== false,
     web_fetch: config.tools?.webFetch?.enabled !== false,
     send_email: !!config.tools?.email?.enabled,
+    browse: config.tools?.browse?.enabled !== false,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;

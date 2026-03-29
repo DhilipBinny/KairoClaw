@@ -127,7 +127,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
 
     const tenantId = getTenantId(request);
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id), tenantId);
+    const sender = await repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -173,7 +173,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       return reply.code(500).send({ error: 'Failed to update config' });
     }
 
-    await repo.updateStatus(Number(id), 'approved', tenantId);
+    await repo.updateStatus(Number(id), 'approved');
 
     // If userId provided, create sender_link (maps this sender to a user account)
     const { userId: linkUserId } = (request.body as { userId?: string }) || {};
@@ -198,12 +198,12 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
-    const sender = await repo.getById(Number(id), tenantId);
+    const sender = await repo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
 
-    await repo.updateStatus(Number(id), 'rejected', tenantId);
+    await repo.updateStatus(Number(id), 'rejected');
     return { success: true };
   });
 
@@ -223,7 +223,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const tenantId = getTenantId(request);
 
     const pendingRepo = new PendingSenderRepository(db);
-    const sender = await pendingRepo.getById(Number(id), tenantId);
+    const sender = await pendingRepo.getById(Number(id));
     if (!sender) {
       return reply.code(404).send({ error: 'Sender not found' });
     }
@@ -291,7 +291,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     }
 
     // 4. Mark sender as approved (after DB operations succeed, before return)
-    try { await pendingRepo.updateStatus(Number(id), 'approved', tenantId); } catch { /* non-critical */ }
+    try { await pendingRepo.updateStatus(Number(id), 'approved'); } catch { /* non-critical */ }
 
     return {
       user: {
