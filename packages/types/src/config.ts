@@ -197,6 +197,11 @@ export interface TranscriptionToolConfig {
   language: string;
 }
 
+export interface BrowseToolConfig {
+  /** Enable/disable the browse tool (headless Chromium). */
+  enabled: boolean;
+}
+
 /** Built-in tool configuration. */
 export interface ToolsConfig {
   exec: ExecToolConfig;
@@ -204,6 +209,7 @@ export interface ToolsConfig {
   webFetch: WebFetchToolConfig;
   email: EmailToolConfig;
   transcription: TranscriptionToolConfig;
+  browse: BrowseToolConfig;
 }
 
 
