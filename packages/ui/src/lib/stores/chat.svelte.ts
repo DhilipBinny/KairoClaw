@@ -5,6 +5,18 @@
 
 import * as ws from '$lib/ws';
 
+/** Parse media attachments from message metadata JSON (for history reload). */
+function parseMediaFromMetadata(metadata?: string): { media?: MediaAttachment[] } {
+  if (!metadata) return {};
+  try {
+    const parsed = JSON.parse(metadata);
+    if (Array.isArray(parsed.media) && parsed.media.length > 0) {
+      return { media: parsed.media as MediaAttachment[] };
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
 export interface ToolCall {
   name: string;
   status: 'running' | 'done';
@@ -214,12 +226,13 @@ export function initChatListeners(): void {
 
   _unsubscribers.push(
     ws.on('chat.history.result', (msg) => {
-      const messages = msg.messages as Array<{ role: string; content: string }>;
+      const messages = msg.messages as Array<{ role: string; content: string; metadata?: string }>;
       _messages = messages.map((m, i) => ({
         id: `msg-${++_msgCounter}`,
         role: m.role as 'user' | 'assistant',
         content: m.content || '',
         timestamp: Date.now() - (messages.length - i) * 1000,
+        ...parseMediaFromMetadata(m.metadata),
       }));
     })
   );
@@ -280,6 +293,7 @@ export async function loadHistory(sessionId?: string): Promise<void> {
         role: m.role as 'user' | 'assistant',
         content: m.content || '',
         timestamp: Date.now() - (messages.length - i) * 1000,
+        ...parseMediaFromMetadata((m as any).metadata),
       }));
     } catch (e) {
       console.error('Failed to load history:', e);

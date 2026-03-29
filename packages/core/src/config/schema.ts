@@ -98,12 +98,17 @@ const transcriptionToolSchema = z.object({
   language: z.string().default(''),
 });
 
+const browseToolSchema = z.object({
+  enabled: z.boolean().default(true),
+});
+
 const toolsSchema = z.object({
   exec: withObjectDefault(execToolSchema),
   webSearch: withObjectDefault(webSearchToolSchema),
   webFetch: withObjectDefault(webFetchToolSchema),
   email: withObjectDefault(emailToolSchema),
   transcription: withObjectDefault(transcriptionToolSchema),
+  browse: withObjectDefault(browseToolSchema),
 });
 
 const telegramChannelSchema = z.object({
@@ -339,6 +344,9 @@ export const configDefaults: GatewayConfig = {
       baseUrl: '',
       model: 'whisper-small',
       language: '',
+    },
+    browse: {
+      enabled: true,
     },
   },
   agent: {

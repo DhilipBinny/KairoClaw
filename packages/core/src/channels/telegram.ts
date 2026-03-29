@@ -118,6 +118,10 @@ class TelegramChannel implements Channel {
       await ctx.reply(
         '*Commands*\n\n' +
         '/start — Welcome message\n' +
+        '/new — Start fresh session (clears history)\n' +
+        '/status — Show session info\n' +
+        '/compact — Compress long conversations\n' +
+        '/model — Show or switch AI model\n' +
         '/help — Show this list\n' +
         '/myid — Show your Telegram user ID\n\n' +
         'Or just send any message to chat.',
@@ -153,6 +157,9 @@ class TelegramChannel implements Channel {
     this.bot.api.deleteMyCommands().catch(() => {});
     this.bot.api.setMyCommands([
       { command: 'start', description: 'Welcome message' },
+      { command: 'new', description: 'Start fresh session (clears history)' },
+      { command: 'status', description: 'Show session info' },
+      { command: 'compact', description: 'Compress long conversations' },
       { command: 'help', description: 'List available commands' },
       { command: 'myid', description: 'Show your Telegram user ID' },
       { command: 'groupid', description: 'Show this group\'s chat ID' },

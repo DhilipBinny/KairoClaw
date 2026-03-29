@@ -118,13 +118,7 @@ export class PendingSenderRepository {
   }
 
   /** Get a sender by id. */
-  async getById(id: number | string, tenantId?: string): Promise<PendingSenderRow | undefined> {
-    if (tenantId) {
-      return await this.db.get<PendingSenderRow>(
-        'SELECT * FROM pending_senders WHERE id = ? AND tenant_id = ?',
-        [id, tenantId],
-      );
-    }
+  async getById(id: number | string): Promise<PendingSenderRow | undefined> {
     return await this.db.get<PendingSenderRow>(
       'SELECT * FROM pending_senders WHERE id = ?',
       [id],
@@ -132,12 +126,8 @@ export class PendingSenderRepository {
   }
 
   /** Update status (approve/reject). */
-  async updateStatus(id: number | string, status: string, tenantId?: string): Promise<void> {
-    if (tenantId) {
-      await this.db.run('UPDATE pending_senders SET status = ? WHERE id = ? AND tenant_id = ?', [status, id, tenantId]);
-    } else {
-      await this.db.run('UPDATE pending_senders SET status = ? WHERE id = ?', [status, id]);
-    }
+  async updateStatus(id: number | string, status: string): Promise<void> {
+    await this.db.run('UPDATE pending_senders SET status = ? WHERE id = ?', [status, id]);
   }
 
   /**

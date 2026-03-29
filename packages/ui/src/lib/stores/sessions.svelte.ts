@@ -56,13 +56,14 @@ export async function loadSessions(): Promise<void> {
 }
 
 /** Load messages for a specific session via REST API */
-export async function loadSessionMessages(sessionId: string): Promise<Array<{ role: string; content: string }>> {
+export async function loadSessionMessages(sessionId: string): Promise<Array<{ role: string; content: string; metadata?: string }>> {
   try {
     const data = await fetchSession(sessionId);
     return (data.messages || []).map((m) => ({
       id: (m as any).id,
       role: m.role,
       content: m.content,
+      metadata: (m as any).metadata ?? undefined,
     }));
   } catch (e) {
     console.error('Failed to load session messages:', e);
