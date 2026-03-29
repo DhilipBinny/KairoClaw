@@ -28,7 +28,7 @@ RUN pnpm lint && \
 # Stage 3: Production (install deps + remove build tools in one layer)
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tini curl git ca-certificates gosu \
+    tini curl git ca-certificates gosu zip \
     jq bsdmainutils poppler-utils tesseract-ocr \
     # Chromium for browse tool (headless browser automation)
     chromium \

@@ -15,10 +15,11 @@ jobs:
   build-and-deploy:
     runs-on: self-hosted
     timeout-minutes: 15
-    # Only deploy if CI passed (or if manually triggered)
+    # Only deploy if CI passed on deploy/railway (or if manually triggered)
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'deploy/railway')
 
     steps:
       - name: Checkout code

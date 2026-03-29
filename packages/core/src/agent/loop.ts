@@ -289,9 +289,22 @@ export async function runAgent(
       stopReason: ('stopReason' in response ? (response as Record<string, unknown>).stopReason : undefined) || (toolCount > 0 ? 'tool_use' : 'end_turn'),
     }, 'LLM call completed');
 
+    // Log LLM response preview
+    if (response.text) {
+      reqLog.info({
+        round,
+        responsePreview: response.text.slice(0, 300),
+        responseLen: response.text.length,
+        category: 'llm',
+      }, 'LLM response text');
+    }
+
     // Record per-round usage with cost estimate (skip for ephemeral)
     const provider = model.split('/')[0] ?? 'unknown';
     const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
+    if (costUsd > 0) {
+      reqLog.info({ round, costUsd: +costUsd.toFixed(6), category: 'llm' }, 'Round cost');
+    }
     if (usageRepo) {
       try {
         await usageRepo.record({
@@ -449,7 +462,13 @@ export async function runAgent(
 
       const resultStr =
         typeof result === 'string' ? result : JSON.stringify(result);
-      reqLog.debug({ tool: toolName, resultLen: resultStr.length, durationMs, category: 'tool' }, 'Tool completed');
+      reqLog.info({
+        tool: toolName,
+        resultPreview: resultStr.slice(0, 200),
+        resultLen: resultStr.length,
+        durationMs,
+        category: 'tool',
+      }, 'Tool completed');
 
       if (onToolEnd) {
         try {
@@ -528,13 +547,33 @@ export async function runAgent(
     }
   }
 
+  // ── Agent turn summary ──────────────────────────────────
+  reqLog.info({
+    totalRounds: round,
+    totalInputTokens,
+    totalOutputTokens,
+    responseLen: fullText.length,
+    responsePreview: fullText.slice(0, 200),
+    mediaCount: collectedMedia.length,
+    category: 'llm',
+  }, 'Agent turn completed');
+
   // ── Persist assistant message (skip for ephemeral) ───────
-  if (fullText && messageRepo) {
+  if ((fullText || collectedMedia.length > 0) && messageRepo) {
+    const msgMetadata: Record<string, unknown> = {};
+    if (collectedMedia.length > 0) {
+      msgMetadata.media = collectedMedia.map(m => ({
+        type: m.type,
+        fileName: m.fileName,
+        mimeType: m.mimeType,
+      }));
+    }
     await messageRepo.create({
       sessionId: session.id,
       tenantId,
       role: 'assistant',
-      content: fullText,
+      content: fullText || '',
+      metadata: Object.keys(msgMetadata).length > 0 ? JSON.stringify(msgMetadata) : undefined,
     });
   }
 
