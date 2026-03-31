@@ -36,9 +36,16 @@ export class OpenAIProvider implements ProviderInterface {
     const modelId = model || this.defaultModel;
 
     // Build messages with system prompt
+    // If structured prompt (cached + dynamic), concatenate for OpenAI (no caching API)
     const apiMessages: OpenAI.ChatCompletionMessageParam[] = [];
-    if (systemPrompt) {
-      apiMessages.push({ role: 'system', content: systemPrompt });
+    const flatPrompt = typeof systemPrompt === 'object' && systemPrompt !== null && 'cached' in systemPrompt
+      ? (systemPrompt as { cached: string; dynamic: string }).cached +
+        ((systemPrompt as { cached: string; dynamic: string }).dynamic
+          ? '\n\n' + (systemPrompt as { cached: string; dynamic: string }).dynamic
+          : '')
+      : systemPrompt as string;
+    if (flatPrompt) {
+      apiMessages.push({ role: 'system', content: flatPrompt });
     }
 
     for (const m of messages) {
