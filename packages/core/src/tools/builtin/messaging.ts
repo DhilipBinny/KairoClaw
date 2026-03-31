@@ -194,6 +194,7 @@ export const messagingTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
   {
     definition: {
