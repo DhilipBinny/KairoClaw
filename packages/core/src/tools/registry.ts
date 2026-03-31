@@ -196,4 +196,12 @@ export class ToolRegistry {
   get(name: string): ToolRegistration | undefined {
     return this.tools.get(name);
   }
+
+  /**
+   * Check if a tool is safe to run concurrently with other tools.
+   * Returns false (sequential) for unknown tools — fail-safe.
+   */
+  isConcurrencySafe(name: string): boolean {
+    return this.tools.get(name)?.concurrencySafe ?? false;
+  }
 }
