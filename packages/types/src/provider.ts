@@ -48,6 +48,19 @@ export interface ThinkingConfig {
   budgetTokens?: number;
 }
 
+/**
+ * Structured system prompt with cache boundary.
+ *
+ * Static content (persona, tool descriptions, safety rules) goes in `cached` —
+ * Anthropic caches this prefix for 5 min, saving ~90% on input token costs.
+ * Dynamic content (time, memory, session context) goes in `dynamic` —
+ * changes every call, never cached.
+ */
+export interface StructuredSystemPrompt {
+  cached: string;
+  dynamic: string;
+}
+
 export interface ChatArgs {
   /** Conversation messages (history + current user message). */
   messages: Message[];
@@ -55,8 +68,12 @@ export interface ChatArgs {
   tools?: ToolDefinition[];
   /** Model ID to use (overrides provider default). */
   model: string;
-  /** System prompt prepended to the conversation. */
-  systemPrompt: string;
+  /**
+   * System prompt prepended to the conversation.
+   * Pass a string for backwards compatibility, or a StructuredSystemPrompt
+   * to enable prompt caching on the static prefix (Anthropic only).
+   */
+  systemPrompt: string | StructuredSystemPrompt;
   /** Streaming callback — called with each text delta. */
   onDelta?: (delta: string) => void;
   /** Streaming callback — called with each thinking delta. */

@@ -428,6 +428,7 @@ async function main(): Promise<void> {
         };
         return toolRegistry.execute(name, args, enrichedCtx as any);
       },
+      isToolConcurrencySafe: (name) => toolRegistry.isConcurrencySafe(name),
     });
   };
 
