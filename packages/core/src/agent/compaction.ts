@@ -173,6 +173,11 @@ ${conversationText}
     if (summary && summary.length > 0) {
       // Strip <analysis> scratchpad — reasoning improves quality but shouldn't persist in context
       summary = summary.replace(/<analysis>[\s\S]*?<\/analysis>/g, '').trim();
+      // Safety net: if LLM forgot the closing tag, strip everything before the first ## heading
+      if (summary.includes('<analysis>')) {
+        const headingIndex = summary.indexOf('## ');
+        summary = headingIndex >= 0 ? summary.slice(headingIndex).trim() : summary.replace(/<analysis>[\s\S]*/g, '').trim();
+      }
       return summary || null;
     }
     return null;
@@ -187,7 +192,7 @@ ${conversationText}
 
 /**
  * Build a structured fallback summary from older messages (no LLM needed).
- * Mirrors the structured format: Active Tasks / Resolved Topics / Key Facts.
+ * Mirrors the structured format: Active Tasks / Resolved Topics / Key Facts / Current Work.
  */
 function buildCompactionSummary(messages: MessageRow[]): string {
   const lines: string[] = [];
@@ -251,6 +256,23 @@ function buildCompactionSummary(messages: MessageRow[]): string {
   if (assistantMessages.length > 0) {
     const lastAssistant = (assistantMessages[assistantMessages.length - 1].content || '').slice(0, 300).trim();
     if (lastAssistant) lines.push(`- Last assistant output: ${lastAssistant}`);
+  }
+
+  // Current work — what was happening right before compaction
+  lines.push('');
+  lines.push('## Current Work');
+  const lastUser = userMessages[userMessages.length - 1];
+  const lastAssistantMsg = assistantMessages[assistantMessages.length - 1];
+  if (lastUser) {
+    const text = (lastUser.content || '').slice(0, 300).trim();
+    if (text) lines.push(`- Last user request: ${text}`);
+  }
+  if (lastAssistantMsg) {
+    const text = (lastAssistantMsg.content || '').slice(0, 300).trim();
+    if (text) lines.push(`- Last assistant response: ${text}`);
+  }
+  if (!lastUser && !lastAssistantMsg) {
+    lines.push('- No recent context available');
   }
 
   return lines.join('\n');
