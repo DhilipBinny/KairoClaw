@@ -28,7 +28,7 @@ import { MessageRepository } from '../db/repositories/message.js';
 import { UsageRepository } from '../db/repositories/usage.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { buildSystemPrompt } from './prompt.js';
-import { checkAndCompact } from './compaction.js';
+import { checkAndCompact, compactSession } from './compaction.js';
 import { handleSlashCommand } from './slash-commands.js';
 import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS, TOOL_LOOP_THRESHOLD } from '../constants.js';
 import { SubAgentRegistry } from './subagent-registry.js';
@@ -216,6 +216,8 @@ export async function runAgent(
   const collectedMedia: MediaAttachment[] = [];
   const toolCallCounts = new Map<string, number>();
   const subagentRegistry = new SubAgentRegistry();
+  const MAX_REACTIVE_COMPACT_FAILURES = 3; // circuit breaker: stop after 3 consecutive compact attempts
+  let reactiveCompactFailures = 0;
   let round = 0;
   while (round < maxToolRounds) {
     round++;
@@ -247,32 +249,74 @@ export async function runAgent(
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
 
-      // Context overflow recovery: compact and retry on first round
-      const isOverflow = /context.length|context.window|too.many.tokens|exceeds.*max|max.*token/i.test(msg);
-      if (isOverflow && round === 1 && !ephemeral) {
-        reqLog.warn({ err: msg }, 'Context overflow detected — attempting mid-turn compaction');
+      // ── Reactive compact: multi-stage recovery for context overflow ──
+      // Matches Anthropic "prompt is too long: X tokens > Y maximum" and
+      // OpenAI "maximum context length" errors, plus generic overflow patterns.
+      const isOverflow = /prompt is too long|maximum context length|context.length|context.window|too.many.tokens|exceeds.*max|max.*token/i.test(msg);
+
+      if (isOverflow && !ephemeral && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
+        reactiveCompactFailures++;
+        reqLog.warn({ err: msg, round, attempt: reactiveCompactFailures }, 'Context overflow — starting reactive compact recovery');
+
+        // Stage 1: Strip images from messages (cheapest — no LLM call)
+        let strippedImages = false;
+        for (const m of messages) {
+          if (Array.isArray(m.content)) {
+            const textParts = (m.content as MessageContentPart[]).filter(p => p.type !== 'image');
+            if (textParts.length < (m.content as MessageContentPart[]).length) {
+              m.content = textParts.length === 1 && textParts[0].type === 'text'
+                ? textParts[0].text
+                : textParts.length > 0 ? textParts as any : '[images removed to reduce context]';
+              strippedImages = true;
+            }
+          }
+        }
+        if (strippedImages) {
+          reqLog.info('Stage 1: Stripped images from messages');
+        }
+
+        // Stage 2: Force hard compaction (LLM summarization)
+        if (messageRepo) {
+          try {
+            reqLog.info('Stage 2: Forcing hard compaction');
+            await compactSession(session.id, tenantId, model, db, config, context.callLLM);
+            // Reload messages after compaction
+            const freshRows = await messageRepo.listBySession(session.id);
+            messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
+          } catch (compactErr: unknown) {
+            reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');
+          }
+        }
+
+        // Stage 3: Retry the LLM call
         try {
-          await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
-          // Reload messages after compaction
-          const freshRows = await messageRepo!.listBySession(session.id);
-          messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
           response = await context.callLLM({
             messages, tools: tools.length > 0 ? tools : undefined,
             model, systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
           });
-          reqLog.info('LLM call succeeded after mid-turn compaction');
+          reqLog.info({ round, attempt: reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
+          reactiveCompactFailures = 0; // reset on success
         } catch (retryErr: unknown) {
           const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          reqLog.error({ err: retryMsg }, 'LLM call failed after compaction');
+          // If still overflowing and we haven't hit the circuit breaker, loop will retry next round
+          const stillOverflow = /prompt is too long|maximum context length|context.length|too.many.tokens|exceeds.*max|max.*token/i.test(retryMsg);
+          if (stillOverflow && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
+            reqLog.warn({ err: retryMsg, attempt: reactiveCompactFailures }, 'Still overflowing after compact — will retry');
+            continue; // go to next round, which will trigger another compact attempt
+          }
+          reqLog.error({ err: retryMsg, attempt: reactiveCompactFailures }, 'LLM call failed after reactive compact — giving up');
           if (userMsgResult?.id) {
             try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
           }
-          return { text: 'Something went wrong processing your request. Please try again.', error: true };
+          return { text: 'Your conversation is too long to process even after compaction. Please start a new session with /new.', error: true };
         }
       } else {
         reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
         if (userMsgResult?.id) {
           try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
+        }
+        if (isOverflow && reactiveCompactFailures >= MAX_REACTIVE_COMPACT_FAILURES) {
+          return { text: 'Your conversation is too long to process even after multiple compaction attempts. Please start a new session with /new.', error: true };
         }
         return { text: 'Something went wrong processing your request. Please try again.', error: true };
       }
