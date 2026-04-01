@@ -373,31 +373,51 @@ async function extractTouchedFilePaths(sessionId: string, db: DatabaseAdapter): 
   return [...writePaths, ...readPaths];
 }
 
+/** Binary file extensions to skip during restoration (not useful as text context). */
+const BINARY_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp',
+  '.pdf', '.zip', '.tar', '.gz', '.bz2', '.7z', '.rar',
+  '.bin', '.exe', '.dll', '.so', '.dylib', '.wasm',
+  '.mp3', '.mp4', '.wav', '.ogg', '.webm', '.avi',
+  '.sqlite', '.db', '.dat',
+]);
+
 /**
  * Build a restoration context message with the content of recently touched files.
  * Respects per-file and total budget limits.
+ *
+ * Returns `{ message, fileCount }` or null if no files could be restored.
  */
 function buildFileRestorationMessage(
   filePaths: string[],
   workspace: string,
-): string | null {
+): { message: string; fileCount: number } | null {
   const restored: string[] = [];
   let totalChars = 0;
   let filesRestored = 0;
+  const resolvedWorkspace = path.resolve(workspace);
 
   for (const relPath of filePaths) {
     if (filesRestored >= POST_COMPACT_MAX_FILES) break;
     if (totalChars >= POST_COMPACT_TOTAL_BUDGET_CHARS) break;
+
+    // Skip binary files — not useful as text context
+    const ext = path.extname(relPath).toLowerCase();
+    if (BINARY_EXTENSIONS.has(ext)) continue;
 
     // Resolve path relative to workspace
     const absPath = path.isAbsolute(relPath)
       ? relPath
       : path.join(workspace, relPath);
 
-    if (!fs.existsSync(absPath)) continue;
+    // Security: ensure resolved path is within workspace (prevent path traversal)
+    const resolved = path.resolve(absPath);
+    if (!resolved.startsWith(resolvedWorkspace)) continue;
+
+    if (!fs.existsSync(resolved)) continue;
 
     try {
-      let content = fs.readFileSync(absPath, 'utf8');
+      let content = fs.readFileSync(resolved, 'utf8');
       if (content.length > POST_COMPACT_MAX_CHARS_PER_FILE) {
         content = content.slice(0, POST_COMPACT_MAX_CHARS_PER_FILE) + '\n[... truncated ...]';
       }
@@ -418,7 +438,10 @@ function buildFileRestorationMessage(
 
   if (restored.length === 0) return null;
 
-  return `[Restored Files — recently touched files re-injected after context compaction]\n\n${restored.join('\n\n')}`;
+  return {
+    message: `[Restored Files — recently touched files re-injected after context compaction]\n\n${restored.join('\n\n')}`,
+    fileCount: filesRestored,
+  };
 }
 
 // ─── Compact session ────────────────────────────────────────
@@ -595,16 +618,16 @@ export async function compactSession(
   if (workspace) {
     const touchedPaths = await extractTouchedFilePaths(sessionId, db);
     if (touchedPaths.length > 0) {
-      const restorationMsg = buildFileRestorationMessage(touchedPaths, workspace);
-      if (restorationMsg) {
+      const restoration = buildFileRestorationMessage(touchedPaths, workspace);
+      if (restoration) {
         await messageRepo.create({
           sessionId,
           tenantId,
           role: 'system',
-          content: restorationMsg,
-          metadata: JSON.stringify({ type: 'file-restoration', fileCount: touchedPaths.length }),
+          content: restoration.message,
+          metadata: JSON.stringify({ type: 'file-restoration', fileCount: restoration.fileCount }),
         });
-        restoredFileCount = Math.min(touchedPaths.length, POST_COMPACT_MAX_FILES);
+        restoredFileCount = restoration.fileCount;
         log.info({ sessionId, files: touchedPaths.slice(0, POST_COMPACT_MAX_FILES) }, `Post-compact: restored ${restoredFileCount} recently touched files`);
       }
     }
