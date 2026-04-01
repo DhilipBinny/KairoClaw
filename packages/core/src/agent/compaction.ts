@@ -352,7 +352,7 @@ async function softCompact(
 }
 
 /** Perform compaction on a session — summarizes older messages and keeps recent ones. */
-async function compactSession(
+export async function compactSession(
   sessionId: string,
   tenantId: string,
   modelId: string,
