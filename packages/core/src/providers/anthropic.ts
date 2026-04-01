@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ProviderInterface, ProviderResponse, ChatArgs } from './types.js';
 import type { ProviderOptions } from './types.js';
-import type { GatewayConfig, ToolCall, ThinkingBlock } from '@agw/types';
+import type { GatewayConfig, ToolCall, ThinkingBlock, StructuredSystemPrompt } from '@agw/types';
 import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 
@@ -173,17 +173,45 @@ export class AnthropicProvider implements ProviderInterface {
 
     const caps = getModelCapabilities(modelId, this.config);
 
-    // Build system content as array with cache_control for prompt caching
-    // Anthropic caches marked blocks for 5 min — saves ~90% on input tokens for repeat turns
+    // Build system content as array with cache_control for prompt caching.
+    // Anthropic caches marked blocks for 5 min — saves ~90% on input tokens
+    // for repeat turns within the same session.
+    //
+    // When a StructuredSystemPrompt is passed, the cached prefix (identity,
+    // tools, safety, persona files) gets cache_control and stays stable across
+    // turns. The dynamic suffix (time, memory) changes every call but is small.
+    const structured = typeof systemPrompt === 'object' && systemPrompt !== null && 'cached' in systemPrompt
+      ? systemPrompt as StructuredSystemPrompt
+      : null;
+
     let systemContent: string | Anthropic.TextBlockParam[];
     if (this.authType === 'oauth-token') {
-      systemContent = [
+      // OAuth mode: prepend Claude Code identity header
+      const blocks: Anthropic.TextBlockParam[] = [
         { type: 'text' as const, text: "You are Claude Code, Anthropic's official CLI for Claude." },
-        ...(systemPrompt ? [{ type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } }] : []),
       ];
+      if (structured) {
+        blocks.push({ type: 'text' as const, text: structured.cached, cache_control: { type: 'ephemeral' as const } });
+        if (structured.dynamic) {
+          blocks.push({ type: 'text' as const, text: structured.dynamic });
+        }
+      } else if (systemPrompt) {
+        blocks.push({ type: 'text' as const, text: systemPrompt as string, cache_control: { type: 'ephemeral' as const } });
+      }
+      systemContent = blocks;
+    } else if (structured) {
+      // API key mode with structured prompt: cache the stable prefix
+      const blocks: Anthropic.TextBlockParam[] = [
+        { type: 'text' as const, text: structured.cached, cache_control: { type: 'ephemeral' as const } },
+      ];
+      if (structured.dynamic) {
+        blocks.push({ type: 'text' as const, text: structured.dynamic });
+      }
+      systemContent = blocks;
     } else if (systemPrompt) {
+      // API key mode with plain string: cache the whole thing (backwards compat)
       systemContent = [
-        { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+        { type: 'text' as const, text: systemPrompt as string, cache_control: { type: 'ephemeral' as const } },
       ];
     } else {
       systemContent = '';
@@ -211,7 +239,9 @@ export class AnthropicProvider implements ProviderInterface {
     }
 
     // ── Detailed request logging ──────────────────────────
-    const systemLen = (systemPrompt || '').length;
+    const systemLen = structured
+      ? structured.cached.length + structured.dynamic.length
+      : (typeof systemPrompt === 'string' ? systemPrompt.length : 0);
     const msgsInfo = apiMessages.map((m) => {
       const contentLen = typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length;
       return `${m.role}(${contentLen}c)`;
@@ -293,6 +323,21 @@ export class AnthropicProvider implements ProviderInterface {
         } else if (event.type === 'message_start') {
           if (event.message?.usage) {
             inputTokens = event.message.usage.input_tokens || 0;
+            // Log prompt cache metrics when available
+            const usage = event.message.usage as unknown as Record<string, unknown>;
+            const cacheRead = usage.cache_read_input_tokens as number | undefined;
+            const cacheCreate = usage.cache_creation_input_tokens as number | undefined;
+            if (cacheRead || cacheCreate) {
+              log.info({
+                cacheReadTokens: cacheRead || 0,
+                cacheCreationTokens: cacheCreate || 0,
+                inputTokens: inputTokens,
+                cacheHitRate: inputTokens > 0
+                  ? `${(((cacheRead || 0) / inputTokens) * 100).toFixed(1)}%`
+                  : '0%',
+                category: 'llm',
+              }, `Prompt cache: ${cacheRead || 0} read, ${cacheCreate || 0} created`);
+            }
           }
         }
       }
