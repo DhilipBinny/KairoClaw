@@ -6,6 +6,8 @@
  * older messages while keeping recent messages intact.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { GatewayConfig } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import { MessageRepository, type MessageRow } from '../db/repositories/message.js';
@@ -14,6 +16,15 @@ import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('llm');
+
+// ─── Post-compact file restoration constants ───────────────
+
+/** Max files to restore after compaction */
+const POST_COMPACT_MAX_FILES = 5;
+/** Max characters per restored file */
+const POST_COMPACT_MAX_CHARS_PER_FILE = 5_000;
+/** Max total characters for all restored files */
+const POST_COMPACT_TOTAL_BUDGET_CHARS = 50_000;
 
 // ─── Token estimation ───────────────────────────────────────
 
@@ -317,6 +328,99 @@ function evictToolResults(messages: MessageRow[]): MessageRow[] {
   });
 }
 
+// ─── Post-compact file restoration ──────────────────────────
+
+/** File tool names that indicate a file was read or written. */
+const FILE_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file']);
+
+/**
+ * Extract file paths from the tool_calls table for a session.
+ * Returns paths in reverse chronological order (most recent first), deduplicated.
+ * Prioritizes written/edited files over read-only files.
+ */
+async function extractTouchedFilePaths(sessionId: string, db: DatabaseAdapter): Promise<string[]> {
+  const seen = new Set<string>();
+  const writePaths: string[] = [];
+  const readPaths: string[] = [];
+
+  try {
+    const rows = await db.query<{ tool_name: string; arguments: string }>(
+      `SELECT tool_name, arguments FROM tool_calls
+       WHERE session_id = ? AND tool_name IN ('read_file', 'write_file', 'edit_file')
+       ORDER BY created_at DESC`,
+      [sessionId],
+    );
+
+    for (const row of rows) {
+      try {
+        const args = JSON.parse(row.arguments) as Record<string, unknown>;
+        const filePath = (args.path || args.file_path) as string | undefined;
+        if (!filePath || seen.has(filePath)) continue;
+        seen.add(filePath);
+        // Prioritize files the agent wrote/edited (more likely to be actively working on)
+        if (row.tool_name === 'write_file' || row.tool_name === 'edit_file') {
+          writePaths.push(filePath);
+        } else {
+          readPaths.push(filePath);
+        }
+      } catch { /* skip malformed args */ }
+    }
+  } catch (err) {
+    log.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to extract file paths from tool_calls');
+  }
+
+  // Written files first, then read files
+  return [...writePaths, ...readPaths];
+}
+
+/**
+ * Build a restoration context message with the content of recently touched files.
+ * Respects per-file and total budget limits.
+ */
+function buildFileRestorationMessage(
+  filePaths: string[],
+  workspace: string,
+): string | null {
+  const restored: string[] = [];
+  let totalChars = 0;
+  let filesRestored = 0;
+
+  for (const relPath of filePaths) {
+    if (filesRestored >= POST_COMPACT_MAX_FILES) break;
+    if (totalChars >= POST_COMPACT_TOTAL_BUDGET_CHARS) break;
+
+    // Resolve path relative to workspace
+    const absPath = path.isAbsolute(relPath)
+      ? relPath
+      : path.join(workspace, relPath);
+
+    if (!fs.existsSync(absPath)) continue;
+
+    try {
+      let content = fs.readFileSync(absPath, 'utf8');
+      if (content.length > POST_COMPACT_MAX_CHARS_PER_FILE) {
+        content = content.slice(0, POST_COMPACT_MAX_CHARS_PER_FILE) + '\n[... truncated ...]';
+      }
+      if (totalChars + content.length > POST_COMPACT_TOTAL_BUDGET_CHARS) {
+        // Partial fit — truncate to remaining budget
+        const remaining = POST_COMPACT_TOTAL_BUDGET_CHARS - totalChars;
+        if (remaining < 200) break; // not enough room, skip
+        content = content.slice(0, remaining) + '\n[... truncated ...]';
+      }
+
+      restored.push(`### ${relPath}\n\`\`\`\n${content}\n\`\`\``);
+      totalChars += content.length;
+      filesRestored++;
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  if (restored.length === 0) return null;
+
+  return `[Restored Files — recently touched files re-injected after context compaction]\n\n${restored.join('\n\n')}`;
+}
+
 // ─── Compact session ────────────────────────────────────────
 
 export interface CompactionResult {
@@ -483,6 +587,29 @@ export async function compactSession(
     }
   });
 
+  // ── Post-compact file restoration ──────────────────────────
+  // Re-inject recently touched files so the agent remembers what it was editing.
+  // Scan ALL messages (including compacted ones) for file tool calls.
+  const workspace = config.agent?.workspace || '';
+  let restoredFileCount = 0;
+  if (workspace) {
+    const touchedPaths = await extractTouchedFilePaths(sessionId, db);
+    if (touchedPaths.length > 0) {
+      const restorationMsg = buildFileRestorationMessage(touchedPaths, workspace);
+      if (restorationMsg) {
+        await messageRepo.create({
+          sessionId,
+          tenantId,
+          role: 'system',
+          content: restorationMsg,
+          metadata: JSON.stringify({ type: 'file-restoration', fileCount: touchedPaths.length }),
+        });
+        restoredFileCount = Math.min(touchedPaths.length, POST_COMPACT_MAX_FILES);
+        log.info({ sessionId, files: touchedPaths.slice(0, POST_COMPACT_MAX_FILES) }, `Post-compact: restored ${restoredFileCount} recently touched files`);
+      }
+    }
+  }
+
   const newMessages = await messageRepo.listBySession(sessionId);
   const newTokens = estimateMessageTokens(newMessages);
   const tokensSaved = oldTokens - newTokens;
@@ -496,8 +623,9 @@ export async function compactSession(
       tokensBefore: oldTokens,
       tokensAfter: newTokens,
       tokensSaved,
+      restoredFiles: restoredFileCount,
     },
-    `Compaction complete: ${olderMessages.length} messages summarized via ${method}, saved ~${tokensSaved} tokens`,
+    `Compaction complete: ${olderMessages.length} messages summarized via ${method}, saved ~${tokensSaved} tokens, restored ${restoredFileCount} files`,
   );
 
   return {
