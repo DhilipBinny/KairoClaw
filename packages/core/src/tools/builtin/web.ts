@@ -187,6 +187,7 @@ export const webTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
   {
     definition: {
@@ -239,5 +240,6 @@ export const webTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
 ];

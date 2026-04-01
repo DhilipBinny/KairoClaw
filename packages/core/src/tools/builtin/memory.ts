@@ -58,6 +58,7 @@ export const memoryTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
   {
     definition: {
@@ -88,6 +89,7 @@ export const memoryTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
   {
     definition: {
@@ -122,5 +124,6 @@ export const memoryTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
 ];

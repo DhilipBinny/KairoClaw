@@ -62,6 +62,8 @@ export interface AgentContext {
     args: Record<string, unknown>,
     ctx: { session: SessionRow },
   ) => Promise<unknown>;
+  /** Check if a tool is safe to run concurrently with other tools. */
+  isToolConcurrencySafe?: (name: string) => boolean;
   /** Model ID override (defaults to config.model.primary). */
   model?: string;
   /** Sub-agent nesting depth (0 = top-level). */
@@ -340,56 +342,57 @@ export async function runAgent(
     };
     messages.push(assistantMsg);
 
-    // ── Execute each tool call ────────────────────────────
+    // ── Execute tool calls (parallel for safe tools, sequential for others) ──
     // Tool result budgets from constants.ts
     let totalToolResultSize = 0;
 
+    // Pre-parse all tool calls and run pre-execution checks
+    interface ParsedToolCall {
+      tc: ToolCall;
+      toolName: string;
+      toolArgs: Record<string, unknown>;
+      skipped?: string; // reason if skipped (loop detection)
+    }
+    const parsed: ParsedToolCall[] = [];
     for (const tc of response.toolCalls) {
       const toolName = tc.function?.name || 'unknown';
       let toolArgs: Record<string, unknown>;
       try {
-        toolArgs = JSON.parse(tc.function?.arguments || '{}') as Record<
-          string,
-          unknown
-        >;
+        toolArgs = JSON.parse(tc.function?.arguments || '{}') as Record<string, unknown>;
       } catch {
         reqLog.warn({ tool: toolName }, 'Invalid tool arguments JSON');
         toolArgs = {};
       }
-
       if (typeof toolArgs !== 'object' || toolArgs === null) {
         toolArgs = {};
       }
 
-      // Compact tool log: name + key args on one line
+      // Compact tool log
       const argSummary = Object.entries(toolArgs)
-        .map(([k, v]) => {
-          const val = typeof v === 'string' ? v : JSON.stringify(v);
-          return `${k}=${val}`;
-        })
+        .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
         .join(', ');
       reqLog.info({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool called');
 
-      // Tool loop detection: skip if same tool+args called too many times
+      // Tool loop detection
       const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
       const callCount = (toolCallCounts.get(toolHash) ?? 0) + 1;
       toolCallCounts.set(toolHash, callCount);
       if (callCount > TOOL_LOOP_THRESHOLD) {
         reqLog.warn({ tool: toolName, callCount, threshold: TOOL_LOOP_THRESHOLD }, 'Tool loop detected — skipping execution');
-        messages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: `[Tool loop detected: "${toolName}" called ${callCount} times with similar arguments. Try a different approach or tool.]`,
-        });
-        continue;
+        parsed.push({ tc, toolName, toolArgs, skipped: `[Tool loop detected: "${toolName}" called ${callCount} times with similar arguments. Try a different approach or tool.]` });
+      } else {
+        parsed.push({ tc, toolName, toolArgs });
+      }
+    }
+
+    // Execute a single tool call and return the result message
+    const executeSingleTool = async (p: ParsedToolCall): Promise<{ toolCallId: string; content: string }> => {
+      if (p.skipped) {
+        return { toolCallId: p.tc.id, content: p.skipped };
       }
 
       if (onToolStart) {
-        try {
-          onToolStart(toolName, toolArgs);
-        } catch {
-          // ignore callback errors
-        }
+        try { onToolStart(p.toolName, p.toolArgs); } catch { /* ignore */ }
       }
 
       const toolStartTime = Date.now();
@@ -398,14 +401,14 @@ export async function runAgent(
 
       try {
         if (context.executeTool) {
-          result = await context.executeTool(toolName, toolArgs, { session, subagentRegistry, user: context.user, scopeKey: context.scopeKey } as any);
+          result = await context.executeTool(p.toolName, p.toolArgs, { session, subagentRegistry, user: context.user, scopeKey: context.scopeKey } as any);
         } else {
           result = { error: 'No tool executor configured' };
           toolStatus = 'error';
         }
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        reqLog.error({ tool: toolName, err: errMsg, category: 'tool' }, 'Tool execution failed');
+        reqLog.error({ tool: p.toolName, err: errMsg, category: 'tool' }, 'Tool execution failed');
         result = { error: `Tool execution failed: ${errMsg}` };
         toolStatus = 'error';
       }
@@ -416,18 +419,18 @@ export async function runAgent(
       if (toolCallRepo) {
         try {
           await toolCallRepo.record({
-            id: tc.id || crypto.randomUUID(),
+            id: p.tc.id || crypto.randomUUID(),
             sessionId: session.id,
             tenantId,
             userId,
-            toolName,
-            arguments: toolArgs,
+            toolName: p.toolName,
+            arguments: p.toolArgs,
             result,
             status: toolStatus,
             durationMs,
           });
         } catch (e: unknown) {
-          reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: toolName }, 'Failed to record tool call (non-critical)');
+          reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: p.toolName }, 'Failed to record tool call (non-critical)');
         }
       }
 
@@ -439,7 +442,6 @@ export async function runAgent(
           for (const item of mediaArr) {
             if (!item || typeof item !== 'object') continue;
             const m = item as Record<string, unknown>;
-            // Validate all required fields + file existence
             if (
               typeof m.filePath === 'string' &&
               typeof m.fileName === 'string' &&
@@ -454,16 +456,13 @@ export async function runAgent(
               }
             }
           }
-          // Strip _media from the result before stringifying for LLM context
-          // (avoids leaking absolute file paths into the conversation)
           delete resultObj._media;
         }
       }
 
-      const resultStr =
-        typeof result === 'string' ? result : JSON.stringify(result);
+      const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
       reqLog.info({
-        tool: toolName,
+        tool: p.toolName,
         resultPreview: resultStr.slice(0, 200),
         resultLen: resultStr.length,
         durationMs,
@@ -471,32 +470,54 @@ export async function runAgent(
       }, 'Tool completed');
 
       if (onToolEnd) {
-        try {
-          onToolEnd(toolName, resultStr.slice(0, 500));
-        } catch {
-          // ignore callback errors
-        }
+        try { onToolEnd(p.toolName, resultStr.slice(0, 500)); } catch { /* ignore */ }
       }
 
       // Cap tool results to prevent context overflow
-      const MAX_TOOL_RESULT = MAX_TOOL_RESULT_CHARS;
       let cappedResult = resultStr;
-      if (cappedResult.length > MAX_TOOL_RESULT) {
-        cappedResult = cappedResult.slice(0, MAX_TOOL_RESULT) +
-          `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT} chars. Ask the user to narrow the query if more detail is needed.]`;
+      if (cappedResult.length > MAX_TOOL_RESULT_CHARS) {
+        cappedResult = cappedResult.slice(0, MAX_TOOL_RESULT_CHARS) +
+          `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT_CHARS} chars. Ask the user to narrow the query if more detail is needed.]`;
       }
 
-      // Track total result size this round — check BEFORE accumulating
-      if (totalToolResultSize + cappedResult.length > MAX_TOTAL_TOOL_RESULTS) {
-        cappedResult = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
-      }
-      totalToolResultSize += cappedResult.length;
+      return { toolCallId: p.tc.id, content: cappedResult };
+    };
 
-      messages.push({
-        role: 'tool',
-        tool_call_id: tc.id,
-        content: cappedResult,
-      });
+    // Split into concurrent-safe and sequential tools, preserving order.
+    // Strategy: batch consecutive concurrent-safe tools, execute sequentially otherwise.
+    const isSafe = (name: string) => context.isToolConcurrencySafe?.(name) ?? false;
+    let i = 0;
+    while (i < parsed.length) {
+      if (!parsed[i].skipped && isSafe(parsed[i].toolName)) {
+        // Collect consecutive concurrent-safe tools into a batch
+        const batch: ParsedToolCall[] = [];
+        while (i < parsed.length && (parsed[i].skipped || isSafe(parsed[i].toolName))) {
+          batch.push(parsed[i]);
+          i++;
+        }
+        if (batch.length > 1) {
+          reqLog.info({ tools: batch.map(b => b.toolName), count: batch.length, category: 'tool' }, 'Executing tools in parallel');
+        }
+        // Execute batch concurrently
+        const results = await Promise.all(batch.map(executeSingleTool));
+        for (const r of results) {
+          // Apply total budget check
+          if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
+            r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
+          }
+          totalToolResultSize += r.content.length;
+          messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+        }
+      } else {
+        // Execute sequentially
+        const r = await executeSingleTool(parsed[i]);
+        if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
+          r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
+        }
+        totalToolResultSize += r.content.length;
+        messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+        i++;
+      }
     }
 
     // ── Wait for pending sub-agents and inject results ──────
