@@ -314,5 +314,6 @@ export const pdfTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
 ];

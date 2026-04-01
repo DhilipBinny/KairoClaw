@@ -154,6 +154,7 @@ export const fileTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
   {
     definition: {
@@ -270,5 +271,6 @@ export const fileTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'read',
+    concurrencySafe: true,
   },
 ];
