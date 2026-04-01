@@ -1,10 +1,68 @@
 import crypto from 'node:crypto';
-import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel } from '@agw/types';
+import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel, JSONSchemaObject, JSONSchemaProperty } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { ToolRegistration } from './types.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { checkToolPermission } from './permissions.js';
 import type { AuditService } from '../security/audit.js';
+
+// ─── Lightweight argument validation ────────────────────────
+
+/**
+ * Validate tool arguments against the tool's JSON Schema.
+ * Returns an array of human-readable error strings (empty = valid).
+ *
+ * This is intentionally lightweight — checks required fields and basic
+ * types without a full JSON Schema library. The goal is to give the LLM
+ * a clear error message so it can self-correct, not strict spec compliance.
+ */
+function validateArgs(
+  args: Record<string, unknown>,
+  schema: JSONSchemaObject,
+): string[] {
+  const errors: string[] = [];
+
+  // Check required fields
+  if (schema.required) {
+    for (const field of schema.required) {
+      if (args[field] === undefined || args[field] === null) {
+        const prop = schema.properties[field];
+        const expected = prop?.type || 'value';
+        errors.push(`Missing required argument '${field}' (expected ${expected})`);
+      }
+    }
+  }
+
+  // Check types of provided fields
+  for (const [key, value] of Object.entries(args)) {
+    const prop = schema.properties[key] as JSONSchemaProperty | undefined;
+    if (!prop) continue; // allow extra fields — LLM sometimes sends unexpected args
+
+    if (value === undefined || value === null) continue; // already checked in required
+
+    const expectedType = prop.type;
+    const actualType = Array.isArray(value) ? 'array' : typeof value;
+
+    if (expectedType === 'string' && actualType !== 'string') {
+      errors.push(`Argument '${key}': expected string, got ${actualType}`);
+    } else if (expectedType === 'number' && actualType !== 'number') {
+      errors.push(`Argument '${key}': expected number, got ${actualType}`);
+    } else if (expectedType === 'boolean' && actualType !== 'boolean') {
+      errors.push(`Argument '${key}': expected boolean, got ${actualType}`);
+    } else if (expectedType === 'array' && actualType !== 'array') {
+      errors.push(`Argument '${key}': expected array, got ${actualType}`);
+    } else if (expectedType === 'object' && (actualType !== 'object' || Array.isArray(value))) {
+      errors.push(`Argument '${key}': expected object, got ${actualType}`);
+    }
+
+    // Check enum values
+    if (prop.enum && !prop.enum.includes(value as string)) {
+      errors.push(`Argument '${key}': must be one of [${prop.enum.join(', ')}], got '${value}'`);
+    }
+  }
+
+  return errors;
+}
 
 /**
  * Central tool registry.
@@ -105,6 +163,12 @@ export class ToolRegistry {
         } catch { /* audit should not break execution */ }
         return { error: `Permission denied: tool "${name}" is not allowed for role "${userRole}"` };
       }
+    }
+
+    // Argument validation — catch type errors before execution
+    const validationErrors = validateArgs(args, registration.definition.parameters);
+    if (validationErrors.length > 0) {
+      return { error: `Invalid arguments for tool "${name}": ${validationErrors.join('; ')}` };
     }
 
     // Confirmation check — must happen BEFORE execution
