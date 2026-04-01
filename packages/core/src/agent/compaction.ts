@@ -244,6 +244,55 @@ function buildCompactionSummary(messages: MessageRow[]): string {
   return lines.join('\n');
 }
 
+// ─── API-round safe boundary ────────────────────────────────
+
+/**
+ * Find a safe cut index that doesn't split tool_use/tool_result pairs.
+ *
+ * Given a desired cut index, adjusts it backward to ensure:
+ * - No orphaned tool_use without its tool_result(s)
+ * - No orphaned tool_result without its tool_use
+ *
+ * An API round = [assistant (with tool_use)] + [tool_result(s)].
+ * The cut must fall at a boundary between complete rounds.
+ */
+function findSafeCompactionBoundary(messages: MessageRow[], desiredCutIndex: number): number {
+  let cutIndex = desiredCutIndex;
+
+  // Don't cut past the end
+  if (cutIndex >= messages.length) return messages.length;
+  if (cutIndex <= 0) return 0;
+
+  // Walk backward from the cut point to find a safe boundary.
+  // A safe boundary is where the message BEFORE the cut is NOT:
+  // - an assistant message with tool_calls (would orphan the tool_use)
+  // - a tool message (would orphan the tool_result from its tool_use)
+  while (cutIndex > 0) {
+    const msgAtCut = messages[cutIndex];
+    const msgBeforeCut = messages[cutIndex - 1];
+
+    // If the message at the cut point is a tool result, we'd be splitting
+    // it from its assistant tool_use. Move the cut earlier.
+    if (msgAtCut.role === 'tool') {
+      cutIndex--;
+      continue;
+    }
+
+    // If the message before the cut is an assistant with tool_calls,
+    // the tool results are on the "keep" side but the tool_use is on the
+    // "compact" side — orphaned. Move the cut earlier to include both.
+    if (msgBeforeCut.role === 'assistant' && msgBeforeCut.tool_calls) {
+      cutIndex--;
+      continue;
+    }
+
+    // Safe boundary found
+    break;
+  }
+
+  return cutIndex;
+}
+
 // ─── Tool result eviction ────────────────────────────────────
 
 /**
@@ -301,8 +350,10 @@ async function softCompact(
     return { compacted: false, reason: 'Not enough messages for soft compaction' };
   }
 
-  const keepCount = Math.min(keepRecentMessages, messages.length);
-  const olderMessages = messages.slice(0, messages.length - keepCount);
+  // Find a safe cut point that doesn't split tool_use/tool_result pairs
+  const rawCutIndex = messages.length - Math.min(keepRecentMessages, messages.length);
+  const safeCutIndex = findSafeCompactionBoundary(messages, rawCutIndex);
+  const olderMessages = messages.slice(0, safeCutIndex);
 
   const tokensBefore = estimateMessageTokens(messages);
   let evictedCount = 0;
@@ -368,9 +419,11 @@ async function compactSession(
     return { compacted: false, reason: 'Not enough messages to compact' };
   }
 
-  const keepCount = Math.min(keepRecentMessages, messages.length);
-  const olderMessages = messages.slice(0, messages.length - keepCount);
-  const recentMessages = messages.slice(messages.length - keepCount);
+  // Find a safe cut point that doesn't split tool_use/tool_result pairs
+  const rawCutIndex = messages.length - Math.min(keepRecentMessages, messages.length);
+  const safeCutIndex = findSafeCompactionBoundary(messages, rawCutIndex);
+  const olderMessages = messages.slice(0, safeCutIndex);
+  const recentMessages = messages.slice(safeCutIndex);
 
   const oldTokens = estimateMessageTokens(messages);
 
