@@ -142,7 +142,7 @@ export async function runAgent(
 
   // ── Build system prompt ─────────────────────────────────
   const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey);
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel);
 
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
