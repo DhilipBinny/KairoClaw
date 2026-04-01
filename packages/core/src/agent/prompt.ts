@@ -96,6 +96,7 @@ If you see a [Context Summary] system message, your conversation history was com
 - Focus on items under "## Active Tasks" — these are your current objectives
 - Treat "## Resolved Topics" as historical record only — do NOT revisit, re-investigate, or reference these unless the user explicitly asks
 - Use "## Key Facts" as reference data
+- Use "## Current Work" to understand what was happening right before compaction — resume from here
 - If unsure whether something is still relevant, ask the user or use tools to verify — do NOT assume from the summary`);
 
   // Silent replies (stable rule)
