@@ -330,9 +330,6 @@ function evictToolResults(messages: MessageRow[]): MessageRow[] {
 
 // ─── Post-compact file restoration ──────────────────────────
 
-/** File tool names that indicate a file was read or written. */
-const FILE_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file']);
-
 /**
  * Extract file paths from the tool_calls table for a session.
  * Returns paths in reverse chronological order (most recent first), deduplicated.
