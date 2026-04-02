@@ -34,11 +34,13 @@ import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
  * @param config   Gateway configuration (provides agent name, workspace, model).
  * @param tools    Tool definitions to list in the prompt (optional).
  * @param scopeKey Scope key for per-user memory isolation (optional).
+ * @param channel  Channel this message came from (telegram, whatsapp, web, api).
  */
 export function buildSystemPrompt(
   config: GatewayConfig,
   tools: ToolDefinition[] = [],
   scopeKey?: string | null,
+  channel?: string | null,
 ): StructuredSystemPrompt {
   const workspace = config.agent.workspace;
 
@@ -62,10 +64,74 @@ export function buildSystemPrompt(
       '\nCall tools by returning tool_use blocks. Wait for results before proceeding.',
     );
 
+    // Tool usage guidance — prefer dedicated tools, enable parallel calls
+    const toolNames = new Set(tools.map(t => t.name));
+    const toolHints: string[] = [];
+    if (toolNames.has('read_file') && toolNames.has('exec')) {
+      toolHints.push('- Use **read_file** to read files instead of exec with cat/head/tail');
+    }
+    if (toolNames.has('write_file') && toolNames.has('exec')) {
+      toolHints.push('- Use **write_file** to create files instead of exec with echo/cat redirection');
+    }
+    if (toolNames.has('edit_file') && toolNames.has('exec')) {
+      toolHints.push('- Use **edit_file** to modify files instead of exec with sed/awk');
+    }
+    if (toolNames.has('list_directory') && toolNames.has('exec')) {
+      toolHints.push('- Use **list_directory** to list files instead of exec with ls/find');
+    }
+    if (toolNames.has('web_fetch') && toolNames.has('exec')) {
+      toolHints.push('- Use **web_fetch** to fetch URLs instead of exec with curl/wget');
+    }
+    if (toolHints.length > 0) {
+      toolHints.unshift('### Tool Preferences\nUse dedicated tools instead of exec when possible:');
+      cached.push(toolHints.join('\n'));
+    }
+
+    // Parallel tool execution guidance
+    cached.push(`### Parallel Tool Calls
+You can call multiple tools in a single response. When tools are independent (e.g. reading several files), call them ALL at once — they execute in parallel.
+- read_file, list_directory, web_fetch, web_search, memory_search, read_pdf — safe to call in parallel
+- write_file, edit_file, exec, send_message — must be called one at a time
+Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate turns.`);
   }
 
   // Safety — product-level guardrails from constants.ts (not user-editable)
   cached.push(`## Safety\n${SAFETY_RULES.map(r => `- ${r}`).join('\n')}`);
+
+  // Action safety — reversibility and blast radius
+  cached.push(`## Actions & Destructive Operations
+- Before deleting files, overwriting data, or running destructive commands — confirm with the user first
+- Prefer reversible actions: create a backup before overwriting, use version control when available
+- If a tool call fails, diagnose why before retrying — do not repeat the same failing call
+- When using exec: avoid rm -rf, DROP TABLE, or other irreversible operations unless the user explicitly requests them`);
+
+  // Output efficiency
+  cached.push(`## Response Style
+- Be concise and direct — lead with the answer, not the reasoning
+- If you can say it in one sentence, do not use three
+- Skip filler words and preamble ("Sure!", "Of course!", "Let me...")
+- When using tools, just use them — do not narrate what you are about to do
+- After completing a task, state the result briefly — do not recap every step`);
+
+  // Channel-aware style guidance
+  const channelStyle = channel === 'telegram' || channel === 'whatsapp'
+    ? `## Channel: ${channel}
+You are chatting on ${channel}. Keep responses SHORT:
+- Max 2-3 paragraphs unless the user asks for detail
+- Use bullet points for lists, not long paragraphs
+- Split long answers across multiple messages if needed
+- Avoid markdown tables (they render poorly on mobile)
+- Emojis are OK here — match the user's tone`
+    : channel === 'web'
+    ? `## Channel: Web Chat
+You are in the web chat interface. Full markdown is supported:
+- Use headers, tables, code blocks freely
+- Longer detailed responses are fine when the topic requires it
+- Structure complex answers with sections`
+    : null;
+  if (channelStyle) {
+    cached.push(channelStyle);
+  }
 
   // Workspace — do NOT expose absolute server path or other users' scopes
   const workspaceSection = scopeKey
