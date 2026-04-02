@@ -1,6 +1,7 @@
 import type { GatewayConfig, ProviderInterface, ProviderResponse, ChatArgs } from '@agw/types';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
+import { classifyError, logClassifiedError } from './errors.js';
 import { createModuleLogger } from '../observability/logger.js';
 import type { SecretsStore } from '../secrets/store.js';
 
@@ -215,7 +216,11 @@ export class ProviderRegistry {
   }
 
   /**
-   * Call provider with exponential backoff retry on 429 rate limits.
+   * Call provider with classified error handling and retry logic.
+   *
+   * Uses the centralized error classifier to decide: retry with backoff,
+   * retry immediately (stale connection), or throw (let callWithFailover
+   * handle failover).
    */
   private async callWithRetry(
     provider: ProviderInterface,
@@ -228,22 +233,20 @@ export class ProviderRegistry {
         return await provider.chat(chatArgs);
       } catch (e: unknown) {
         lastErr = e;
-        const err = e as Error & { status?: number };
-        const is429 =
-          err.status === 429 ||
-          err.message?.includes('429') ||
-          err.message?.includes('rate limit') ||
-          err.message?.includes('Rate limit');
-        if (is429 && attempt < maxRetries) {
-          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
-          log.warn(
-            { attempt: attempt + 1, delay: Math.round(delay) },
-            'Rate limited, retrying with backoff',
-          );
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
+        const classified = classifyError(e, attempt);
+        logClassifiedError(classified, { provider: provider.name, attempt, maxRetries });
+
+        // Only retry on retriable errors within attempt budget
+        if (classified.retriable && attempt < maxRetries) {
+          if (classified.action === 'retry_with_backoff' || classified.action === 'retry_immediately') {
+            if (classified.retryDelayMs > 0) {
+              await new Promise((r) => setTimeout(r, classified.retryDelayMs));
+            }
+            continue;
+          }
         }
-        // Non-retryable or exhausted retries
+
+        // Non-retriable or exhausted retries — throw for failover handling
         throw e;
       }
     }
