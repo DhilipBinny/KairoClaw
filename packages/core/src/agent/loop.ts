@@ -38,6 +38,7 @@ import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
 import { sniffBase64Mime } from '../media/store.js';
 import { autoSummarizeToMemory } from './auto-memory.js';
+import { classifyError, logClassifiedError } from '../providers/errors.js';
 
 const log = createModuleLogger('llm');
 
@@ -247,16 +248,14 @@ export async function runAgent(
         thinkingConfig,
       });
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // ── Classify the error and determine recovery action ──
+      const classified = classifyError(e);
+      logClassifiedError(classified, { round, requestId, sessionId: session.id });
 
-      // ── Reactive compact: multi-stage recovery for context overflow ──
-      // Matches Anthropic "prompt is too long: X tokens > Y maximum" and
-      // OpenAI "maximum context length" errors, plus generic overflow patterns.
-      const isOverflow = /prompt is too long|maximum context length|context.length|context.window|too.many.tokens|exceeds.*max|max.*token/i.test(msg);
-
-      if (isOverflow && !ephemeral && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
+      // ── prompt_too_long → reactive compact recovery ──
+      if (classified.type === 'prompt_too_long' && !ephemeral && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
         reactiveCompactFailures++;
-        reqLog.warn({ err: msg, round, attempt: reactiveCompactFailures }, 'Context overflow — starting reactive compact recovery');
+        reqLog.warn({ round, attempt: reactiveCompactFailures, errorType: classified.type }, 'Context overflow — starting reactive compact recovery');
 
         // Stage 1: Strip images from messages (cheapest — no LLM call)
         let strippedImages = false;
@@ -271,16 +270,13 @@ export async function runAgent(
             }
           }
         }
-        if (strippedImages) {
-          reqLog.info('Stage 1: Stripped images from messages');
-        }
+        if (strippedImages) reqLog.info('Stage 1: Stripped images from messages');
 
         // Stage 2: Force hard compaction (LLM summarization)
         if (messageRepo) {
           try {
             reqLog.info('Stage 2: Forcing hard compaction');
             await compactSession(session.id, tenantId, model, db, config, context.callLLM);
-            // Reload messages after compaction
             const freshRows = await messageRepo.listBySession(session.id);
             messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
           } catch (compactErr: unknown) {
@@ -295,30 +291,37 @@ export async function runAgent(
             model, systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
           });
           reqLog.info({ round, attempt: reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
-          reactiveCompactFailures = 0; // reset on success
+          reactiveCompactFailures = 0;
         } catch (retryErr: unknown) {
-          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
-          // If still overflowing and we haven't hit the circuit breaker, loop will retry next round
-          const stillOverflow = /prompt is too long|maximum context length|context.length|too.many.tokens|exceeds.*max|max.*token/i.test(retryMsg);
-          if (stillOverflow && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
-            reqLog.warn({ err: retryMsg, attempt: reactiveCompactFailures }, 'Still overflowing after compact — will retry');
-            continue; // go to next round, which will trigger another compact attempt
+          const retryClassified = classifyError(retryErr);
+          if (retryClassified.type === 'prompt_too_long' && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
+            reqLog.warn({ attempt: reactiveCompactFailures }, 'Still overflowing after compact — will retry');
+            continue;
           }
-          reqLog.error({ err: retryMsg, attempt: reactiveCompactFailures }, 'LLM call failed after reactive compact — giving up');
+          reqLog.error({ attempt: reactiveCompactFailures, errorType: retryClassified.type }, 'LLM call failed after reactive compact — giving up');
           if (userMsgResult?.id) {
             try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
           }
-          return { text: 'Your conversation is too long to process even after compaction. Please start a new session with /new.', error: true };
+          return { text: retryClassified.userMessage || 'Your conversation is too long even after compaction. Please start a new session with /new.', error: true };
         }
-      } else {
-        reqLog.error({ err: msg, latencyMs: Date.now() - llmStart }, 'LLM call failed');
+
+      // ── auth_error → clear message, don't retry ──
+      } else if (classified.type === 'auth_error') {
         if (userMsgResult?.id) {
           try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
         }
-        if (isOverflow && reactiveCompactFailures >= MAX_REACTIVE_COMPACT_FAILURES) {
-          return { text: 'Your conversation is too long to process even after multiple compaction attempts. Please start a new session with /new.', error: true };
+        return { text: classified.userMessage || 'Authentication failed. Please check your API key configuration.', error: true };
+
+      // ── All other errors → generic failure ──
+      } else {
+        reqLog.error({ latencyMs: Date.now() - llmStart, errorType: classified.type, action: classified.action }, 'LLM call failed');
+        if (userMsgResult?.id) {
+          try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
         }
-        return { text: 'Something went wrong processing your request. Please try again.', error: true };
+        if (classified.type === 'prompt_too_long') {
+          return { text: 'Your conversation is too long even after multiple compaction attempts. Please start a new session with /new.', error: true };
+        }
+        return { text: classified.userMessage || 'Something went wrong processing your request. Please try again.', error: true };
       }
     }
 
