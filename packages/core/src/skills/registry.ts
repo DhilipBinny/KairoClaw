@@ -21,7 +21,7 @@ const log = createModuleLogger('plugins'); // skills use 'plugins' log category
  * Lightweight — no YAML library needed.
  */
 function parseFrontmatter(content: string): { frontmatter: Record<string, unknown>; body: string } | null {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
   if (!match) return null;
 
   const [, fmBlock, body] = match;
@@ -116,7 +116,7 @@ export class SkillRegistry {
         const content = fs.readFileSync(skillPath, 'utf8');
         const parsed = parseFrontmatter(content);
         if (!parsed) {
-          log.warn({ filePath: relativePath }, 'Skill file has no frontmatter, skipping');
+          log.warn({ filePath: relativePath }, 'Skill file has no YAML frontmatter (---), skipping. See https://github.com/anthropics/skills for the correct format.');
           continue;
         }
 
