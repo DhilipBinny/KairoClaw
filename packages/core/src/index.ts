@@ -51,6 +51,7 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
+import { registerSkillRoutes } from './routes/skills.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
 import { registerDatabaseRoutes } from './routes/database.js';
@@ -530,6 +531,7 @@ async function main(): Promise<void> {
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
   await server.register(chatRoutes, { runner: createRunner });
   await server.register(registerWorkspaceRoutes);
+  await server.register(registerSkillRoutes, { skillRegistry });
   await server.register(registerSystemRoutes, { providerRegistry, secretsStore });
   await server.register(registerDatabaseRoutes);
   await server.register(registerMediaRoutes, { mediaStore });
