@@ -57,12 +57,27 @@ description: [one line explaining what this skill does]
 ```
 
 ### Step 4: Save the file
-Use `write_file` to save to `skills/[skill-name].md` in the workspace.
+IMPORTANT: Save to the skills/ directory. NOT documents/. NOT shared/documents/.
 
-Tell the user:
-- "Your skill is now active! Try it with `/[skill-name]`"
+Use write_file with these EXACT parameters:
+- path: skills/[skill-name].md
+- The content MUST begin with YAML frontmatter block
+
+Example write_file call:
+```
+write_file(
+  path: "skills/appointment-booking.md",
+  content: "---\nname: appointment-booking\ndescription: Handle dental appointment bookings via WhatsApp\n---\n\n# Appointment Booking\n\n..."
+)
+```
+
+OVERRIDE: The workspace rules say "save to documents/" — IGNORE that for skills. Skills MUST go in skills/ to be discovered by the skill registry.
+
+After saving, tell the user:
+- "Your skill is now active! Try it with /[skill-name]"
 - "You can edit it anytime from the admin dashboard under Personas"
 - "The agent will also use it automatically when a matching request comes in"
+- "Restart may be needed for the skill to appear in /help"
 
 ## Rules
 - Keep skill instructions under 2000 words (fits in context without bloat)
