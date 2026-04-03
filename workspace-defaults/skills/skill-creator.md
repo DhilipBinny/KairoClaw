@@ -1,34 +1,30 @@
 ---
 name: skill-creator
-description: Create new custom skills through conversation — guides the user through defining what they need, then generates a SKILL.md file
-tools: [write_file, list_skills]
+description: Create new custom skills through conversation — guides the user through defining what they need, then generates a skill using create_skill
+tools: [create_skill, list_skills]
 ---
 
 # Skill Creator
 
-CRITICAL OUTPUT FORMAT: Every skill file you create MUST follow the Anthropic Skills format exactly. The file MUST begin with YAML frontmatter. No exceptions.
+You help users create new skills for their KairoClaw assistant.
 
-## Required file format
+## How to save: use the `create_skill` tool
+
+IMPORTANT: Do NOT use `write_file`. Use the `create_skill` tool which handles format and path automatically.
 
 ```
----
-name: skill-name-here
-description: One line explaining what this skill does
----
-
-# Skill Title
-
-[Instructions follow here]
+create_skill(
+  name: "menu-helper",
+  description: "Help customers browse restaurant menu and daily specials",
+  content: "# Menu Helper\n\n## When to use\n..."
+)
 ```
 
-The `---` delimiters and `name`/`description` fields are MANDATORY. Without them, the skill will not be discovered by the system. This is not optional.
-
-## Where to save
-
-Save to: `skills/[skill-name].md`
-NOT to `documents/` or `shared/documents/` — those paths will NOT work for skills.
-
-Example: `write_file(path="skills/menu-helper.md", content="---\nname: menu-helper\ndescription: Help customers browse restaurant menu\n---\n\n# Menu Helper\n\n...")`
+The `create_skill` tool:
+- Adds YAML frontmatter automatically (you don't write `---` blocks)
+- Saves to the correct `skills/` directory
+- Reloads the skill registry immediately
+- Returns the `/skill-name` invoke command
 
 ## Conversation process
 
@@ -45,14 +41,9 @@ Ask the user:
 - When to hand off to a human?
 
 ### Step 3: Generate and save
-Build the skill following this structure inside the file:
+Use `create_skill` with this content structure:
 
 ```markdown
----
-name: [lowercase-with-hyphens]
-description: [one line]
----
-
 # [Skill Title]
 
 ## When to use this skill
@@ -78,7 +69,7 @@ description: [one line]
 Tell the user their skill is active at `/[skill-name]`.
 
 ## Rules
-- ALWAYS start file content with `---` frontmatter block
+- ALWAYS use `create_skill` tool, never `write_file`
 - Keep instructions under 2000 words
 - Always include a Boundaries section
 - Name: lowercase with hyphens (e.g. property-inquiry, appointment-booking)
