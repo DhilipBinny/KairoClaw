@@ -189,6 +189,16 @@ export const fileTools: ToolRegistration[] = [
         return { error: e instanceof Error ? e.message : String(e) };
       }
 
+      // Validate skill files: must have YAML frontmatter per Anthropic skills spec
+      const relPath = path.relative(workspace, filePath);
+      if (relPath.startsWith('skills' + path.sep) && relPath.endsWith('.md')) {
+        if (!fileContent.startsWith('---\n') && !fileContent.startsWith('---\r\n')) {
+          return {
+            error: `Skill files MUST start with YAML frontmatter. Your content is missing the "---" block. Rewrite the content starting with:\n---\nname: ${path.basename(relPath, '.md')}\ndescription: <one line description>\n---\n\n<rest of skill instructions>`,
+          };
+        }
+      }
+
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       try {
         fs.writeFileSync(filePath, fileContent);
