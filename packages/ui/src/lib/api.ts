@@ -516,6 +516,23 @@ export async function saveWorkspaceFile(name: string, content: string): Promise<
   return request(`/workspace/files/${name}`, { method: 'PUT', body: { content } });
 }
 
+// ── Admin: Skills ──────────────────────────
+export async function getSkills(): Promise<{ skills: Array<{ name: string; description: string; size: number; modified: string | null }> }> {
+  return request('/skills');
+}
+
+export async function getSkill(name: string): Promise<{ name: string; description: string; content: string }> {
+  return request(`/skills/${name}`);
+}
+
+export async function saveSkill(name: string, content: string): Promise<{ success: boolean }> {
+  return request(`/skills/${name}`, { method: 'PUT', body: { content } });
+}
+
+export async function deleteSkill(name: string): Promise<{ success: boolean }> {
+  return request(`/skills/${name}`, { method: 'DELETE' });
+}
+
 // ── Scoped Users ─────────────────────────────────
 
 export interface ScopeEntry {
