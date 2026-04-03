@@ -73,6 +73,10 @@ export interface AgentContext {
   scopeKey?: string | null;
   /** Ephemeral mode — skip all DB persistence (for sub-agents). */
   ephemeral?: boolean;
+  /** Available skills metadata for system prompt injection. */
+  skills?: Array<{ name: string; description: string }>;
+  /** Skill registry for slash command invocation. */
+  skillRegistry?: import('../skills/registry.js').SkillRegistry;
 }
 
 /** Observability callbacks fired around each round. */
@@ -120,9 +124,15 @@ export async function runAgent(
       tenantId,
       userId,
       callLLM: context.callLLM,
+      skillRegistry: context.skillRegistry,
     });
-    if (slashResult) {
+    if (slashResult && !slashResult.isSkill) {
       return { text: slashResult.text, slashResult: true };
+    }
+    if (slashResult?.isSkill) {
+      // Skill invocation: replace the user's message with skill instructions + request.
+      // The LLM will process this as a normal turn with the skill context.
+      inbound = { ...inbound, text: slashResult.text };
     }
   }
 
@@ -143,7 +153,7 @@ export async function runAgent(
 
   // ── Build system prompt ─────────────────────────────────
   const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel);
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, context.skills);
 
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];

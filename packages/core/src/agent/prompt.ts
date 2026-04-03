@@ -35,12 +35,14 @@ import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
  * @param tools    Tool definitions to list in the prompt (optional).
  * @param scopeKey Scope key for per-user memory isolation (optional).
  * @param channel  Channel this message came from (telegram, whatsapp, web, api).
+ * @param skills   Available skill metadata for auto-discovery (optional).
  */
 export function buildSystemPrompt(
   config: GatewayConfig,
   tools: ToolDefinition[] = [],
   scopeKey?: string | null,
   channel?: string | null,
+  skills?: Array<{ name: string; description: string }>,
 ): StructuredSystemPrompt {
   const workspace = config.agent.workspace;
 
@@ -93,6 +95,17 @@ You can call multiple tools in a single response. When tools are independent (e.
 - read_file, list_directory, web_fetch, web_search, memory_search, read_pdf — safe to call in parallel
 - write_file, edit_file, exec, send_message — must be called one at a time
 Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate turns.`);
+  }
+
+  // Skills — available specialized instruction packs
+  if (skills && skills.length > 0) {
+    const skillLines = skills.map(s => `- **${s.name}**: ${s.description} (invoke: /${s.name})`);
+    cached.push(`## Skills
+You have access to specialized skills for common tasks. When a user's request matches a skill, use the \`load_skill\` tool to load its full instructions before proceeding.
+Users can also invoke skills directly with \`/skill-name\`.
+
+Available skills:
+${skillLines.join('\n')}`);
   }
 
   // Safety — product-level guardrails from constants.ts (not user-editable)

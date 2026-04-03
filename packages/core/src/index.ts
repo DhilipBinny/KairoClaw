@@ -14,6 +14,8 @@ import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
 import { builtinTools } from './tools/builtin/index.js';
 import { setMemorySystem } from './tools/builtin/memory.js';
+import { setSkillRegistry } from './tools/builtin/skills.js';
+import { SkillRegistry } from './skills/registry.js';
 import { MemorySystem } from './memory/index.js';
 import { MCPBridge } from './mcp/bridge.js';
 import { registerAllPlugins, reloadPlugins } from './plugins/index.js';
@@ -172,9 +174,15 @@ async function main(): Promise<void> {
     const defaultsDir = path.join(projectRoot, 'workspace-defaults');
     if (fs.existsSync(defaultsDir)) {
       for (const file of fs.readdirSync(defaultsDir)) {
+        const srcPath = path.join(defaultsDir, file);
         const dest = path.join(workspace, file);
-        if (!fs.existsSync(dest)) {
-          fs.copyFileSync(path.join(defaultsDir, file), dest);
+        if (fs.statSync(srcPath).isDirectory()) {
+          // Recursively copy directories (e.g. skills/)
+          if (!fs.existsSync(dest)) {
+            fs.cpSync(srcPath, dest, { recursive: true });
+          }
+        } else if (!fs.existsSync(dest)) {
+          fs.copyFileSync(srcPath, dest);
         }
       }
     }
@@ -263,6 +271,11 @@ async function main(): Promise<void> {
   const memorySystem = new MemorySystem(db, config.agent.workspace);
   await memorySystem.init();
   setMemorySystem(memorySystem);
+
+  // 7d. Initialize skill system
+  const skillRegistry = new SkillRegistry(config.agent.workspace);
+  skillRegistry.loadSkills();
+  setSkillRegistry(skillRegistry);
 
   // 8. Create Fastify server (needed before MCP bridge for server.log)
   const server = await createServer({ db, config });
@@ -429,6 +442,8 @@ async function main(): Promise<void> {
         return toolRegistry.execute(name, args, enrichedCtx as any);
       },
       isToolConcurrencySafe: (name) => toolRegistry.isConcurrencySafe(name),
+      skills: skillRegistry.list().map(s => ({ name: s.name, description: s.description })),
+      skillRegistry,
     });
   };
 

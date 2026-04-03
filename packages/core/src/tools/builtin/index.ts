@@ -8,6 +8,7 @@ import { pluginTools } from './plugins.js';
 import { pdfTools } from './pdf.js';
 import { subagentTools } from './subagent.js';
 import { browseTools } from './browse.js';
+import { skillTools } from './skills.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -21,6 +22,7 @@ export const builtinTools: ToolRegistration[] = [
   ...pdfTools,
   ...subagentTools,
   ...browseTools,
+  ...skillTools,
 ];
 
 export { fileTools } from './files.js';
@@ -33,3 +35,4 @@ export { pluginTools } from './plugins.js';
 export { pdfTools } from './pdf.js';
 export { subagentTools } from './subagent.js';
 export { safePath } from './files.js';
+export { skillTools, setSkillRegistry } from './skills.js';
