@@ -14,6 +14,7 @@ import type { Page, Locator } from 'playwright-core';
 import type { ToolRegistration } from '../types.js';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
+import { hasRemoteBrowser, sendBrowserCommand } from '../../browser/bridge.js';
 import { getWorkspace } from './utils.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
@@ -319,13 +320,52 @@ ACTIONS:
       if (!action) return { error: 'action is required' };
 
       const ctx = context as Record<string, unknown>;
-      const browserManager = ctx.browserManager as BrowserSessionManager | undefined;
-      if (!browserManager) {
-        return { error: 'Browser not available. Chromium may not be installed.' };
-      }
-
       const userId = (ctx.user as { id?: string } | undefined)?.id || 'anonymous';
       const workspace = getWorkspace(ctx);
+
+      // ── Remote browser mode: route through Chrome extension bridge ──
+      // Session management actions always use local (they're about local files)
+      const localOnlyActions = new Set(['saveSession', 'loadSession', 'listSessions', 'deleteSession']);
+      if (!localOnlyActions.has(action) && hasRemoteBrowser(userId)) {
+        try {
+          const params: Record<string, unknown> = { ...args };
+          delete params.action;
+          const result = await sendBrowserCommand(userId, action, params) as Record<string, unknown>;
+
+          // Screenshot: save base64 data to file and return media URL
+          if (action === 'screenshot' && result.screenshot && typeof result.screenshot === 'string' && result.screenshot.startsWith('data:')) {
+            const match = (result.screenshot as string).match(/^data:image\/(\w+);base64,(.+)$/);
+            if (match) {
+              const ext = match[1] === 'png' ? 'png' : 'jpg';
+              const buffer = Buffer.from(match[2], 'base64');
+              const mediaDir = path.join(workspace, 'scopes', userId, 'media');
+              const filename = `screenshot-${Date.now()}.${ext}`;
+              const filePath = path.join(mediaDir, filename);
+              try {
+                fs.mkdirSync(mediaDir, { recursive: true });
+                fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+                return {
+                  success: true,
+                  url: result.url || '',
+                  title: result.title || '',
+                  note: 'Screenshot captured and delivered to the user automatically. Just confirm it was taken — do not share file paths or URLs.',
+                  _media: [{ type: 'image' as const, filePath, fileName: filename, mimeType: `image/${ext}` }],
+                };
+              } catch { /* fall through to raw result */ }
+            }
+          }
+
+          return result;
+        } catch (e: unknown) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+
+      // ── Local browser mode (Playwright) ──
+      const browserManager = ctx.browserManager as BrowserSessionManager | undefined;
+      if (!browserManager) {
+        return { error: 'Browser not available. Install the Chrome extension for remote browsing, or ensure Chromium is installed for local browsing.' };
+      }
 
       // Actions that don't need an active page
       if (action === 'close') {
