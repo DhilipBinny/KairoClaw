@@ -34,7 +34,11 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PACKAGES_TOKEN }}" >> .npmrc
+          pnpm install --frozen-lockfile
+          sed -i '/_authToken/d' .npmrc
       - run: pnpm lint
 
   typecheck-and-build:
@@ -60,7 +64,11 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PACKAGES_TOKEN }}" >> .npmrc
+          pnpm install --frozen-lockfile
+          sed -i '/_authToken/d' .npmrc
 
       - name: Build types
         run: pnpm --filter @agw/types build
@@ -97,7 +105,11 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PACKAGES_TOKEN }}" >> .npmrc
+          pnpm install --frozen-lockfile
+          sed -i '/_authToken/d' .npmrc
 
       - name: Build types (needed for imports)
         run: pnpm --filter @agw/types build
@@ -116,7 +128,11 @@ jobs:
         with:
           version: 10
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GH_PACKAGES_TOKEN }}" >> .npmrc
+          pnpm install --frozen-lockfile
+          sed -i '/_authToken/d' .npmrc
 
       - name: Dependency audit
         run: pnpm audit --prod || true
