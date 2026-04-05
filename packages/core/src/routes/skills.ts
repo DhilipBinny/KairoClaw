@@ -1,5 +1,7 @@
 /**
  * Skill management routes — list, view, edit, delete skills.
+ * Covers both shared skills (workspace/skills/) and
+ * user-scoped skills (workspace/scopes/{scopeKey}/skills/).
  */
 
 import fs from 'node:fs';
@@ -25,7 +27,9 @@ const MAX_SKILL_CONTENT_CHARS = 10_000;
 export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async (app, opts) => {
   const { skillRegistry } = opts;
 
-  // GET /api/v1/skills — list all skills
+  // ── Shared skills ────────────────────────────────────────────
+
+  // GET /api/v1/skills — list all shared skills
   app.get('/api/v1/skills', { preHandler: [requireRole('admin')] }, async () => {
     const skills = skillRegistry.list();
     const dir = skillRegistry.directory;
@@ -45,11 +49,100 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
     };
   });
 
-  // GET /api/v1/skills/:name — read a skill's full content
+  // GET /api/v1/skills/users — list all user-scoped skills grouped by scope
+  // Must be registered BEFORE /api/v1/skills/:name to avoid route conflict
+  app.get('/api/v1/skills/users', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = getConfig(request);
+    const workspace = config.agent?.workspace || '';
+    const scopesDir = path.join(workspace, 'scopes');
+
+    if (!fs.existsSync(scopesDir)) {
+      return { users: [] };
+    }
+
+    const result: Array<{ scopeKey: string; skills: Array<{ name: string; description: string; size: number; modified: string | null }> }> = [];
+
+    const scopes = fs.readdirSync(scopesDir, { withFileTypes: true })
+      .filter(e => e.isDirectory());
+
+    for (const scope of scopes) {
+      const userSkillsDir = path.join(scopesDir, scope.name, 'skills');
+      if (!fs.existsSync(userSkillsDir)) continue;
+
+      const userSkills = skillRegistry.getUserSkills(scope.name);
+      if (userSkills.size === 0) continue;
+
+      result.push({
+        scopeKey: scope.name,
+        skills: [...userSkills.values()].map(s => {
+          const filePath = path.join(userSkillsDir, `${s.meta.name}.md`);
+          let size = 0;
+          let modified: string | null = null;
+          if (fs.existsSync(filePath)) {
+            const stat = fs.statSync(filePath);
+            size = stat.size;
+            modified = stat.mtime.toISOString();
+          }
+          return { name: s.meta.name, description: s.meta.description, size, modified };
+        }),
+      });
+    }
+
+    return { users: result };
+  });
+
+  // GET /api/v1/skills/users/:scopeKey/:name — read a user skill
+  app.get('/api/v1/skills/users/:scopeKey/:name', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const { scopeKey, name } = request.params as { scopeKey: string; name: string };
+    const config = getConfig(request);
+    const workspace = config.agent?.workspace || '';
+
+    if (/[/\\]|\.\./.test(scopeKey) || /[/\\]|\.\./.test(name)) {
+      return reply.code(400).send({ error: 'Invalid scope key or skill name' });
+    }
+
+    const filePath = path.join(workspace, 'scopes', scopeKey, 'skills', `${name}.md`);
+    if (!fs.existsSync(filePath)) {
+      return reply.code(404).send({ error: `User skill "${name}" not found for scope "${scopeKey}"` });
+    }
+
+    const content = fs.readFileSync(filePath, 'utf8');
+    const userSkills = skillRegistry.getUserSkills(scopeKey);
+    const skill = userSkills.get(name);
+
+    return {
+      name,
+      scopeKey,
+      description: skill?.meta.description ?? '',
+      content,
+    };
+  });
+
+  // DELETE /api/v1/skills/users/:scopeKey/:name — admin delete a user skill
+  app.delete('/api/v1/skills/users/:scopeKey/:name', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const { scopeKey, name } = request.params as { scopeKey: string; name: string };
+    const config = getConfig(request);
+    const workspace = config.agent?.workspace || '';
+
+    if (/[/\\]|\.\./.test(scopeKey) || /[/\\]|\.\./.test(name)) {
+      return reply.code(400).send({ error: 'Invalid scope key or skill name' });
+    }
+
+    const filePath = path.join(workspace, 'scopes', scopeKey, 'skills', `${name}.md`);
+    if (!fs.existsSync(filePath)) {
+      return reply.code(404).send({ error: `User skill "${name}" not found` });
+    }
+
+    fs.unlinkSync(filePath);
+    log.info({ skill: name, scopeKey }, 'User skill deleted by admin');
+
+    return { success: true, name, scopeKey };
+  });
+
+  // GET /api/v1/skills/:name — read a shared skill's full content
   app.get('/api/v1/skills/:name', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const { name } = request.params as { name: string };
 
-    // Security: no path traversal
     if (/[/\\]|\.\./.test(name)) {
       return reply.code(400).send({ error: 'Invalid skill name' });
     }
@@ -59,7 +152,6 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
       return reply.code(404).send({ error: `Skill "${name}" not found` });
     }
 
-    // Read the raw file content (frontmatter + body)
     const filePath = path.join(skillRegistry.directory, `${name}.md`);
     let content = '';
     if (fs.existsSync(filePath)) {
@@ -69,7 +161,7 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
     return { name, description: skill.meta.description, content };
   });
 
-  // PUT /api/v1/skills/:name — update a skill's content
+  // PUT /api/v1/skills/:name — create or update a shared skill
   app.put('/api/v1/skills/:name', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const { name } = request.params as { name: string };
     const { content } = request.body as { content?: string };
@@ -94,14 +186,13 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content, 'utf8');
 
-    // Reload registry
     skillRegistry.loadSkills();
-    log.info({ skill: name, size: content.length }, 'Skill updated via admin');
+    log.info({ skill: name, size: content.length }, 'Shared skill saved via admin');
 
     return { success: true, name, size: content.length };
   });
 
-  // DELETE /api/v1/skills/:name — delete a skill
+  // DELETE /api/v1/skills/:name — delete a shared skill
   app.delete('/api/v1/skills/:name', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const { name } = request.params as { name: string };
 
@@ -116,7 +207,7 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
 
     fs.unlinkSync(filePath);
     skillRegistry.loadSkills();
-    log.info({ skill: name }, 'Skill deleted via admin');
+    log.info({ skill: name }, 'Shared skill deleted via admin');
 
     return { success: true, name };
   });
