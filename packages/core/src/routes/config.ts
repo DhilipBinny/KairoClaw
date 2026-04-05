@@ -65,7 +65,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.email.maxRecipientsPerMessage',
       'tools.email.rateLimit.perMinute', 'tools.email.rateLimit.perHour', 'tools.email.rateLimit.perDay', 'tools.email.rateLimit.perRecipientPerHour',
       'tools.transcription.enabled', 'tools.transcription.baseUrl', 'tools.transcription.model', 'tools.transcription.language',
-      'tools.browse.enabled',
+      'tools.browse.enabled', 'tools.browse.remoteAccess',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
@@ -191,6 +191,8 @@ export const registerConfigRoutes: FastifyPluginAsync<{
           hint: 'Allow the agent to browse websites, take screenshots, fill forms (uses headless Chromium or Chrome extension)',
           fields: [
             { key: 'enabled', type: 'boolean' },
+            { key: 'remoteAccess', type: 'select', label: 'Chrome Extension Access', hint: 'Who can connect the Chrome extension for remote browsing', showWhen: 'enabled',
+              options: [{ value: 'admin', label: 'Admin only' }, { value: 'all', label: 'All users' }, { value: 'false', label: 'Disabled' }] },
           ],
         },
       ],

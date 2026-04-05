@@ -200,6 +200,8 @@ export interface TranscriptionToolConfig {
 export interface BrowseToolConfig {
   /** Enable/disable the browse tool (headless Chromium). */
   enabled: boolean;
+  /** Chrome extension remote browsing access: 'admin' = admin only, 'all' = all users, false = disabled */
+  remoteAccess: 'admin' | 'all' | false;
 }
 
 /** Built-in tool configuration. */

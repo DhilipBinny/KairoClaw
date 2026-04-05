@@ -233,7 +233,11 @@ export class BrowserSessionManager {
     const filePath = path.join(dir, `${safeName}.json`);
 
     const state = await session.context.storageState();
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(state, null, 2), { mode: 0o600 });
+    } catch (e: unknown) {
+      throw new Error(`Failed to save session: ${e instanceof Error ? e.message : 'disk error'}`);
+    }
     log.info({ userId, name: safeName }, 'Browser session saved');
     return { success: true, name: safeName };
   }
@@ -251,16 +255,22 @@ export class BrowserSessionManager {
     await this.closeSession(userId);
 
     // Read and validate saved state
-    const stateJson = fs.readFileSync(filePath, 'utf8');
-    const storageState = JSON.parse(stateJson);
+    let storageState: unknown;
+    try {
+      const stateJson = fs.readFileSync(filePath, 'utf8');
+      storageState = JSON.parse(stateJson);
+    } catch {
+      throw new Error(`Failed to read session file "${name}" — may be corrupted.`);
+    }
     // Basic schema validation — Playwright expects { cookies: [], origins: [] }
     if (!storageState || typeof storageState !== 'object') {
       throw new Error(`Corrupted session file "${name}".`);
     }
-    if (storageState.cookies && !Array.isArray(storageState.cookies)) {
+    const state = storageState as Record<string, unknown>;
+    if (state.cookies && !Array.isArray(state.cookies)) {
       throw new Error(`Invalid session file "${name}" — cookies must be an array.`);
     }
-    if (storageState.origins && !Array.isArray(storageState.origins)) {
+    if (state.origins && !Array.isArray(state.origins)) {
       throw new Error(`Invalid session file "${name}" — origins must be an array.`);
     }
 
@@ -279,7 +289,7 @@ export class BrowserSessionManager {
         viewport: DEFAULT_VIEWPORT,
         userAgent: 'KairoClaw/1.0 (Browser Tool)',
         acceptDownloads: false,
-        storageState,
+        storageState: storageState as any,
       });
       context.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
       context.setDefaultTimeout(NAV_TIMEOUT_MS);

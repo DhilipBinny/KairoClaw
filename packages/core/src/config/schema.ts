@@ -100,6 +100,8 @@ const transcriptionToolSchema = z.object({
 
 const browseToolSchema = z.object({
   enabled: z.boolean().default(true),
+  /** Allow Chrome extension remote browsing. 'admin' = admin only (beta), 'all' = all users, false = disabled */
+  remoteAccess: z.enum(['admin', 'all']).or(z.literal(false)).default('admin'),
 });
 
 const toolsSchema = z.object({
@@ -347,6 +349,7 @@ export const configDefaults: GatewayConfig = {
     },
     browse: {
       enabled: true,
+      remoteAccess: 'admin',
     },
   },
   agent: {
