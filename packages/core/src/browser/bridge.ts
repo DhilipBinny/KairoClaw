@@ -17,6 +17,7 @@ interface PendingCommand {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  userId: string;
 }
 
 /** Connected browser extensions, keyed by userId */
@@ -25,6 +26,8 @@ const connections = new Map<string, WebSocket>();
 const pendingCommands = new Map<string, PendingCommand>();
 
 const COMMAND_TIMEOUT_MS = 60_000; // 60 seconds per command
+const AUTH_RATE_LIMIT = 5; // max auth attempts per minute per connection
+const AUTH_RATE_WINDOW_MS = 60_000;
 
 /**
  * Check if a user has a remote browser connected.
@@ -55,7 +58,7 @@ export async function sendBrowserCommand(
       reject(new Error(`Browser command timed out after ${COMMAND_TIMEOUT_MS / 1000}s`));
     }, COMMAND_TIMEOUT_MS);
 
-    pendingCommands.set(id, { resolve, reject, timeout });
+    pendingCommands.set(id, { resolve, reject, timeout, userId });
 
     log.debug({ userId, action, cmdId: id, category: 'browser' }, 'Extension command dispatched');
     ws.send(JSON.stringify({ type: 'command', id, action, params }));
@@ -71,6 +74,7 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
   app.get('/ws/browser-bridge', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     let userId: string | null = null;
     let authenticated = false;
+    const authAttempts: number[] = []; // timestamps of auth attempts
 
     socket.on('message', async (raw: Buffer | string) => {
       let msg: Record<string, unknown>;
@@ -83,6 +87,19 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
 
       // Auth
       if (msg.type === 'auth') {
+        // Rate limit auth attempts
+        const now = Date.now();
+        authAttempts.push(now);
+        // Remove attempts outside window
+        while (authAttempts.length > 0 && authAttempts[0] < now - AUTH_RATE_WINDOW_MS) {
+          authAttempts.shift();
+        }
+        if (authAttempts.length > AUTH_RATE_LIMIT) {
+          log.warn({ category: 'browser' }, 'Extension auth rate limited');
+          socket.send(JSON.stringify({ type: 'auth.error', message: 'Too many auth attempts. Wait a minute.' }));
+          return;
+        }
+
         const token = msg.token as string | undefined;
         if (!token) {
           socket.send(JSON.stringify({ type: 'auth.error', message: 'Token required' }));
@@ -146,6 +163,14 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
     socket.on('close', () => {
       if (userId) {
         connections.delete(userId);
+        // Reject pending commands for this user — don't let them hang until timeout
+        for (const [cmdId, pending] of pendingCommands) {
+          if (pending.userId === userId) {
+            clearTimeout(pending.timeout);
+            pendingCommands.delete(cmdId);
+            pending.reject(new Error('Browser extension disconnected while command was in progress'));
+          }
+        }
         log.info({ userId }, 'Browser extension disconnected');
       }
     });
