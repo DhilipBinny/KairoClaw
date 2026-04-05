@@ -16,6 +16,12 @@ export interface SkillRoutesOptions {
   skillRegistry: SkillRegistry;
 }
 
+/** Slash command names that cannot be used as skill names. */
+const RESERVED_NAMES = new Set(['new', 'reset', 'status', 'stop', 'compact', 'model', 'help', 'sessions']);
+
+/** Maximum skill file size in characters. */
+const MAX_SKILL_CONTENT_CHARS = 10_000;
+
 export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async (app, opts) => {
   const { skillRegistry } = opts;
 
@@ -76,6 +82,12 @@ export const registerSkillRoutes: FastifyPluginAsync<SkillRoutesOptions> = async
     }
     if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) {
       return reply.code(400).send({ error: 'Skill file must start with YAML frontmatter (---)' });
+    }
+    if (RESERVED_NAMES.has(name)) {
+      return reply.code(400).send({ error: `"${name}" is a reserved command name and cannot be used as a skill name` });
+    }
+    if (content.length > MAX_SKILL_CONTENT_CHARS) {
+      return reply.code(400).send({ error: `Skill content too large (${content.length} chars). Maximum is ${MAX_SKILL_CONTENT_CHARS} chars.` });
     }
 
     const filePath = path.join(skillRegistry.directory, `${name}.md`);

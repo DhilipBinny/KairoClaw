@@ -21,13 +21,6 @@ When asked to write or draft an email, follow these guidelines:
 - **Call to action** — what you need from them, with deadline if applicable
 - **Closing** — appropriate sign-off
 
-## UAE Business Context
-- Use "Dear [Name]" for formal, "Hi [Name]" for semi-formal
-- Include both Arabic and English greetings when appropriate
-- Reference "Inshallah" or "God willing" naturally in follow-ups if culturally appropriate
-- Be aware of UAE business hours (Sun-Thu) and holidays
-- For government contacts, use more formal language
-
 ## Rules
 - Keep emails under 200 words unless the topic requires more
 - Use bullet points for multiple items or action points
