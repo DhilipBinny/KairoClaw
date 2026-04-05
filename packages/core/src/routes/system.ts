@@ -68,7 +68,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // 1. Check Anthropic connectivity (check secrets store + config + env)
     const anthropicKey = secretsStore?.get('providers.anthropic', 'apiKey') || config.providers.anthropic?.apiKey;
-    const anthropicToken = secretsStore?.get('providers.anthropic', 'authToken') || config.providers.anthropic?.authToken;
+    const anthropicToken = secretsStore?.get('providers.anthropic', 'authToken') || (config.providers.anthropic as any)?.authToken;
     if (anthropicKey || anthropicToken) {
       try {
         const headers: Record<string, string> = {
@@ -263,7 +263,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
       const authToken =
         reqAuthToken ||
-        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || config.providers.anthropic?.authToken) : null) ||
+        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || (config.providers.anthropic as any)?.authToken) : null) ||
         reqAuthToken;
 
       if (provider === 'anthropic') {
@@ -422,8 +422,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     return {
       anthropic: {
         hasApiKey: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey),
-        hasAuthToken: hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal(config.providers?.anthropic?.authToken),
-        configured: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey) || hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal(config.providers?.anthropic?.authToken),
+        hasAuthToken: hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal((config.providers?.anthropic as any)?.authToken),
+        configured: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey) || hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal((config.providers?.anthropic as any)?.authToken),
       },
       openai: {
         hasApiKey: hasVal(secretsStore?.get('providers.openai', 'apiKey')) || hasVal(config.providers?.openai?.apiKey),
@@ -488,8 +488,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     // Update in-memory config
     const cfg = config.providers;
     if (id === 'anthropic') {
-      if (body.apiKey) { cfg.anthropic.apiKey = body.apiKey; cfg.anthropic.authToken = ''; }
-      if (body.authToken) { cfg.anthropic.authToken = body.authToken; cfg.anthropic.apiKey = ''; }
+      if (body.apiKey) { cfg.anthropic.apiKey = body.apiKey; (cfg.anthropic as any).authToken = ''; }
+      if (body.authToken) { (cfg.anthropic as any).authToken = body.authToken; cfg.anthropic.apiKey = ''; }
       if (body.baseUrl !== undefined) cfg.anthropic.baseUrl = body.baseUrl;
     } else if (id === 'openai' && body.apiKey !== undefined) {
       cfg.openai.apiKey = body.apiKey;

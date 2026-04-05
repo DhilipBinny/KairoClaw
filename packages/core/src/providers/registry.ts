@@ -1,6 +1,7 @@
 import type { GatewayConfig, ProviderInterface, ProviderResponse, ChatArgs } from '@agw/types';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
+import { KairoPremiumProvider, isKairoPremiumAvailable } from './kairo-premium.js';
 import { classifyError, logClassifiedError } from './errors.js';
 import { createModuleLogger } from '../observability/logger.js';
 import type { SecretsStore } from '../secrets/store.js';
@@ -43,29 +44,36 @@ export class ProviderRegistry {
   private initProviders(): void {
     const cfg = this.config.providers;
 
-    // Anthropic: supports API key OR OAuth/setup-token
-    // Priority: SecretsStore > process.env > config (resolved from .env)
+    // Anthropic: API key auth (standard billing)
     const anthropicApiKey = this.secretsStore?.get('providers.anthropic', 'apiKey')
       || cfg.anthropic?.apiKey || '';
-    const anthropicAuthToken = this.secretsStore?.get('providers.anthropic', 'authToken')
-      || process.env.ANTHROPIC_AUTH_TOKEN || cfg.anthropic?.authToken || '';
     const anthropicBaseUrl = this.secretsStore?.get('providers.anthropic', 'baseUrl')
       || process.env.ANTHROPIC_BASE_URL || cfg.anthropic?.baseUrl || '';
 
-    if (anthropicApiKey || anthropicAuthToken) {
+    if (anthropicApiKey) {
       this.providers.anthropic = new AnthropicProvider(
         {
-          apiKey: anthropicApiKey || undefined,
-          authToken: anthropicAuthToken || undefined,
+          apiKey: anthropicApiKey,
           baseUrl: anthropicBaseUrl || undefined,
           defaultModel: cfg.anthropic?.defaultModel || 'claude-sonnet-4-20250514',
         },
         this.config,
       );
-      log.info(
-        { auth: (this.providers.anthropic as AnthropicProvider).authType },
-        'Anthropic provider initialized',
-      );
+      log.info('Anthropic provider initialized (API key)');
+    }
+
+    // Kairo Premium: proprietary auth via kairo-auth binary (OAuth + SDK)
+    if (isKairoPremiumAvailable() && cfg.kairoPremium?.enabled !== false) {
+      const licenseKey = this.secretsStore?.get('kairo', 'licenseKey')
+        || process.env.KAIRO_LICENSE_KEY || '';
+      if (licenseKey) {
+        try {
+          this.providers['kairo-premium'] = new KairoPremiumProvider(this.config, licenseKey);
+          log.info({ mode: cfg.kairoPremium?.mode || 'oauth' }, 'Kairo Premium provider initialized');
+        } catch (e: unknown) {
+          log.warn({ err: (e as Error).message }, 'Kairo Premium provider failed to initialize');
+        }
+      }
     }
 
     const openaiApiKey = this.secretsStore?.get('providers.openai', 'apiKey')
