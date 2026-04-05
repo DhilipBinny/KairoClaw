@@ -8,6 +8,7 @@
 import type { WebSocket } from '@fastify/websocket';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
+import type { GatewayConfig } from '@agw/types';
 import { hashApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
 
@@ -68,8 +69,9 @@ export async function sendBrowserCommand(
 /**
  * Fastify plugin that registers the /ws/browser-bridge WebSocket endpoint.
  */
-export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = async (app, opts) => {
-  const { db } = opts;
+export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter; config: GatewayConfig }> = async (app, opts) => {
+  const { db, config } = opts;
+  const remoteAccess = config.tools?.browse?.remoteAccess ?? 'admin';
 
   app.get('/ws/browser-bridge', { websocket: true }, (socket: WebSocket, _req: FastifyRequest) => {
     let userId: string | null = null;
@@ -118,10 +120,14 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter }> = 
           return;
         }
 
-        // Only admin can use remote browser (beta feature)
-        if (user.role !== 'admin') {
-          log.warn({ userId: user.id, role: user.role, category: 'browser' }, 'Extension auth rejected: non-admin user');
-          socket.send(JSON.stringify({ type: 'auth.error', message: 'Remote browser is admin-only (beta)' }));
+        // Check remote access permission
+        if (remoteAccess === false) {
+          socket.send(JSON.stringify({ type: 'auth.error', message: 'Remote browser is disabled' }));
+          return;
+        }
+        if (remoteAccess === 'admin' && user.role !== 'admin') {
+          log.warn({ userId: user.id, role: user.role, category: 'browser' }, 'Extension auth rejected: admin-only');
+          socket.send(JSON.stringify({ type: 'auth.error', message: 'Remote browser is admin-only. Contact your admin to enable.' }));
           return;
         }
 
