@@ -533,6 +533,18 @@ export async function deleteSkill(name: string): Promise<{ success: boolean }> {
   return request(`/skills/${name}`, { method: 'DELETE' });
 }
 
+export async function getUserSkills(): Promise<{ users: Array<{ scopeKey: string; skills: Array<{ name: string; description: string; size: number; modified: string | null }> }> }> {
+  return request('/skills/users');
+}
+
+export async function getUserSkill(scopeKey: string, name: string): Promise<{ name: string; scopeKey: string; description: string; content: string }> {
+  return request(`/skills/users/${encodeURIComponent(scopeKey)}/${encodeURIComponent(name)}`);
+}
+
+export async function deleteUserSkill(scopeKey: string, name: string): Promise<{ success: boolean }> {
+  return request(`/skills/users/${encodeURIComponent(scopeKey)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
 // ── Scoped Users ─────────────────────────────────
 
 export interface ScopeEntry {
