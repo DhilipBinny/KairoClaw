@@ -8,26 +8,10 @@ import { createModuleLogger } from '../observability/logger.js';
 const log = createModuleLogger('llm');
 
 /**
- * Anthropic provider supporting both auth methods:
+ * Anthropic provider — standard API key authentication.
  *
- * 1. API Key (standard): sk-ant-api03-xxxxx
- *    - Passed as X-Api-Key header
- *    - Standard usage-based billing
- *    - Env: ANTHROPIC_API_KEY
- *
- * 2. OAuth/Setup Token (subscription): from `claude setup-token`
- *    - Passed as Authorization: Bearer <token> header
- *    - Uses your Claude Pro/Max subscription
- *    - Token format: sk-ant-oat-xxxxx (OAuth Access Token)
- *    - Env: ANTHROPIC_AUTH_TOKEN
- *    - CRITICAL: requires specific headers:
- *      - anthropic-beta: oauth-2025-04-20
- *      - user-agent: claude-cli/0.1 (external, cli)
- *      - x-app: cli
- *    - CRITICAL: api_key must be "" (empty string), NOT undefined/null
- *      because null causes SDK to fall back to ANTHROPIC_API_KEY env var,
- *      which sends the token as both X-Api-Key AND Bearer, causing 401.
- *    - Note: prompt caching and 1M context may not work with OAuth tokens
+ * Uses ANTHROPIC_API_KEY for pay-per-token billing.
+ * For subscription-based auth (OAuth, CLI), use the Kairo Premium provider.
  */
 export class AnthropicProvider implements ProviderInterface {
   readonly name = 'anthropic';
@@ -37,56 +21,19 @@ export class AnthropicProvider implements ProviderInterface {
   private config?: GatewayConfig;
 
   constructor(options: ProviderOptions, config?: GatewayConfig) {
-    let { apiKey, authToken } = options;
-    const { baseUrl, defaultModel } = options;
+    const { apiKey, baseUrl, defaultModel } = options;
     this.config = config;
 
     const clientOpts: Record<string, unknown> = {};
 
-    // Auto-detect: if sk-ant-oat-* is passed as apiKey, treat as OAuth token
-    if (apiKey && apiKey.startsWith('sk-ant-oat')) {
-      authToken = apiKey;
-      apiKey = undefined;
-    }
-
-    if (authToken) {
-      // OAuth/setup-token auth — match OpenClaw's exact headers
-      clientOpts.apiKey = '';
-      clientOpts.authToken = authToken;
-      clientOpts.dangerouslyAllowBrowser = true;
-      clientOpts.defaultHeaders = {
-        'accept': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-        'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
-        'user-agent': 'claude-cli/0.1 (external, cli)',
-        'x-app': 'cli',
-      };
-      this.authType = 'oauth-token';
-    } else if (apiKey) {
-      // Standard API key auth
+    // Standard API key auth only
+    // For OAuth/subscription auth, use the Kairo Premium provider (kairo-auth binary)
+    if (apiKey) {
       clientOpts.apiKey = apiKey;
       this.authType = 'api-key';
     } else {
-      // No explicit auth — last resort: check env vars directly
-      // (ProviderRegistry normally passes credentials from secretsStore,
-      // so this branch only fires if secretsStore + config are both empty)
-      const envToken = process.env.ANTHROPIC_AUTH_TOKEN;
       const envKey = process.env.ANTHROPIC_API_KEY;
-      if (envToken) {
-        clientOpts.apiKey = '';
-        clientOpts.authToken = envToken;
-        clientOpts.dangerouslyAllowBrowser = true;
-        clientOpts.defaultHeaders = {
-          'accept': 'application/json',
-          'anthropic-dangerous-direct-browser-access': 'true',
-          'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14',
-          'user-agent': 'claude-cli/0.1 (external, cli)',
-          'x-app': 'cli',
-        };
-        this.authType = 'oauth-token';
-      } else {
-        this.authType = envKey ? 'api-key' : 'unknown';
-      }
+      this.authType = envKey ? 'api-key' : 'unknown';
     }
 
     // Custom base URL for proxies
@@ -185,21 +132,7 @@ export class AnthropicProvider implements ProviderInterface {
       : null;
 
     let systemContent: string | Anthropic.TextBlockParam[];
-    if (this.authType === 'oauth-token') {
-      // OAuth mode: prepend Claude Code identity header
-      const blocks: Anthropic.TextBlockParam[] = [
-        { type: 'text' as const, text: "You are Claude Code, Anthropic's official CLI for Claude." },
-      ];
-      if (structured) {
-        blocks.push({ type: 'text' as const, text: structured.cached, cache_control: { type: 'ephemeral' as const } });
-        if (structured.dynamic) {
-          blocks.push({ type: 'text' as const, text: structured.dynamic });
-        }
-      } else if (systemPrompt) {
-        blocks.push({ type: 'text' as const, text: systemPrompt as string, cache_control: { type: 'ephemeral' as const } });
-      }
-      systemContent = blocks;
-    } else if (structured) {
+    if (structured) {
       // API key mode with structured prompt: cache the stable prefix
       const blocks: Anthropic.TextBlockParam[] = [
         { type: 'text' as const, text: structured.cached, cache_control: { type: 'ephemeral' as const } },
@@ -364,14 +297,8 @@ export class AnthropicProvider implements ProviderInterface {
 
       // Provide helpful error messages for auth issues
       if (err.status === 401) {
-        const hint =
-          this.authType === 'oauth-token'
-            ? 'OAuth token may be expired or invalid. Re-run `claude setup-token` and update ANTHROPIC_AUTH_TOKEN. Make sure the oauth-2025-04-20 beta header is included.'
-            : 'API key is invalid. Check your ANTHROPIC_API_KEY.';
-        log.error(
-          { err: err.message, authType: this.authType },
-          `Anthropic auth error: ${hint}`,
-        );
+        const hint = 'API key is invalid. Check your ANTHROPIC_API_KEY.';
+        log.error({ err: err.message, authType: this.authType }, `Anthropic auth error: ${hint}`);
         throw new Error(`Anthropic 401: ${hint}`);
       }
 

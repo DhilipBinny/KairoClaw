@@ -14,16 +14,12 @@
 export interface AnthropicProviderConfig {
   /** API key (standard billing). Resolved from `${ANTHROPIC_API_KEY}`. */
   apiKey: string;
-  /** OAuth/setup token for Claude Pro/Max subscription. */
-  authToken: string;
   /** Optional proxy base URL. */
   baseUrl: string;
   /** Default model ID when none is specified. */
   defaultModel: string;
   /** Path to a file containing the API key (alternative to env var). */
   apiKeyFile?: string;
-  /** Path to a file containing the auth token. */
-  authTokenFile?: string;
 }
 
 /** OpenAI provider configuration. */
@@ -44,11 +40,22 @@ export interface OllamaProviderConfig {
   defaultModel: string;
 }
 
+/** Kairo Premium provider configuration (proprietary auth via kairo-auth binary). */
+export interface KairoPremiumProviderConfig {
+  /** Enable/disable premium provider. */
+  enabled: boolean;
+  /** Auth mode: 'oauth' for subscription token, 'sdk' for Claude CLI proxy. */
+  mode: 'oauth' | 'sdk';
+  /** Default model (sonnet, opus, haiku). */
+  defaultModel: string;
+}
+
 /** All configured LLM providers. */
 export interface ProvidersConfig {
   anthropic: AnthropicProviderConfig;
   openai: OpenAIProviderConfig;
   ollama: OllamaProviderConfig;
+  kairoPremium?: KairoPremiumProviderConfig;
 }
 
 // ──────────────────────────────────────────────
