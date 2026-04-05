@@ -31,8 +31,15 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           docker tag kairoclaw:latest kairoclaw:prev 2>/dev/null || true
-          docker build -t kairoclaw:latest -t kairoclaw:$SHORT_SHA .
+          # Use BuildKit secret — token never baked into image layers
+          echo "$GITHUB_PKG_TOKEN" > /tmp/.github_token
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=github_token,src=/tmp/.github_token \
+            -t kairoclaw:latest -t kairoclaw:$SHORT_SHA .
+          rm -f /tmp/.github_token
           echo "Built kairoclaw:$SHORT_SHA"
+        env:
+          GITHUB_PKG_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
 
       - name: Deploy stack
         run: |

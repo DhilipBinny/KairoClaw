@@ -203,11 +203,30 @@ async function main(): Promise<void> {
     console.log('  Secrets: encrypted (AES-256-GCM envelope encryption)');
   }
 
-  // 6b. Initialize provider registry with secrets store
+  // 6a. Clear sensitive env vars — secrets are now in encrypted store, not process.env
+  // This prevents leaking tokens to child processes (e.g., Agent SDK subprocess)
+  const sensitiveEnvVars = [
+    'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+    'OPENAI_API_KEY', 'KAIRO_LICENSE_KEY',
+    'TELEGRAM_BOT_TOKEN', 'BRAVE_API_KEY',
+  ];
+  for (const key of sensitiveEnvVars) {
+    if (process.env[key]) delete process.env[key];
+  }
+
+  // 6c. Migrate OAuth token from old namespace to kairo premium namespace
+  const oldAuthToken = secretsStore.get('providers.anthropic', 'authToken');
+  if (oldAuthToken && !secretsStore.get('kairo.providers.anthropic', 'authToken')) {
+    secretsStore.set('kairo.providers.anthropic', 'authToken', oldAuthToken);
+    secretsStore.set('providers.anthropic', 'authToken', '');
+    console.log('  [migration] Moved OAuth token to kairo.providers.anthropic namespace');
+  }
+
+  // 6d. Initialize provider registry with secrets store
   const providerRegistry = new ProviderRegistry(config);
   providerRegistry.setSecretsStore(secretsStore);
 
-  // 6b. Initialize audit service
+  // 6e. Initialize audit service
   const auditService = new AuditService(db);
 
   // 7. Initialize tool registry with built-in tools (config-aware filtering)
@@ -452,6 +471,11 @@ async function main(): Promise<void> {
         channelRegistry.whatsapp = undefined;
         server.log.info('WhatsApp channel stopped via Settings');
       }
+    }
+    // Provider toggle hot-reload
+    if (dotPath === 'providers.kairoPremium.enabled') {
+      await providerRegistry.reinitProviders();
+      server.log.info({ enabled: !!value }, 'Kairo Premium provider toggled via Settings');
     }
     // Tool toggle hot-reload
     if (dotPath.startsWith('tools.') && dotPath.endsWith('.enabled')) {

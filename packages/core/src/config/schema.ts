@@ -35,7 +35,7 @@ const ollamaProviderSchema = z.object({
 const kairoPremiumSchema = z.object({
   enabled: z.boolean().default(false),
   mode: z.enum(['oauth', 'sdk']).default('oauth'),
-  defaultModel: z.string().default('sonnet'),
+  defaultModel: z.string().default('claude-sonnet-4-20250514'),
 });
 
 const providersSchema = z.object({
@@ -292,7 +292,7 @@ export const configDefaults: GatewayConfig = {
     kairoPremium: {
       enabled: false,
       mode: 'oauth',
-      defaultModel: 'sonnet',
+      defaultModel: 'claude-sonnet-4-20250514',
     },
     openai: {
       apiKey: '${OPENAI_API_KEY}',

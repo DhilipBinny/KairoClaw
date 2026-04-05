@@ -2,6 +2,10 @@
 # Kairo — .gitignore
 # ══════════════════════════════════════════════
 
+# ── Kairo Premium binary (proprietary, never commit) ──
+kairo-auth
+*.license
+
 # ── Secrets (never commit) ──
 .env
 .env.*

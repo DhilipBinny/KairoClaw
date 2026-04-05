@@ -66,6 +66,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.email.rateLimit.perMinute', 'tools.email.rateLimit.perHour', 'tools.email.rateLimit.perDay', 'tools.email.rateLimit.perRecipientPerHour',
       'tools.transcription.enabled', 'tools.transcription.baseUrl', 'tools.transcription.model', 'tools.transcription.language',
       'tools.browse.enabled', 'tools.browse.remoteAccess',
+      'providers.kairoPremium.enabled', 'providers.kairoPremium.mode', 'providers.kairoPremium.defaultModel',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
