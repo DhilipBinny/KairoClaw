@@ -443,7 +443,7 @@ async function main(): Promise<void> {
         return toolRegistry.execute(name, args, enrichedCtx as any);
       },
       isToolConcurrencySafe: (name) => toolRegistry.isConcurrencySafe(name),
-      skills: skillRegistry.list().map(s => ({ name: s.name, description: s.description })),
+      skills: skillRegistry.listMerged(scopeKey).map(s => ({ name: s.name, description: s.description })),
       skillRegistry,
     });
   };

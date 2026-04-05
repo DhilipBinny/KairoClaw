@@ -20,11 +20,6 @@ When asked to translate content, follow these guidelines:
 - For ambiguous phrases, add a translator note in [brackets]
 - If translating a document, maintain paragraph structure
 
-## Common UAE language pairs
-- Arabic ↔ English
-- Hindi/Urdu ↔ English
-- Arabic ↔ Hindi/Urdu
-
 ## Output
 - Provide the translated text directly
 - If the user didn't specify a target language, default to English
