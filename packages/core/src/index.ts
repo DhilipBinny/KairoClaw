@@ -601,7 +601,7 @@ async function main(): Promise<void> {
   // 14b. Register browser bridge WebSocket (for Chrome extension remote browsing)
   try {
     const { browserBridgePlugin } = await import('./browser/bridge.js');
-    await server.register(browserBridgePlugin, { db });
+    await server.register(browserBridgePlugin, { db, config });
   } catch { /* browser bridge not available — non-critical */ }
 
   // 15. Channel registry — mutable so channels can be hot-reloaded via Settings
