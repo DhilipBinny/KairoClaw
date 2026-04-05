@@ -101,6 +101,18 @@ export async function runAgent(
   const maxToolRounds = config.agent?.maxToolRounds || 25;
   const model = context.model || config.model.primary;
 
+  // Tool executor bridge for SDK/CLI providers (in-process MCP)
+  const sdkToolExecutor = context.executeTool
+    ? async (name: string, args: Record<string, unknown>): Promise<string> => {
+        try {
+          const result = await context.executeTool!(name, args, { session, user: context.user, scopeKey: context.scopeKey } as any);
+          return typeof result === 'string' ? result : JSON.stringify(result);
+        } catch (e) {
+          return JSON.stringify({ error: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
+    : undefined;
+
   // Child logger with request context — auto-propagated to all log calls
   const reqLog = log.child({ requestId, sessionId: session.id, channel: inbound.channel, model, ephemeral });
 
@@ -246,6 +258,9 @@ export async function runAgent(
         onDelta,
         onThinkingDelta,
         thinkingConfig,
+        // Pass tool executor for SDK/CLI providers (in-process MCP tool bridge)
+        _executeTool: sdkToolExecutor,
+        _maxToolRounds: maxToolRounds,
       });
     } catch (e: unknown) {
       // ── Classify the error and determine recovery action ──
@@ -289,6 +304,8 @@ export async function runAgent(
           response = await context.callLLM({
             messages, tools: tools.length > 0 ? tools : undefined,
             model, systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+            _executeTool: sdkToolExecutor,
+            _maxToolRounds: maxToolRounds,
           });
           reqLog.info({ round, attempt: reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
           reactiveCompactFailures = 0;

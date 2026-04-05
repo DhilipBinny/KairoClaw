@@ -66,23 +66,16 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     const stateDir = config._stateDir || '';
     const checks: { name: string; status: string; message: string }[] = [];
 
-    // 1. Check Anthropic connectivity (check secrets store + config + env)
+    // 1. Check Anthropic connectivity (API key only — OAuth goes through Kairo Premium)
     const anthropicKey = secretsStore?.get('providers.anthropic', 'apiKey') || config.providers.anthropic?.apiKey;
-    const anthropicToken = secretsStore?.get('providers.anthropic', 'authToken') || (config.providers.anthropic as any)?.authToken;
-    if (anthropicKey || anthropicToken) {
+    if (anthropicKey) {
       try {
         const headers: Record<string, string> = {
           'anthropic-version': '2023-06-01',
           'content-type': 'application/json',
+          'x-api-key': anthropicKey,
         };
-        let authLabel = 'API Key';
-        if (anthropicToken) {
-          headers['authorization'] = `Bearer ${anthropicToken}`;
-          headers['anthropic-beta'] = 'oauth-2025-04-20';
-          authLabel = 'OAuth Token';
-        } else {
-          headers['x-api-key'] = anthropicKey;
-        }
+        const authLabel = 'API Key';
         const resp = await fetch(
           (config.providers.anthropic.baseUrl || 'https://api.anthropic.com') + '/v1/messages',
           {
@@ -267,20 +260,13 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         reqAuthToken;
 
       if (provider === 'anthropic') {
-        const token = authToken || apiKey;
-        if (!token) return reply.code(400).send({ error: 'No key or token provided' });
+        if (!apiKey) return reply.code(400).send({ error: 'No API key provided. For OAuth, use the Kairo Premium test.' });
 
-        const isOAuth = token.startsWith('sk-ant-oat');
         const headers: Record<string, string> = {
           'anthropic-version': '2023-06-01',
           'content-type': 'application/json',
+          'x-api-key': apiKey,
         };
-        if (isOAuth) {
-          headers['authorization'] = `Bearer ${token}`;
-          headers['anthropic-beta'] = 'oauth-2025-04-20';
-        } else {
-          headers['x-api-key'] = token;
-        }
 
         let models: { id: string; name: string; created?: string; capabilities?: unknown }[] = [];
         try {
@@ -329,7 +315,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
         return {
           success: true,
-          authType: isOAuth ? 'oauth' : 'api-key',
+          authType: 'api-key',
           models: models.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
         };
       } else if (provider === 'openai') {
@@ -408,6 +394,39 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
           return { id: m.name, name: m.name, capabilities: fallback };
         }));
         return { success: true, models };
+      } else if (provider === 'kairo-premium') {
+        // Test Kairo Premium via @dhilipbinny/kairo-enterprise package
+        const { isKairoPremiumAvailable, testKairoPremiumConnection } = await import('../providers/kairo-premium.js');
+        if (!await isKairoPremiumAvailable()) {
+          return { success: false, error: 'Kairo Enterprise package not installed.' };
+        }
+        const kAuthToken = secretsStore?.get('kairo.providers.anthropic', 'authToken') || reqAuthToken || '';
+        const kLicenseKey = secretsStore?.get('kairo', 'licenseKey') || '';
+        const kMethod = (config.providers?.kairoPremium?.mode || 'oauth') as 'oauth' | 'sdk';
+        if (!kAuthToken && kMethod === 'oauth') return { success: false, error: 'No auth token configured' };
+        if (!kLicenseKey) return { success: false, error: 'No license key configured' };
+
+        const { listKairoPremiumModels } = await import('../providers/kairo-premium.js');
+        const result = await testKairoPremiumConnection({ licenseKey: kLicenseKey, authToken: kAuthToken, mode: kMethod });
+        if (result.success) {
+          // Fetch models using OAuth token if available (works for both modes — same account)
+          const tokenForModels = secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
+          if (tokenForModels) {
+            const apiModels = await listKairoPremiumModels(tokenForModels);
+            if (apiModels.length > 0) {
+              return {
+                ...result,
+                authType: kMethod,
+                models: apiModels.map(m => ({ id: m.id, name: m.displayName })),
+              };
+            }
+          }
+          // No OAuth token (SDK-only user) — show the tested model at minimum
+          if (result.model) {
+            return { ...result, authType: kMethod, models: [{ id: result.model, name: result.model }] };
+          }
+        }
+        return { ...result, authType: kMethod };
       } else {
         return reply.code(400).send({ error: `Unknown provider: ${provider}` });
       }
@@ -419,11 +438,12 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     const config = getConfig(request);
     const hasVal = (v: unknown) => typeof v === 'string' && v !== '' && !v.startsWith('${');
 
+    const { isKairoPremiumAvailable } = await import('../providers/kairo-premium.js');
+    const premiumAvailable = await isKairoPremiumAvailable();
     return {
       anthropic: {
         hasApiKey: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey),
-        hasAuthToken: hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal((config.providers?.anthropic as any)?.authToken),
-        configured: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey) || hasVal(secretsStore?.get('providers.anthropic', 'authToken')) || hasVal((config.providers?.anthropic as any)?.authToken),
+        configured: hasVal(secretsStore?.get('providers.anthropic', 'apiKey')) || hasVal(config.providers?.anthropic?.apiKey),
       },
       openai: {
         hasApiKey: hasVal(secretsStore?.get('providers.openai', 'apiKey')) || hasVal(config.providers?.openai?.apiKey),
@@ -432,6 +452,15 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       ollama: {
         hasBaseUrl: hasVal(secretsStore?.get('providers.ollama', 'baseUrl')) || hasVal(config.providers?.ollama?.baseUrl),
         configured: hasVal(secretsStore?.get('providers.ollama', 'baseUrl')) || hasVal(config.providers?.ollama?.baseUrl),
+      },
+      kairoPremium: {
+        available: premiumAvailable,
+        hasAuthToken: hasVal(secretsStore?.get('kairo.providers.anthropic', 'authToken')),
+        hasLicenseKey: hasVal(secretsStore?.get('kairo', 'licenseKey')),
+        configured: hasVal(secretsStore?.get('kairo', 'licenseKey'))
+          && ((config.providers?.kairoPremium?.mode || 'oauth') === 'sdk' || hasVal(secretsStore?.get('kairo.providers.anthropic', 'authToken'))),
+        enabled: config.providers?.kairoPremium?.enabled ?? false,
+        mode: config.providers?.kairoPremium?.mode || 'oauth',
       },
     };
   });
@@ -442,7 +471,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     const { id } = request.params as { id: string };
     const body = request.body as { apiKey?: string; authToken?: string; baseUrl?: string };
 
-    const knownProviders = ['anthropic', 'openai', 'ollama'];
+    const knownProviders = ['anthropic', 'openai', 'ollama', 'kairo-premium'];
     if (!knownProviders.includes(id)) {
       return reply.code(400).send({ error: `Unknown provider: ${id}` });
     }
@@ -455,18 +484,13 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     let changed = false;
 
     if (id === 'anthropic') {
-      // Mutually exclusive: apiKey clears authToken and vice versa
-      if (body.apiKey) {
-        secretsStore.set(namespace, 'apiKey', body.apiKey);
-        secretsStore.set(namespace, 'authToken', ''); // clear
-        changed = true;
-      } else if (body.authToken) {
-        secretsStore.set(namespace, 'authToken', body.authToken);
-        secretsStore.set(namespace, 'apiKey', ''); // clear
+      // API key only — OAuth goes through Kairo Premium
+      if (body.apiKey !== undefined) {
+        secretsStore.set(namespace, 'apiKey', body.apiKey || '');
         changed = true;
       }
       if (body.baseUrl !== undefined) {
-        secretsStore.set(namespace, 'baseUrl', body.baseUrl);
+        secretsStore.set(namespace, 'baseUrl', body.baseUrl || '');
         changed = true;
       }
     } else if (id === 'openai') {
@@ -479,6 +503,23 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         secretsStore.set(namespace, 'baseUrl', body.baseUrl || '');
         changed = true;
       }
+    } else if (id === 'kairo-premium') {
+      const kairoPremiumBody = body as { authToken?: string; licenseKey?: string };
+      if (kairoPremiumBody.authToken !== undefined) {
+        secretsStore.set('kairo.providers.anthropic', 'authToken', kairoPremiumBody.authToken || '');
+        changed = true;
+      }
+      if (kairoPremiumBody.licenseKey !== undefined) {
+        secretsStore.set('kairo', 'licenseKey', kairoPremiumBody.licenseKey || '');
+        changed = true;
+      }
+      // Auto-enable/disable based on credential state (SDK mode doesn't need authToken)
+      const hasToken = !!secretsStore.get('kairo.providers.anthropic', 'authToken');
+      const hasLicense = !!secretsStore.get('kairo', 'licenseKey');
+      const mode = config.providers?.kairoPremium?.mode || 'oauth';
+      if (config.providers.kairoPremium) {
+        config.providers.kairoPremium.enabled = hasLicense && (mode === 'sdk' || hasToken);
+      }
     }
 
     if (!changed) {
@@ -488,8 +529,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     // Update in-memory config
     const cfg = config.providers;
     if (id === 'anthropic') {
-      if (body.apiKey) { cfg.anthropic.apiKey = body.apiKey; (cfg.anthropic as any).authToken = ''; }
-      if (body.authToken) { (cfg.anthropic as any).authToken = body.authToken; cfg.anthropic.apiKey = ''; }
+      if (body.apiKey !== undefined) cfg.anthropic.apiKey = body.apiKey;
       if (body.baseUrl !== undefined) cfg.anthropic.baseUrl = body.baseUrl;
     } else if (id === 'openai' && body.apiKey !== undefined) {
       cfg.openai.apiKey = body.apiKey;
@@ -499,7 +539,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // Reinitialize provider registry
     if (providerRegistry) {
-      providerRegistry.reinitProviders();
+      await providerRegistry.reinitProviders();
     }
 
     return { success: true };

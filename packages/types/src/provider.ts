@@ -82,6 +82,13 @@ export interface ChatArgs {
   thinkingConfig?: ThinkingConfig;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * Tool executor function — used by SDK/CLI providers to execute tools in-process.
+   * OAuth providers ignore this (tool calls are returned to the agent loop).
+   */
+  _executeTool?: (name: string, args: Record<string, unknown>) => Promise<string>;
+  /** Maximum tool rounds — passed to SDK provider for maxTurns. */
+  _maxToolRounds?: number;
 }
 
 /**
