@@ -32,7 +32,7 @@ async function connect() {
     return;
   }
 
-  const wsUrl = serverUrl.replace(/^http/, 'ws').replace(/\/$/, '') + '/ws/browser-bridge';
+  const wsUrl = serverUrl.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:').replace(/\/$/, '') + '/ws/browser-bridge';
 
   try {
     ws = new WebSocket(wsUrl);
@@ -133,10 +133,12 @@ async function executeCommand(msg) {
     switch (action) {
       case 'navigate': {
         const url = params.url;
+        if (!url) return { error: 'url is required' };
+        // Only allow http/https URLs — block file://, chrome://, javascript:
+        if (!/^https?:\/\//i.test(url)) return { error: 'Only http:// and https:// URLs are allowed' };
         // Show label on existing tab if we have one
         const existingTab = await getActiveAgentTab();
         if (existingTab) await showActionLabel(existingTab, `Navigating to ${new URL(url).hostname}...`).catch(() => {});
-        if (!url) return { error: 'url is required' };
 
         // Check if we already have an agent-opened tab (never reuse user's tabs)
         let tab;
@@ -190,7 +192,7 @@ async function executeCommand(msg) {
       case 'click': {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
-        const ref = params.ref ?? null;
+        const ref = params.ref != null && /^\d+$/.test(String(params.ref)) ? Number(params.ref) : null;
         const element = params.element ?? null;
         await highlightElement(tabId, ref, element, 'Clicking...');
         const result = await executeInTab(tabId, (ref, element) => {
@@ -217,7 +219,7 @@ async function executeCommand(msg) {
         const tabId = params.tabId || await getActiveAgentTab();
         if (!tabId) return { error: 'No active tab' };
         const { text, submit } = params;
-        const ref = params.ref ?? null;
+        const ref = params.ref != null && /^\d+$/.test(String(params.ref)) ? Number(params.ref) : null;
         const element = params.element ?? null;
         await highlightElement(tabId, ref, element, 'Typing...');
         const result = await executeInTab(tabId, (ref, element, text) => {
