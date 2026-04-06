@@ -46,6 +46,7 @@ import {
   shouldExtractSessionMemory,
   extractSessionMemory,
 } from './session-memory.js';
+import { routeModel, stripModelOverride } from './router.js';
 import { classifyError, logClassifiedError } from '../providers/errors.js';
 
 /** Sessions currently running memory extraction — prevents concurrent extraction races. */
@@ -110,7 +111,24 @@ export async function runAgent(
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
 
   const maxToolRounds = config.agent?.maxToolRounds || 25;
-  const model = context.model || config.model.primary;
+
+  // ── Model routing ───────────────────────────────────────
+  // Route the message to the best model tier (fast/standard/powerful).
+  // context.model overrides routing (used by sub-agents, ephemeral sessions).
+  let model: string;
+  if (context.model) {
+    model = context.model;
+  } else if (config.agent?.routing?.enabled) {
+    const routingResult = await routeModel(inbound, context.callLLM, config);
+    model = routingResult.model;
+    log.info({ tier: routingResult.tier, reason: routingResult.reason, stage: routingResult.stage, model: routingResult.model, category: 'routing' }, 'Model routed');
+    // Strip @model prefix from message text so the LLM doesn't see it
+    if (routingResult.stage === 'rule' && routingResult.reason.startsWith('user override')) {
+      inbound = { ...inbound, text: stripModelOverride(inbound.text) };
+    }
+  } else {
+    model = config.model.primary;
+  }
 
   // Child logger with request context — auto-propagated to all log calls
   const reqLog = log.child({ requestId, sessionId: session.id, channel: inbound.channel, model, ephemeral });

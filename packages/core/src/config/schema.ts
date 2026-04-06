@@ -170,6 +170,17 @@ const contextInjectionSchema = z.object({
   dailySessionMaxChars: z.number().int().min(0).optional(),
 });
 
+const routingSchema = z.object({
+  enabled: z.boolean().default(false),
+  forceModel: z.string().default(''),
+  fastModel: z.string().default('anthropic/claude-haiku-4-5-20251001'),
+  powerfulModel: z.string().default('anthropic/claude-opus-4-6'),
+  llmClassifier: z.boolean().default(true),
+  shortMessageThreshold: z.number().int().min(0).default(50),
+  opusPatterns: z.array(z.string()).default([]),
+  haikuPatterns: z.array(z.string()).default([]),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -180,6 +191,7 @@ const agentSchema = z.object({
   thinking: withObjectDefault(thinkingSchema),
   sessionMemory: withObjectDefault(sessionMemorySchema),
   contextInjection: withObjectDefault(contextInjectionSchema),
+  routing: withObjectDefault(routingSchema),
 });
 
 const modelsCatalogSchema = z.object({
