@@ -38,6 +38,15 @@ import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
 import { sniffBase64Mime } from '../media/store.js';
 import { autoSummarizeToMemory } from './auto-memory.js';
+import {
+  type SessionMemoryState,
+  createInitialState,
+  loadSessionMemoryState,
+  saveSessionMemoryState,
+  shouldExtractSessionMemory,
+  extractSessionMemory,
+} from './session-memory.js';
+import { estimateMessageTokens } from './compaction.js';
 import { classifyError, logClassifiedError } from '../providers/errors.js';
 
 const log = createModuleLogger('llm');
@@ -131,10 +140,16 @@ export async function runAgent(
     return { text: null };
   }
 
+  // ── Initialize session memory state ─────────────────────
+  let sessionMemoryState: SessionMemoryState | null = null;
+  if (!ephemeral && config.agent?.sessionMemory?.enabled !== false) {
+    sessionMemoryState = loadSessionMemoryState(session) ?? createInitialState();
+  }
+
   // ── Pre-turn compaction check (skip for ephemeral) ──────
   if (!ephemeral) {
     try {
-      await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
+      await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId, context.scopeKey);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       reqLog.warn({ err: msg }, 'Compaction check failed');
@@ -143,7 +158,7 @@ export async function runAgent(
 
   // ── Build system prompt ─────────────────────────────────
   const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel);
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id);
 
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
@@ -651,7 +666,44 @@ export async function runAgent(
     await sessionRepo.incrementTurns(session.id);
   }
 
+  // ── Session memory extraction (fire-and-forget, replaces old auto-memory for active session) ──
+  if (!ephemeral && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
+    const currentTokens = totalInputTokens; // approximate context size from last API call
+    const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
+    if (check.shouldExtract) {
+      reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
+      extractSessionMemory({
+        sessionId: session.id,
+        scopeKey: context.scopeKey ?? null,
+        db,
+        config,
+        state: sessionMemoryState,
+        currentTokens,
+        callLLM: context.callLLM,
+      }).then((newState) => {
+        sessionMemoryState = newState;
+        // Persist updated state to session metadata
+        if (sessionRepo) {
+          saveSessionMemoryState(session.id, newState, sessionRepo).catch((e) => {
+            reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
+          });
+        }
+      }).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction failed');
+      });
+    } else {
+      // Persist state even if no extraction (in case state was just initialized)
+      if (sessionMemoryState.extractionCount === 0 && sessionRepo) {
+        saveSessionMemoryState(session.id, sessionMemoryState, sessionRepo).catch(() => {});
+      }
+    }
+  }
+
   // ── Auto-summarize to memory (skip for ephemeral — sub-agents don't generate memory) ──
+  // This continues to run alongside session memory for now — it handles
+  // long-term fact extraction to PROFILE.md via sessions/YYYY-MM-DD.md.
+  // Will be replaced by maybeExtractToProfile() in a future phase.
   if (!ephemeral && totalInputTokens + totalOutputTokens > 0) {
     autoSummarizeToMemory({
       sessionId: session.id,

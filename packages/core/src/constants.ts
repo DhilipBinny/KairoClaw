@@ -28,6 +28,29 @@ export const MAX_TOTAL_TOOL_RESULTS = 30_000;
 
 // ── Compaction ──────────────────────────────────────────────
 
+// ── Session Memory ─────────────────────────────────────────
+
+/** Token threshold for first session memory extraction */
+export const SESSION_MEMORY_INIT_TOKEN_THRESHOLD = 8_000;
+
+/** Token growth since last extraction before re-extracting */
+export const SESSION_MEMORY_GROWTH_TOKEN_THRESHOLD = 4_000;
+
+/** Max tokens per section in the session memory file */
+export const SESSION_MEMORY_MAX_TOKENS_PER_SECTION = 1_500;
+
+/** Max total tokens for the session memory file */
+export const SESSION_MEMORY_MAX_TOTAL_TOKENS = 8_000;
+
+/** Days to keep session memory files before cleanup */
+export const SESSION_MEMORY_MAX_AGE_DAYS = 7;
+
+/** Directory name for session-context files */
+export const SESSION_MEMORY_DIR = 'session-context';
+
+/** Default model for session memory extraction (cheap, fast) */
+export const SESSION_MEMORY_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+
 // ── Memory ──────────────────────────────────────────────────
 
 /** Days to keep session memory files before cleanup */

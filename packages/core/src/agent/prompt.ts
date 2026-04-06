@@ -18,8 +18,10 @@ import {
   MEMORY_PROFILE_MAX_CHARS,
   MEMORY_SESSION_MAX_CHARS,
   MEMORY_RECENT_DAYS,
+  SESSION_MEMORY_DIR,
 } from '../constants.js';
 import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
+import { readSessionMemory } from './session-memory.js';
 
 /**
  * Build the full system prompt from config, workspace files, and tool
@@ -41,6 +43,7 @@ export function buildSystemPrompt(
   tools: ToolDefinition[] = [],
   scopeKey?: string | null,
   channel?: string | null,
+  sessionId?: string | null,
 ): StructuredSystemPrompt {
   const workspace = config.agent.workspace;
 
@@ -158,11 +161,11 @@ File organization:
 
   // Context compaction guidance (stable rules)
   cached.push(`## Compacted Context
-If you see a [Context Summary] system message, your conversation history was compacted. Follow these rules:
-- Focus on items under "## Active Tasks" — these are your current objectives
-- Treat "## Resolved Topics" as historical record only — do NOT revisit, re-investigate, or reference these unless the user explicitly asks
-- Use "## Key Facts" as reference data
-- Use "## Current Work" to understand what was happening right before compaction — resume from here
+If you see a [Context Summary] message, your conversation history was compacted. The summary may come from session memory (structured notes with ## sections like Current State, Task/Request, Key Information, Worklog) or from an LLM-generated summary (with ## Active Tasks, Resolved Topics, Key Facts, Current Work). Follow these rules:
+- Focus on current objectives — "## Current State" or "## Active Tasks"
+- Treat resolved/completed items as historical — do NOT revisit unless the user explicitly asks
+- Use key facts/information as reference data
+- Resume from where the last work left off
 - If unsure whether something is still relevant, ask the user or use tools to verify — do NOT assume from the summary`);
 
   // Silent replies (stable rule)
@@ -178,6 +181,7 @@ It must be your ENTIRE message — nothing else.`);
 You wake up fresh each session. Your memory files are your continuity:
 - **${memoryBasePath}/PROFILE.md** — long-term memory (preferences, key facts, consolidated from sessions)
 - **${memoryBasePath}/sessions/YYYY-MM-DD.md** — recent session notes (last 7 days, auto-extracted)
+- **${memoryBasePath}/session-context/** — active session notes (auto-maintained, structured per session)
 If someone says "remember this", write it to ${memoryBasePath}/PROFILE.md.`);
 
   // Inject workspace files (IDENTITY, SOUL, RULES are global; USER.md cascades per scope)
@@ -205,33 +209,51 @@ If someone says "remember this", write it to ${memoryBasePath}/PROFILE.md.`);
 ${new Date().toISOString()}
 Model: ${config.model.primary}`);
 
-  // Inject layered memory: profile + recent sessions (scoped per user)
-  // Memory content changes as conversations happen — dynamic
+  // ── Inject layered memory (configurable via contextInjection) ──
+  const ctxInj = config.agent?.contextInjection;
+  const profileMaxChars = ctxInj?.profileMaxChars ?? MEMORY_PROFILE_MAX_CHARS;
+  const sessionMemoryMaxChars = ctxInj?.sessionMemoryMaxChars ?? 3_000;
+  const dailySessionDays = ctxInj?.dailySessionDays ?? MEMORY_RECENT_DAYS;
+  const dailySessionMaxChars = ctxInj?.dailySessionMaxChars ?? MEMORY_SESSION_MAX_CHARS;
+
   const memoryDir = getScopedMemoryDir(workspace, scopeKey ?? null);
+
+  // 1. User profile (long-term, permanent)
   const profilePath = path.join(memoryDir, 'PROFILE.md');
   if (fs.existsSync(profilePath)) {
-    const profile = fs.readFileSync(profilePath, 'utf8').slice(0, MEMORY_PROFILE_MAX_CHARS);
+    const profile = fs.readFileSync(profilePath, 'utf8').slice(0, profileMaxChars);
     if (profile.trim()) {
       dynamic.push(`### User Profile (Long-Term Memory)\n${profile}`);
     }
   }
 
-  const sessionsDir = path.join(memoryDir, 'sessions');
-  if (fs.existsSync(sessionsDir)) {
-    const sessionFiles = fs.readdirSync(sessionsDir)
-      .filter(f => f.endsWith('.md'))
-      .sort()
-      .reverse()
-      .slice(0, MEMORY_RECENT_DAYS); // Last 3 days
-    const sessionSummaries: string[] = [];
-    for (const file of sessionFiles) {
-      const content = fs.readFileSync(path.join(sessionsDir, file), 'utf8').slice(0, MEMORY_SESSION_MAX_CHARS);
-      if (content.trim()) {
-        sessionSummaries.push(`#### ${file.replace('.md', '')}\n${content}`);
-      }
+  // 2. Current session memory (structured notes for this session)
+  if (sessionId && sessionMemoryMaxChars > 0) {
+    const smContent = readSessionMemory(workspace, scopeKey ?? null, sessionId);
+    if (smContent.trim() && !smContent.includes('(No activity yet)')) {
+      dynamic.push(`### Session Notes (Current Session)\n${smContent.slice(0, sessionMemoryMaxChars)}`);
     }
-    if (sessionSummaries.length > 0) {
-      dynamic.push(`### Recent Sessions\n${sessionSummaries.join('\n\n')}`);
+  }
+
+  // 3. Daily session files (cross-session, recent days)
+  if (dailySessionDays > 0) {
+    const sessionsDir = path.join(memoryDir, 'sessions');
+    if (fs.existsSync(sessionsDir)) {
+      const sessionFiles = fs.readdirSync(sessionsDir)
+        .filter(f => f.endsWith('.md'))
+        .sort()
+        .reverse()
+        .slice(0, dailySessionDays);
+      const sessionSummaries: string[] = [];
+      for (const file of sessionFiles) {
+        const content = fs.readFileSync(path.join(sessionsDir, file), 'utf8').slice(0, dailySessionMaxChars);
+        if (content.trim()) {
+          sessionSummaries.push(`#### ${file.replace('.md', '')}\n${content}`);
+        }
+      }
+      if (sessionSummaries.length > 0) {
+        dynamic.push(`### Recent Sessions\n${sessionSummaries.join('\n\n')}`);
+      }
     }
   }
 
