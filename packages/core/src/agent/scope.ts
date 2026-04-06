@@ -124,11 +124,13 @@ export function ensureScopeDir(
 ): void {
   const scopeDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
   const memoryDir = path.join(scopeDir, 'memory', 'sessions');
+  const sessionContextDir = path.join(scopeDir, 'memory', 'session-context');
   const docsDir = path.join(scopeDir, 'documents');
   const mediaDir = path.join(scopeDir, 'media');
   const isNew = !fs.existsSync(scopeDir);
 
   fs.mkdirSync(memoryDir, { recursive: true });
+  fs.mkdirSync(sessionContextDir, { recursive: true });
   fs.mkdirSync(docsDir, { recursive: true });
   fs.mkdirSync(mediaDir, { recursive: true });
 
