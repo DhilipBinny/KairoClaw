@@ -275,15 +275,16 @@ function formatMessagesForExtraction(messages: MessageRow[], maxChars = 20_000):
 
 /** Resolve which model to use for session memory extraction. */
 function resolveExtractionModel(config: GatewayConfig): string {
-  // 1. Explicit override
+  // 1. Explicit override from session memory config
   const explicit = config.agent?.sessionMemory?.extractionModel;
   if (explicit) return explicit;
 
-  // 2. Fallback model (often cheaper)
-  if (config.model.fallback) return config.model.fallback;
+  // 2. Fallback model (often a cheaper model)
+  const fallback = config.model.fallback;
+  if (fallback && fallback.trim()) return fallback;
 
-  // 3. Hardcoded Haiku default
-  return SESSION_MEMORY_DEFAULT_MODEL;
+  // 3. Primary model (last resort — works with whatever auth is configured)
+  return config.model.primary;
 }
 
 /**
