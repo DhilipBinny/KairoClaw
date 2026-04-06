@@ -164,4 +164,6 @@ export interface AgentResult {
   error?: boolean;
   /** Media attachments collected from tool results (via `_media` convention). */
   media?: MediaAttachment[];
+  /** Model ID used for this turn (for model indicator feature). */
+  model?: string;
 }

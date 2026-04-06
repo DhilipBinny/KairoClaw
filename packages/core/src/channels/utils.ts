@@ -2,6 +2,44 @@
  * Shared utilities for channel implementations.
  */
 
+// ── Model indicator ─────────────────────────────────────
+
+/** Superscript model labels for compact display. */
+const MODEL_LABELS: Record<string, string> = {
+  // Anthropic
+  'haiku': 'ᴴᴬᴵᴷᵁ',
+  'sonnet': 'ˢᴼᴺᴺᴱᵀ',
+  'opus': 'ᴼᴾᵁˢ',
+  // OpenAI
+  'gpt-4o': 'ᴳᴾᵀ⁻⁴ᴼ',
+  'gpt-4o-mini': 'ᴳᴾᵀ⁻⁴ᴼ⁻ᴹᴵᴺᴵ',
+  'gpt-4.1': 'ᴳᴾᵀ⁻⁴·¹',
+  'o3-mini': 'ᴼ³⁻ᴹᴵᴺᴵ',
+};
+
+/** Extract short model name from full ID. */
+function getModelShortName(modelId: string): string {
+  const lower = modelId.toLowerCase();
+  // Anthropic family
+  if (lower.includes('haiku')) return 'haiku';
+  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('opus')) return 'opus';
+  // Extract model name after provider prefix (e.g. "openai/gpt-4o" → "gpt-4o")
+  const parts = modelId.split('/');
+  return parts[parts.length - 1] || modelId;
+}
+
+/**
+ * Append a small model indicator to message text.
+ * For display only — not stored in DB, not sent to LLM.
+ */
+export function appendModelIndicator(text: string, modelId: string | undefined): string {
+  if (!text || !modelId) return text;
+  const shortName = getModelShortName(modelId);
+  const label = MODEL_LABELS[shortName] || shortName;
+  return `${text}\n\n${label}`;
+}
+
 // ── Markdown → WhatsApp formatting ───────────────────────
 
 /**

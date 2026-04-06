@@ -46,6 +46,8 @@ export interface ChatMessage {
   isThinking?: boolean;
   /** Media attachments (screenshots, images, etc.) */
   media?: MediaAttachment[];
+  /** Model used for this response (for model indicator display). */
+  model?: string;
 }
 
 // Persist session key across page refreshes
@@ -195,12 +197,13 @@ export function initChatListeners(): void {
       _thinkingLabel = null;
       const text = msg.text as string;
       const media = Array.isArray(msg.media) ? msg.media as MediaAttachment[] : undefined;
+      const model = msg.model as string | undefined;
       const lastMsg = _messages[_messages.length - 1];
 
       if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
         _messages = _messages.map((m, i) =>
           i === _messages.length - 1
-            ? { ...m, content: text || m.content, isStreaming: false, ...(media?.length ? { media } : {}) }
+            ? { ...m, content: text || m.content, isStreaming: false, ...(media?.length ? { media } : {}), ...(model ? { model } : {}) }
             : m
         );
       } else if (text || media?.length) {
@@ -211,6 +214,7 @@ export function initChatListeners(): void {
           timestamp: Date.now(),
           isStreaming: false,
           ...(media?.length ? { media } : {}),
+          ...(model ? { model } : {}),
         }];
       }
     })

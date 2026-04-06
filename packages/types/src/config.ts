@@ -279,6 +279,16 @@ export interface RoutingConfig {
   haikuPatterns?: string[];
 }
 
+/** Model indicator visibility per channel. */
+export interface ModelIndicatorConfig {
+  /** Show model indicator on Telegram. Default: false. */
+  telegram: boolean;
+  /** Show model indicator on WhatsApp. Default: false. */
+  whatsapp: boolean;
+  /** Show model indicator on Web chat. Default: false. */
+  web: boolean;
+}
+
 /** Agent behaviour configuration. */
 export interface AgentConfig {
   /** Display name of the assistant. */
@@ -301,6 +311,8 @@ export interface AgentConfig {
   contextInjection?: ContextInjectionConfig;
   /** Model routing configuration. */
   routing?: RoutingConfig;
+  /** Show which model responded (per channel). Off by default. */
+  showModelIndicator?: ModelIndicatorConfig;
 }
 
 /** User/auto-detected model capability overrides. */
