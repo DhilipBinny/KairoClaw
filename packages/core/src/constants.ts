@@ -49,7 +49,7 @@ export const SESSION_MEMORY_MAX_AGE_DAYS = 7;
 export const SESSION_MEMORY_DIR = 'session-context';
 
 /** Default model for session memory extraction (cheap, fast) */
-export const SESSION_MEMORY_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+export const SESSION_MEMORY_DEFAULT_MODEL = 'anthropic/claude-haiku-4-5-20251001';
 
 // ── Memory ──────────────────────────────────────────────────
 

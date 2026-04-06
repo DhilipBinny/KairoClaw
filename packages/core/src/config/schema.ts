@@ -156,6 +156,20 @@ const thinkingSchema = z.object({
   showThinking: withObjectDefault(thinkingShowSchema),
 });
 
+const sessionMemorySchema = z.object({
+  enabled: z.boolean().default(true),
+  extractionModel: z.string().optional(),
+  initTokenThreshold: z.number().int().min(0).optional(),
+  growthTokenThreshold: z.number().int().min(0).optional(),
+});
+
+const contextInjectionSchema = z.object({
+  profileMaxChars: z.number().int().min(0).optional(),
+  sessionMemoryMaxChars: z.number().int().min(0).optional(),
+  dailySessionDays: z.number().int().min(0).optional(),
+  dailySessionMaxChars: z.number().int().min(0).optional(),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -164,6 +178,8 @@ const agentSchema = z.object({
   softCompactionThreshold: z.number().min(0).max(1).default(0.50),
   keepRecentMessages: z.number().int().min(0).default(10),
   thinking: withObjectDefault(thinkingSchema),
+  sessionMemory: withObjectDefault(sessionMemorySchema),
+  contextInjection: withObjectDefault(contextInjectionSchema),
 });
 
 const modelsCatalogSchema = z.object({
