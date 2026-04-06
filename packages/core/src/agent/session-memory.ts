@@ -222,6 +222,13 @@ export function shouldExtractSessionMemory(
 
   // Subsequent extractions — check token growth since last
   const growth = currentTokens - state.tokensAtLastExtraction;
+
+  // If current tokens < last recorded (e.g., after compaction or session resume),
+  // re-calibrate: treat as if we need extraction once we're above init threshold again
+  if (growth < 0 && currentTokens >= initThreshold) {
+    return { shouldExtract: true, reason: `re-calibrating after context reset (current: ${currentTokens}, last: ${state.tokensAtLastExtraction})` };
+  }
+
   if (growth >= growthThreshold) {
     return { shouldExtract: true, reason: `growth threshold reached (${growth} >= ${growthThreshold})` };
   }

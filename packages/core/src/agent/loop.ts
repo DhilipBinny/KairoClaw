@@ -37,7 +37,7 @@ import { getModelCapabilities, estimateCost } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
 import { sniffBase64Mime } from '../media/store.js';
-import { autoSummarizeToMemory } from './auto-memory.js';
+import { maybeExtractToProfile } from './auto-memory.js';
 import {
   type SessionMemoryState,
   createInitialState,
@@ -666,9 +666,14 @@ export async function runAgent(
     await sessionRepo.incrementTurns(session.id);
   }
 
-  // ── Session memory extraction (fire-and-forget, replaces old auto-memory for active session) ──
+  // ── Session memory extraction (fire-and-forget) ──────────────
+  // When extraction threshold is met:
+  //   1. Extract session memory (Haiku updates structured notes file)
+  //   2. Then extract long-term facts to profile (Haiku reads session notes → daily file)
+  // Profile extraction only runs when session memory was just updated —
+  // no point re-reading the same file every turn.
   if (!ephemeral && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
-    const currentTokens = totalInputTokens; // approximate context size from last API call
+    const currentTokens = totalInputTokens;
     const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
     if (check.shouldExtract) {
       reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
@@ -688,9 +693,19 @@ export async function runAgent(
             reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
           });
         }
+        // Session memory just updated → extract long-term facts to profile
+        return maybeExtractToProfile({
+          sessionId: session.id,
+          channel: inbound.channel,
+          scopeKey: context.scopeKey,
+          db,
+          config,
+          callLLM: context.callLLM,
+          minTurns: 5,
+        });
       }).catch((e) => {
         const msg = e instanceof Error ? e.message : String(e);
-        reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction failed');
+        reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction or profile extraction failed');
       });
     } else {
       // Persist state even if no extraction (in case state was just initialized)
@@ -698,26 +713,6 @@ export async function runAgent(
         saveSessionMemoryState(session.id, sessionMemoryState, sessionRepo).catch(() => {});
       }
     }
-  }
-
-  // ── Auto-summarize to memory (skip for ephemeral — sub-agents don't generate memory) ──
-  // This continues to run alongside session memory for now — it handles
-  // long-term fact extraction to PROFILE.md via sessions/YYYY-MM-DD.md.
-  // Will be replaced by maybeExtractToProfile() in a future phase.
-  if (!ephemeral && totalInputTokens + totalOutputTokens > 0) {
-    autoSummarizeToMemory({
-      sessionId: session.id,
-      channel: inbound.channel,
-      scopeKey: context.scopeKey,
-      db,
-      config,
-      callLLM: context.callLLM,
-      minTurns: 5,
-    }).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      const stack = e instanceof Error ? e.stack : undefined;
-      reqLog.error({ err: msg, stack, sessionId: session.id, channel: inbound.channel, category: 'memory' }, 'Auto-memory summarization failed');
-    });
   }
 
   return {
