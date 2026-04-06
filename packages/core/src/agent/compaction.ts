@@ -614,12 +614,18 @@ export async function compactSession(
   await db.transaction(async () => {
     await messageRepo.deleteBySession(sessionId);
 
-    // Insert compacted summary as a system message
+    // Insert compacted summary as a user message. Both the Anthropic and
+    // OpenAI providers filter out role:'system' from the messages array
+    // (system content is sent separately via params.system), so using
+    // role:'system' here caused the summary to be silently dropped —
+    // the agent lost all prior context after compaction.
+    // This matches Claude Code's approach: the summary is a UserMessage
+    // with isCompactSummary metadata.
     await messageRepo.create({
       sessionId,
       tenantId,
-      role: 'system',
-      content: `[Context Summary]\n${summaryText}`,
+      role: 'user',
+      content: `[Context Summary — automated summary of earlier conversation, not a user message]\n${summaryText}`,
       metadata: JSON.stringify({
         compacted: true,
         originalCount: olderMessages.length,
@@ -654,7 +660,7 @@ export async function compactSession(
         await messageRepo.create({
           sessionId,
           tenantId,
-          role: 'system',
+          role: 'user',
           content: restoration.message,
           metadata: JSON.stringify({ type: 'file-restoration', fileCount: restoration.fileCount }),
         });
