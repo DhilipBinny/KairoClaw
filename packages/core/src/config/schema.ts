@@ -181,6 +181,12 @@ const routingSchema = z.object({
   haikuPatterns: z.array(z.string()).default([]),
 });
 
+const modelIndicatorSchema = z.object({
+  telegram: z.boolean().default(false),
+  whatsapp: z.boolean().default(false),
+  web: z.boolean().default(false),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -192,6 +198,7 @@ const agentSchema = z.object({
   sessionMemory: withObjectDefault(sessionMemorySchema),
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
+  showModelIndicator: withObjectDefault(modelIndicatorSchema),
 });
 
 const modelsCatalogSchema = z.object({

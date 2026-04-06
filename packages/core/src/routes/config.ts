@@ -59,6 +59,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'channels.telegram.outboundPolicy', 'channels.telegram.outboundAllowlist',
       'agent.routing.enabled', 'agent.routing.forceModel', 'agent.routing.fastModel', 'agent.routing.powerfulModel',
       'agent.routing.llmClassifier', 'agent.routing.shortMessageThreshold', 'agent.routing.opusPatterns', 'agent.routing.haikuPatterns',
+      'agent.showModelIndicator.telegram', 'agent.showModelIndicator.whatsapp', 'agent.showModelIndicator.web',
       'tools.exec.enabled', 'tools.exec.timeout',
       'tools.webSearch.enabled',
       'tools.webFetch.enabled', 'tools.webFetch.maxChars',
