@@ -18,6 +18,8 @@ import {
   type CallLLMFn,
 } from './compaction.js';
 
+import type { SkillRegistry } from '../skills/registry.js';
+
 /** Context needed by slash command handlers. */
 export interface SlashCommandContext {
   db: DatabaseAdapter;
@@ -26,11 +28,14 @@ export interface SlashCommandContext {
   tenantId: string;
   userId?: string;
   callLLM?: CallLLMFn;
+  skillRegistry?: SkillRegistry;
 }
 
 /** Result of a slash command. */
 export interface SlashCommandResult {
   text: string;
+  /** If true, this is a skill invocation — the text should be sent to the LLM as context, not returned directly. */
+  isSkill?: boolean;
 }
 
 const SLASH_COMMANDS: Record<string, string> = {
@@ -153,7 +158,11 @@ export async function handleSlashCommand(
         `- \`/compact\` — Force context compaction\n` +
         `- \`/sessions\` — List active sessions\n` +
         `- \`/stop\` — Stop current generation\n` +
-        `- \`/help\` — Show this help`,
+        `- \`/help\` — Show this help\n` +
+        (context.skillRegistry && context.skillRegistry.size > 0
+          ? `\n**Skills** (invoke with \`/skill-name\`):\n` +
+            context.skillRegistry.list().map(s => `- \`/${s.name}\` — ${s.description}`).join('\n')
+          : ''),
     };
   }
 
@@ -166,6 +175,22 @@ export async function handleSlashCommand(
     return {
       text: `**Active Sessions** (${sessions.length})\n${lines.join('\n') || 'None'}`,
     };
+  }
+
+  // ── Skill invocation: /skill-name args ──
+  // If no built-in command matched, check if it's a skill name
+  if (context.skillRegistry) {
+    const skillName = command.replace(/^\//, '');
+    const skill = context.skillRegistry.get(skillName);
+    if (skill) {
+      // Return skill instructions to be injected into the conversation.
+      // The agent loop will prepend these to the user's message and send
+      // to the LLM for processing (not return raw to the user).
+      return {
+        text: `[Skill: ${skill.meta.name}]\n\nFollow these instructions for this task:\n\n${skill.instructions}${text ? `\n\n---\n**User request:** ${text}` : ''}`,
+        isSkill: true,
+      };
+    }
   }
 
   return null;
