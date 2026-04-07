@@ -282,8 +282,8 @@
       </div>
     {/if}
 
-    {#if message.model && message.role === 'assistant' && !message.isStreaming}
-      <span class="model-indicator">{message.model.includes('haiku') ? 'haiku' : message.model.includes('opus') ? 'opus' : message.model.includes('sonnet') ? 'sonnet' : message.model.split('/').pop()}</span>
+    {#if message.modelShortName && message.role === 'assistant' && !message.isStreaming}
+      <span class="model-indicator">{message.modelShortName}</span>
     {/if}
 
     {#if message.media && message.media.length > 0}

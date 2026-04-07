@@ -19,7 +19,7 @@ import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
-import { splitMessage, appendModelIndicator } from './utils.js';
+import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
@@ -523,7 +523,7 @@ class TelegramChannel implements Channel {
 
         // Append model indicator if enabled (display only, not stored in DB)
         let displayText = result.text;
-        if (this.config.agent?.showModelIndicator?.telegram && result.model) {
+        if (shouldShowModelIndicator(this.config.agent?.showModelIndicator?.telegram, result.userRole) && result.model) {
           displayText = appendModelIndicator(displayText, result.model);
         }
 
