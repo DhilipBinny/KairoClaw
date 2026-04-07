@@ -24,7 +24,7 @@ function makeRouting(overrides: Partial<RoutingConfig> = {}): RoutingConfig {
   };
 }
 
-function makeConfig(routing?: Partial<RoutingConfig>): GatewayConfig {
+function makeConfig(routing?: Partial<RoutingConfig>, providerOverrides?: Partial<GatewayConfig['providers']>): GatewayConfig {
   return {
     model: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: '', fallbackChain: [] },
     agent: {
@@ -37,7 +37,12 @@ function makeConfig(routing?: Partial<RoutingConfig>): GatewayConfig {
       routing: routing ? makeRouting(routing) : { enabled: false },
     },
     gateway: { port: 3000, host: '0.0.0.0', token: '' },
-    providers: {} as any,
+    providers: {
+      anthropic: { apiKey: 'test-key', authToken: '', baseUrl: '', defaultModel: '' },
+      openai: { apiKey: '', defaultModel: '' },
+      ollama: { baseUrl: '', defaultModel: '' },
+      ...providerOverrides,
+    },
     channels: {} as any,
     session: { resetHour: 4, idleMinutes: 240 },
     tools: {} as any,
@@ -306,6 +311,51 @@ describe('routeModel', () => {
     expect(result.model).toBe('anthropic/claude-opus-4-6');
     expect(result.tier).toBe('powerful');
     expect(result.stage).toBe('llm');
+  });
+
+  describe('provider validation — unconfigured provider falls back to primary', () => {
+    it('fast tier falls back to primary when Anthropic not configured', async () => {
+      // fastModel set to Anthropic but no API key → should use primary
+      const config = makeConfig(
+        { enabled: true },
+        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
+      );
+      const result = await routeModel(makeInbound('hello'), mockLLM, config);
+      expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+      expect(result.tier).toBe('fast');
+      expect(result.stage).toBe('rule');
+    });
+
+    it('powerful tier falls back to primary when Anthropic not configured', async () => {
+      mockLLM.mockResolvedValueOnce({ text: 'COMPLEX' });
+      const config = makeConfig(
+        { enabled: true },
+        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
+      );
+      const result = await routeModel(makeInbound('Can you design a complete microservices architecture for our new platform?'), mockLLM, config);
+      expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+      expect(result.tier).toBe('powerful');
+    });
+
+    it('no fastModel/powerfulModel configured → falls back to primary (not hardcoded Haiku/Opus)', async () => {
+      mockLLM.mockResolvedValueOnce({ text: 'SIMPLE' });
+      const config = makeConfig({ enabled: true, fastModel: undefined, powerfulModel: undefined });
+      const result = await routeModel(makeInbound('hello world this is a longer message for LLM classification'), mockLLM, config);
+      expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+    });
+
+    it('classifier uses primary model when fastModel provider not configured', async () => {
+      mockLLM.mockResolvedValueOnce({ text: 'STANDARD' });
+      const config = makeConfig(
+        { enabled: true },
+        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
+      );
+      await routeModel(makeInbound('Can you analyze the market trends for Dubai Marina?'), mockLLM, config);
+      // classifier should have been called with primary model, not Haiku
+      expect(mockLLM).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'anthropic/claude-sonnet-4-20250514' }),
+      );
+    });
   });
 });
 

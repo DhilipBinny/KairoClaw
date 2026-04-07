@@ -11,7 +11,7 @@
  *   - powerful (Opus): deep reasoning, architecture, complex planning
  */
 
-import type { InboundMessage, GatewayConfig, ChatArgs, ProviderResponse, RoutingConfig } from '@agw/types';
+import type { InboundMessage, GatewayConfig, ChatArgs, ProviderResponse, RoutingConfig, ProvidersConfig } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('llm');
@@ -32,9 +32,6 @@ export interface RoutingResult {
 }
 
 // ─── Constants ─────────────────────────────────────────────
-
-const DEFAULT_FAST_MODEL = 'anthropic/claude-haiku-4-5-20251001';
-const DEFAULT_POWERFUL_MODEL = 'anthropic/claude-opus-4-6';
 
 /** Greeting / acknowledgment patterns — instant Haiku routing. */
 const GREETING_PATTERN = /^(hi|hello|hey|hola|salaam|marhaba|good\s*(morning|afternoon|evening|night)|thanks|thank\s*you|ok|okay|sure|yes|no|yep|nope|bye|goodbye|see\s*ya|cheers|👋|👍|🙏|❤️|😊|🎉|💯)\s*[!.?]*$/i;
@@ -159,24 +156,51 @@ Reply with ONE word only: SIMPLE, STANDARD, or COMPLEX.`,
 
 // ─── Model Resolution ──────────────────────────────────────
 
-/** Resolve model ID for a tier, with fallback to primary if not configured. */
+/**
+ * Check if the provider for a model ID is actually configured.
+ * Model IDs follow the "provider/model-name" convention.
+ * Returns true for unknown providers — let callWithFailover handle them.
+ */
+function isProviderConfigured(modelId: string, providers: ProvidersConfig): boolean {
+  const provider = modelId.split('/')[0];
+  if (!provider) return true;
+  switch (provider) {
+    case 'anthropic':
+      return !!(providers.anthropic?.apiKey?.trim() || providers.anthropic?.apiKeyFile?.trim());
+    case 'openai':
+      return !!(providers.openai?.apiKey?.trim() || providers.openai?.apiKeyFile?.trim());
+    case 'ollama':
+      return !!(providers.ollama?.baseUrl?.trim());
+    default:
+      return true;
+  }
+}
+
+/**
+ * Resolve model ID for a tier.
+ * Uses the configured fast/powerful model if set AND its provider is available.
+ * Falls back to primary model in all other cases — no hardcoded Anthropic defaults.
+ */
 function resolveModelForTier(
   tier: 'fast' | 'standard' | 'powerful',
   routing: RoutingConfig,
-  primaryModel: string,
+  config: GatewayConfig,
 ): string {
+  const primary = config.model.primary;
   switch (tier) {
     case 'fast': {
-      const fast = routing.fastModel;
-      return (fast && fast.trim()) ? fast : DEFAULT_FAST_MODEL;
+      const fast = routing.fastModel?.trim();
+      if (fast && isProviderConfigured(fast, config.providers)) return fast;
+      return primary;
     }
     case 'powerful': {
-      const powerful = routing.powerfulModel;
-      return (powerful && powerful.trim()) ? powerful : DEFAULT_POWERFUL_MODEL;
+      const powerful = routing.powerfulModel?.trim();
+      if (powerful && isProviderConfigured(powerful, config.providers)) return powerful;
+      return primary;
     }
     case 'standard':
     default:
-      return primaryModel;
+      return primary;
   }
 }
 
@@ -224,19 +248,21 @@ export async function routeModel(
   // ── Stage 1: Rules ──
   const ruleResult = classifyByRules(text, inbound, routing);
   if (ruleResult) {
-    const model = resolveModelForTier(ruleResult.tier, routing, primaryModel);
+    const model = resolveModelForTier(ruleResult.tier, routing, config);
     return { model, tier: ruleResult.tier, reason: ruleResult.reason, stage: 'rule' };
   }
 
   // ── Stage 2: LLM Classifier (if enabled) ──
   if (routing.llmClassifier !== false) {
-    const classifierModel = (routing.fastModel && routing.fastModel.trim())
-      ? routing.fastModel
-      : DEFAULT_FAST_MODEL;
+    // Use fast model if configured and its provider is available; otherwise primary
+    const fast = routing.fastModel?.trim();
+    const classifierModel = (fast && isProviderConfigured(fast, config.providers))
+      ? fast
+      : primaryModel;
 
     const llmResult = await classifyByLLM(text, callLLM, classifierModel);
     if (llmResult) {
-      const model = resolveModelForTier(llmResult.tier, routing, primaryModel);
+      const model = resolveModelForTier(llmResult.tier, routing, config);
       return { model, tier: llmResult.tier, reason: llmResult.reason, stage: 'llm' };
     }
   }
