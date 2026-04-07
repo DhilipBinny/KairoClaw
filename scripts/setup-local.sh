@@ -7,10 +7,10 @@
 # system — any command you can run, it can run.
 #
 # Usage:
-#   ./scripts/setup-local.sh
+#   ./scripts/setup-local.sh [--help]
 #
 # After setup, start with:
-#   ./kairo
+#   kairo
 #
 # Then configure credentials from the admin dashboard:
 #   http://localhost:18181/admin/providers
@@ -18,6 +18,31 @@
 # Data directory: ~/.agw
 # ══════════════════════════════════════════════════════════════
 set -e
+
+# ── Help ────────────────────────────────────────────────────
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: ./scripts/setup-local.sh [--help]"
+  echo ""
+  echo "Installs KairoClaw to run directly on this machine (no Docker)."
+  echo ""
+  echo "What this script does:"
+  echo "  1. Checks Node.js and pnpm prerequisites"
+  echo "  2. Installs dependencies and builds all packages"
+  echo "  3. Creates data directory at ~/.agw (or \$AGW_STATE_DIR)"
+  echo "  4. Generates a default config.json (skipped if exists)"
+  echo "  5. Installs the 'kairo' CLI to /usr/local/bin (requires sudo)"
+  echo "  6. Optionally creates a systemd service (Linux only)"
+  echo ""
+  echo "Environment:"
+  echo "  AGW_STATE_DIR   Override data directory (default: ~/.agw)"
+  echo ""
+  echo "After setup:"
+  echo "  kairo           Start the server"
+  echo "  kairo build     Rebuild after code changes"
+  echo "  kairo start     Start via systemd (Linux only)"
+  echo "  kairo status    Check if running"
+  exit 0
+fi
 
 # ── Colors ──────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -72,7 +97,7 @@ if command -v pnpm &>/dev/null; then
   ok "pnpm $(pnpm -v)"
 else
   warn "pnpm not found. Installing..."
-  npm install -g pnpm@10
+  npm install -g pnpm
   ok "pnpm installed"
 fi
 
@@ -98,7 +123,6 @@ step "Building KairoClaw"
 
 pnpm --filter @agw/types build
 pnpm --filter @agw/core build
-cp -r packages/core/src/db/migrations packages/core/dist/db/
 pnpm --filter @agw/ui build
 ok "Build complete"
 
@@ -127,7 +151,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 {
   "gateway": {
     "port": 18181,
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "token": "\${AGW_TOKEN}"
   },
   "providers": {
@@ -208,7 +232,18 @@ fi
 step "Installing kairo command"
 
 LAUNCHER="/usr/local/bin/kairo"
+if [ -f "$LAUNCHER" ]; then
+  read -rp "  kairo already exists at $LAUNCHER. Overwrite? [y/N]: " OVERWRITE
+  if [[ ! "$OVERWRITE" =~ ^[Yy] ]]; then
+    info "Skipping kairo install"
+    SKIP_LAUNCHER=1
+  fi
+fi
+if [ "${SKIP_LAUNCHER:-0}" != "1" ]; then
+warn "Installing kairo to $LAUNCHER requires sudo."
+fi
 TEMP_LAUNCHER=$(mktemp)
+trap 'rm -f "$TEMP_LAUNCHER"' EXIT
 cat > "$TEMP_LAUNCHER" << 'LAUNCHEOF'
 #!/bin/bash
 # ══════════════════════════════════════════════════════════════
@@ -259,12 +294,16 @@ case "$CMD" in
     echo "Building KairoClaw..."
     pnpm --filter @agw/types build
     pnpm --filter @agw/core build
-    cp -r packages/core/src/db/migrations packages/core/dist/db/
     pnpm --filter @agw/ui build
     echo "Build complete."
     ;;
 
   start)
+    if ! command -v systemctl &>/dev/null; then
+      echo "systemd is not available on this OS (macOS?)."
+      echo "Use: kairo  (runs in foreground)"
+      exit 1
+    fi
     if [ ! -f "/etc/systemd/system/$SERVICE.service" ]; then
       echo "Systemd service not found. Run setup-local.sh to create it."
       echo "Or use: kairo  (runs in foreground)"
@@ -278,23 +317,39 @@ case "$CMD" in
     ;;
 
   stop)
+    if ! command -v systemctl &>/dev/null; then
+      echo "systemd is not available on this OS (macOS?)."
+      echo "Find the process with: pgrep -f 'node.*packages/core/dist/index.js'"
+      exit 1
+    fi
     sudo systemctl stop "$SERVICE"
     echo "KairoClaw stopped."
     ;;
 
   restart)
+    if ! command -v systemctl &>/dev/null; then
+      echo "systemd is not available on this OS (macOS?). Rebuilding only."
+    fi
     echo "Building..."
     pnpm --filter @agw/types build
     pnpm --filter @agw/core build
-    cp -r packages/core/src/db/migrations packages/core/dist/db/
     pnpm --filter @agw/ui build
     echo ""
-    sudo systemctl restart "$SERVICE"
-    echo "KairoClaw rebuilt and restarted."
-    echo "  kairo logs    to see output"
+    if command -v systemctl &>/dev/null; then
+      sudo systemctl restart "$SERVICE"
+      echo "KairoClaw rebuilt and restarted."
+      echo "  kairo logs    to see output"
+    else
+      echo "Build complete. Restart kairo manually."
+    fi
     ;;
 
   logs)
+    if ! command -v journalctl &>/dev/null; then
+      echo "journalctl is not available on this OS (macOS?)."
+      echo "Use: kairo  (runs in foreground, logs to stdout)"
+      exit 1
+    fi
     journalctl -u "$SERVICE" -f --no-hostname -o cat
     ;;
 
@@ -348,12 +403,13 @@ case "$CMD" in
 esac
 LAUNCHEOF
 
-sudo install -m 755 "$TEMP_LAUNCHER" "$LAUNCHER"
-rm -f "$TEMP_LAUNCHER"
-# Also keep a copy in the project root for convenience
-cp "$LAUNCHER" "$PROJECT_DIR/kairo" 2>/dev/null || true
-ok "kairo installed to $LAUNCHER"
-info "You can now run 'kairo' from anywhere"
+if [ "${SKIP_LAUNCHER:-0}" != "1" ]; then
+  sudo install -m 755 "$TEMP_LAUNCHER" "$LAUNCHER"
+  # Also keep a copy in the project root for convenience
+  cp "$LAUNCHER" "$PROJECT_DIR/kairo" 2>/dev/null || true
+  ok "kairo installed to $LAUNCHER"
+  info "You can now run 'kairo' from anywhere"
+fi
 
 # ── Optional: systemd service ───────────────────────────────
 SERVICE="kairoclaw"
