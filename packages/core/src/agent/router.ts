@@ -11,7 +11,7 @@
  *   - powerful (Opus): deep reasoning, architecture, complex planning
  */
 
-import type { InboundMessage, GatewayConfig, ChatArgs, ProviderResponse, RoutingConfig, ProvidersConfig } from '@agw/types';
+import type { InboundMessage, GatewayConfig, ChatArgs, ProviderResponse, RoutingConfig } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('llm');
@@ -157,13 +157,27 @@ Reply with ONE word only: SIMPLE, STANDARD, or COMPLEX.`,
 // ─── Model Resolution ──────────────────────────────────────
 
 /**
- * Check if the provider for a model ID is actually configured.
+ * Check if the provider for a model ID is available.
  * Model IDs follow the "provider/model-name" convention.
+ *
+ * Uses isProviderAvailable (from ProviderRegistry) when available — covers all
+ * 3 credential sources: SecretsStore, env vars, and direct config.
+ * Falls back to checking config.providers directly (covers env var + direct config).
  * Returns true for unknown providers — let callWithFailover handle them.
  */
-function isProviderConfigured(modelId: string, providers: ProvidersConfig): boolean {
+function isProviderConfigured(
+  modelId: string,
+  config: GatewayConfig,
+  isProviderAvailable?: (prefix: string) => boolean,
+): boolean {
   const provider = modelId.split('/')[0];
   if (!provider) return true;
+
+  // Preferred: ProviderRegistry already resolved all 3 credential sources
+  if (isProviderAvailable) return isProviderAvailable(provider);
+
+  // Fallback: check config directly (covers env var + direct config, not SecretsStore)
+  const providers = config.providers;
   switch (provider) {
     case 'anthropic':
       return !!(providers.anthropic?.apiKey?.trim() || providers.anthropic?.apiKeyFile?.trim());
@@ -185,17 +199,18 @@ function resolveModelForTier(
   tier: 'fast' | 'standard' | 'powerful',
   routing: RoutingConfig,
   config: GatewayConfig,
+  isProviderAvailable?: (prefix: string) => boolean,
 ): string {
   const primary = config.model.primary;
   switch (tier) {
     case 'fast': {
       const fast = routing.fastModel?.trim();
-      if (fast && isProviderConfigured(fast, config.providers)) return fast;
+      if (fast && isProviderConfigured(fast, config, isProviderAvailable)) return fast;
       return primary;
     }
     case 'powerful': {
       const powerful = routing.powerfulModel?.trim();
-      if (powerful && isProviderConfigured(powerful, config.providers)) return powerful;
+      if (powerful && isProviderConfigured(powerful, config, isProviderAvailable)) return powerful;
       return primary;
     }
     case 'standard':
@@ -228,6 +243,7 @@ export async function routeModel(
   inbound: InboundMessage,
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>,
   config: GatewayConfig,
+  isProviderAvailable?: (prefix: string) => boolean,
 ): Promise<RoutingResult> {
   const routing = config.agent?.routing;
   const primaryModel = config.model.primary;
@@ -248,7 +264,7 @@ export async function routeModel(
   // ── Stage 1: Rules ──
   const ruleResult = classifyByRules(text, inbound, routing);
   if (ruleResult) {
-    const model = resolveModelForTier(ruleResult.tier, routing, config);
+    const model = resolveModelForTier(ruleResult.tier, routing, config, isProviderAvailable);
     return { model, tier: ruleResult.tier, reason: ruleResult.reason, stage: 'rule' };
   }
 
@@ -256,13 +272,13 @@ export async function routeModel(
   if (routing.llmClassifier !== false) {
     // Use fast model if configured and its provider is available; otherwise primary
     const fast = routing.fastModel?.trim();
-    const classifierModel = (fast && isProviderConfigured(fast, config.providers))
+    const classifierModel = (fast && isProviderConfigured(fast, config, isProviderAvailable))
       ? fast
       : primaryModel;
 
     const llmResult = await classifyByLLM(text, callLLM, classifierModel);
     if (llmResult) {
-      const model = resolveModelForTier(llmResult.tier, routing, config);
+      const model = resolveModelForTier(llmResult.tier, routing, config, isProviderAvailable);
       return { model, tier: llmResult.tier, reason: llmResult.reason, stage: 'llm' };
     }
   }

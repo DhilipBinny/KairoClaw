@@ -24,7 +24,7 @@ function makeRouting(overrides: Partial<RoutingConfig> = {}): RoutingConfig {
   };
 }
 
-function makeConfig(routing?: Partial<RoutingConfig>, providerOverrides?: Partial<GatewayConfig['providers']>): GatewayConfig {
+function makeConfig(routing?: Partial<RoutingConfig>): GatewayConfig {
   return {
     model: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: '', fallbackChain: [] },
     agent: {
@@ -37,12 +37,7 @@ function makeConfig(routing?: Partial<RoutingConfig>, providerOverrides?: Partia
       routing: routing ? makeRouting(routing) : { enabled: false },
     },
     gateway: { port: 3000, host: '0.0.0.0', token: '' },
-    providers: {
-      anthropic: { apiKey: 'test-key', authToken: '', baseUrl: '', defaultModel: '' },
-      openai: { apiKey: '', defaultModel: '' },
-      ollama: { baseUrl: '', defaultModel: '' },
-      ...providerOverrides,
-    },
+    providers: {} as any,
     channels: {} as any,
     session: { resetHour: 4, idleMinutes: 240 },
     tools: {} as any,
@@ -50,6 +45,11 @@ function makeConfig(routing?: Partial<RoutingConfig>, providerOverrides?: Partia
     mcp: { servers: {} },
   } as GatewayConfig;
 }
+
+/** Simulate ProviderRegistry with Anthropic available. */
+const anthropicAvailable = (prefix: string) => prefix === 'anthropic';
+/** Simulate ProviderRegistry with no providers available. */
+const noProvidersAvailable = (_prefix: string) => false;
 
 // ── classifyByRules ────────────────────────────────────────
 
@@ -270,7 +270,7 @@ describe('routeModel', () => {
 
   it('routes greeting to Haiku via rules (no LLM call)', async () => {
     const config = makeConfig({ enabled: true });
-    const result = await routeModel(makeInbound('hello'), mockLLM, config);
+    const result = await routeModel(makeInbound('hello'), mockLLM, config, anthropicAvailable);
     expect(result.model).toBe('anthropic/claude-haiku-4-5-20251001');
     expect(result.tier).toBe('fast');
     expect(result.stage).toBe('rule');
@@ -280,7 +280,7 @@ describe('routeModel', () => {
   it('routes ambiguous message through LLM classifier', async () => {
     mockLLM.mockResolvedValueOnce({ text: 'STANDARD' });
     const config = makeConfig({ enabled: true });
-    const result = await routeModel(makeInbound('Can you analyze the market trends for Dubai Marina?'), mockLLM, config);
+    const result = await routeModel(makeInbound('Can you analyze the market trends for Dubai Marina?'), mockLLM, config, anthropicAvailable);
     expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
     expect(result.tier).toBe('standard');
     expect(result.stage).toBe('llm');
@@ -290,7 +290,7 @@ describe('routeModel', () => {
   it('falls back to default when LLM classifier fails', async () => {
     mockLLM.mockRejectedValueOnce(new Error('API error'));
     const config = makeConfig({ enabled: true });
-    const result = await routeModel(makeInbound('Can you analyze something?'), mockLLM, config);
+    const result = await routeModel(makeInbound('Can you analyze something?'), mockLLM, config, anthropicAvailable);
     expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
     expect(result.tier).toBe('standard');
     expect(result.stage).toBe('default');
@@ -298,7 +298,7 @@ describe('routeModel', () => {
 
   it('skips LLM classifier when llmClassifier is false', async () => {
     const config = makeConfig({ enabled: true, llmClassifier: false });
-    const result = await routeModel(makeInbound('Can you analyze something?'), mockLLM, config);
+    const result = await routeModel(makeInbound('Can you analyze something?'), mockLLM, config, anthropicAvailable);
     expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
     expect(result.stage).toBe('default');
     expect(mockLLM).not.toHaveBeenCalled();
@@ -307,32 +307,25 @@ describe('routeModel', () => {
   it('LLM classifies as COMPLEX → Opus', async () => {
     mockLLM.mockResolvedValueOnce({ text: 'COMPLEX' });
     const config = makeConfig({ enabled: true });
-    const result = await routeModel(makeInbound('Design a complete microservices architecture for our platform'), mockLLM, config);
+    const result = await routeModel(makeInbound('Design a complete microservices architecture for our platform'), mockLLM, config, anthropicAvailable);
     expect(result.model).toBe('anthropic/claude-opus-4-6');
     expect(result.tier).toBe('powerful');
     expect(result.stage).toBe('llm');
   });
 
   describe('provider validation — unconfigured provider falls back to primary', () => {
-    it('fast tier falls back to primary when Anthropic not configured', async () => {
-      // fastModel set to Anthropic but no API key → should use primary
-      const config = makeConfig(
-        { enabled: true },
-        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
-      );
-      const result = await routeModel(makeInbound('hello'), mockLLM, config);
+    it('fast tier falls back to primary when provider not available (via ProviderRegistry)', async () => {
+      const config = makeConfig({ enabled: true });
+      const result = await routeModel(makeInbound('hello'), mockLLM, config, noProvidersAvailable);
       expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
       expect(result.tier).toBe('fast');
       expect(result.stage).toBe('rule');
     });
 
-    it('powerful tier falls back to primary when Anthropic not configured', async () => {
+    it('powerful tier falls back to primary when provider not available', async () => {
       mockLLM.mockResolvedValueOnce({ text: 'COMPLEX' });
-      const config = makeConfig(
-        { enabled: true },
-        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
-      );
-      const result = await routeModel(makeInbound('Can you design a complete microservices architecture for our new platform?'), mockLLM, config);
+      const config = makeConfig({ enabled: true });
+      const result = await routeModel(makeInbound('Can you design a complete microservices architecture for our new platform?'), mockLLM, config, noProvidersAvailable);
       expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
       expect(result.tier).toBe('powerful');
     });
@@ -340,21 +333,25 @@ describe('routeModel', () => {
     it('no fastModel/powerfulModel configured → falls back to primary (not hardcoded Haiku/Opus)', async () => {
       mockLLM.mockResolvedValueOnce({ text: 'SIMPLE' });
       const config = makeConfig({ enabled: true, fastModel: undefined, powerfulModel: undefined });
-      const result = await routeModel(makeInbound('hello world this is a longer message for LLM classification'), mockLLM, config);
+      const result = await routeModel(makeInbound('hello world this is a longer message for LLM classification'), mockLLM, config, anthropicAvailable);
       expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
     });
 
-    it('classifier uses primary model when fastModel provider not configured', async () => {
+    it('classifier uses primary model when provider not available', async () => {
       mockLLM.mockResolvedValueOnce({ text: 'STANDARD' });
-      const config = makeConfig(
-        { enabled: true },
-        { anthropic: { apiKey: '', authToken: '', baseUrl: '', defaultModel: '' } },
-      );
-      await routeModel(makeInbound('Can you analyze the market trends for Dubai Marina?'), mockLLM, config);
-      // classifier should have been called with primary model, not Haiku
+      const config = makeConfig({ enabled: true });
+      await routeModel(makeInbound('Can you analyze the market trends for Dubai Marina?'), mockLLM, config, noProvidersAvailable);
       expect(mockLLM).toHaveBeenCalledWith(
         expect.objectContaining({ model: 'anthropic/claude-sonnet-4-20250514' }),
       );
+    });
+
+    it('isProviderAvailable not provided → falls back to config-based check', async () => {
+      const config = makeConfig({ enabled: true });
+      // No isProviderAvailable passed — falls back to checking config.providers (empty → false → primary)
+      const result = await routeModel(makeInbound('hello'), mockLLM, config);
+      expect(result.model).toBe('anthropic/claude-sonnet-4-20250514');
+      expect(result.tier).toBe('fast');
     });
   });
 });
