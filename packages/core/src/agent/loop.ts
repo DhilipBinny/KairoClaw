@@ -46,8 +46,10 @@ import {
   shouldExtractSessionMemory,
   extractSessionMemory,
 } from './session-memory.js';
-import { estimateMessageTokens } from './compaction.js';
 import { classifyError, logClassifiedError } from '../providers/errors.js';
+
+/** Sessions currently running memory extraction — prevents concurrent extraction races. */
+const _activeExtractions = new Set<string>();
 
 const log = createModuleLogger('llm');
 
@@ -156,12 +158,17 @@ export async function runAgent(
     }
   }
 
-  // ── Build system prompt ─────────────────────────────────
-  const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id);
-
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
+
+  // ── Build system prompt ─────────────────────────────────
+  // Skip session memory injection when a [Context Summary] compaction message exists —
+  // the summary already contains session memory content; injecting both wastes tokens.
+  const hasContextSummary = historyRows.some(
+    r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
+  );
+  const tools = context.tools ?? [];
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -676,37 +683,45 @@ export async function runAgent(
     const currentTokens = totalInputTokens;
     const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
     if (check.shouldExtract) {
-      reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
-      extractSessionMemory({
-        sessionId: session.id,
-        scopeKey: context.scopeKey ?? null,
-        db,
-        config,
-        state: sessionMemoryState,
-        currentTokens,
-        callLLM: context.callLLM,
-      }).then((newState) => {
-        sessionMemoryState = newState;
-        // Persist updated state to session metadata
-        if (sessionRepo) {
-          saveSessionMemoryState(session.id, newState, sessionRepo).catch((e) => {
-            reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
-          });
-        }
-        // Session memory just updated → extract long-term facts to profile
-        return maybeExtractToProfile({
+      // Skip if extraction is already in progress for this session (prevents race on rapid messages)
+      if (_activeExtractions.has(session.id)) {
+        reqLog.debug({ category: 'memory' }, 'Session memory extraction already in progress — skipping');
+      } else {
+        reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
+        _activeExtractions.add(session.id);
+        extractSessionMemory({
           sessionId: session.id,
-          channel: inbound.channel,
-          scopeKey: context.scopeKey,
+          scopeKey: context.scopeKey ?? null,
           db,
           config,
+          state: sessionMemoryState,
+          currentTokens,
           callLLM: context.callLLM,
-          minTurns: 5,
+        }).then((newState) => {
+          sessionMemoryState = newState;
+          // Persist updated state to session metadata
+          if (sessionRepo) {
+            saveSessionMemoryState(session.id, newState, sessionRepo).catch((e) => {
+              reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
+            });
+          }
+          // Session memory just updated → extract long-term facts to profile
+          return maybeExtractToProfile({
+            sessionId: session.id,
+            channel: inbound.channel,
+            scopeKey: context.scopeKey,
+            db,
+            config,
+            callLLM: context.callLLM,
+            minTurns: 5,
+          });
+        }).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction or profile extraction failed');
+        }).finally(() => {
+          _activeExtractions.delete(session.id);
         });
-      }).catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction or profile extraction failed');
-      });
+      }
     } else {
       // Persist state even if no extraction (in case state was just initialized)
       if (sessionMemoryState.extractionCount === 0 && sessionRepo) {

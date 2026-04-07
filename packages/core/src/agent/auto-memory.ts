@@ -20,7 +20,7 @@ import path from 'node:path';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { GatewayConfig, ChatArgs, ProviderResponse } from '@agw/types';
 import { MessageRepository } from '../db/repositories/message.js';
-import { MEMORY_SESSION_RETENTION_DAYS, MEMORY_MIN_TURNS, MEMORY_MAX_CONVERSATION_CHARS, SESSION_MEMORY_DEFAULT_MODEL } from '../constants.js';
+import { MEMORY_SESSION_RETENTION_DAYS, MEMORY_MIN_TURNS, MEMORY_MAX_CONVERSATION_CHARS } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { getScopedMemoryDir } from './scope.js';
 import { readSessionMemory, cleanupSessionMemoryFiles } from './session-memory.js';
@@ -46,6 +46,9 @@ function ensureDir(dirPath: string): void {
 /**
  * Extract NEW facts from a session and save to layered memory.
  * Skips cron sessions, short sessions, and deduplicates against existing memory.
+ *
+ * @deprecated Use `maybeExtractToProfile` instead — it reads the already-structured
+ * session memory file rather than re-scanning raw conversation with Sonnet every turn.
  */
 export async function autoSummarizeToMemory(opts: {
   sessionId: string;

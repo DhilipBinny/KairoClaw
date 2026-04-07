@@ -44,6 +44,7 @@ export function buildSystemPrompt(
   scopeKey?: string | null,
   channel?: string | null,
   sessionId?: string | null,
+  skipSessionMemory = false,
 ): StructuredSystemPrompt {
   const workspace = config.agent.workspace;
 
@@ -228,7 +229,9 @@ Model: ${config.model.primary}`);
   }
 
   // 2. Current session memory (structured notes for this session)
-  if (sessionId && sessionMemoryMaxChars > 0) {
+  // Skip when a [Context Summary] compaction message exists in history — the summary
+  // already contains session memory content, injecting it again wastes tokens.
+  if (sessionId && sessionMemoryMaxChars > 0 && !skipSessionMemory) {
     const smContent = readSessionMemory(workspace, scopeKey ?? null, sessionId);
     if (smContent.trim() && !smContent.includes('(No activity yet)')) {
       dynamic.push(`### Session Notes (Current Session)\n${smContent.slice(0, sessionMemoryMaxChars)}`);
