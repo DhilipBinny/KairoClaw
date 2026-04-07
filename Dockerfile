@@ -73,8 +73,8 @@ RUN --mount=type=secret,id=github_token \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
-# Data directory
-RUN mkdir -p /data && chown node:node /data
+# Data directory + Claude CLI config directory (for SDK/CLI mode)
+RUN mkdir -p /data /home/node/.claude && chown -R node:node /data /home/node
 
 ENV NODE_ENV=production \
     AGW_STATE_DIR=/data \
