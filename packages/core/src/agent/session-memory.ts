@@ -35,7 +35,6 @@ import {
   SESSION_MEMORY_GROWTH_TOKEN_THRESHOLD,
   SESSION_MEMORY_MAX_TOTAL_TOKENS,
   SESSION_MEMORY_MAX_AGE_DAYS,
-  SESSION_MEMORY_DEFAULT_MODEL,
 } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';
 
@@ -334,8 +333,14 @@ export async function extractSessionMemory(opts: {
   }
 
   // 4. Build extraction prompt
+  // Cap existingMemory to prevent unbounded growth — long sessions accumulate large worklog entries
+  const MAX_EXISTING_CHARS = 12_000;
   const model = resolveExtractionModel(config);
-  const existingContent = isFirstExtraction ? '(empty — first extraction)' : existingMemory;
+  const existingContent = isFirstExtraction
+    ? '(empty — first extraction)'
+    : existingMemory.length > MAX_EXISTING_CHARS
+      ? existingMemory.slice(0, MAX_EXISTING_CHARS) + '\n\n[... older entries truncated ...]'
+      : existingMemory;
 
   const response = await callLLM({
     messages: [{

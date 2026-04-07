@@ -1,0 +1,129 @@
+#!/bin/bash
+# ══════════════════════════════════════════════════════════════
+# kairo — KairoClaw CLI
+#
+# Usage:
+#   kairo                 Start the server (foreground)
+#   kairo build           Rebuild after code changes
+#   kairo start           Start via systemd (background)
+#   kairo stop            Stop systemd service
+#   kairo restart         Rebuild + restart systemd service
+#   kairo logs            Tail systemd logs (Ctrl+C to stop)
+#   kairo status          Check if running
+#   kairo dev             Start in dev mode (watch for changes)
+# ══════════════════════════════════════════════════════════════
+set -e
+
+PROJECT_DIR="/home/bala/dev/apps/KairoClaw"
+DATA_DIR="/home/bala/.agw"
+SERVICE="kairoclaw"
+
+export AGW_STATE_DIR="$DATA_DIR"
+export AGW_CONFIG="$DATA_DIR/config.json"
+export LOG_LEVEL="${LOG_LEVEL:-info}"
+
+cd "$PROJECT_DIR"
+
+CMD="${1:-run}"
+
+case "$CMD" in
+
+  run|"")
+    echo "Starting KairoClaw..."
+    echo "  http://localhost:18181"
+    echo "  Ctrl+C to stop"
+    echo ""
+    exec node packages/core/dist/index.js
+    ;;
+
+  build)
+    echo "Building KairoClaw..."
+    pnpm --filter @agw/types build
+    pnpm --filter @agw/core build
+    cp -r packages/core/src/db/migrations packages/core/dist/db/
+    pnpm --filter @agw/ui build
+    echo "Build complete."
+    ;;
+
+  start)
+    if [ ! -f "/etc/systemd/system/$SERVICE.service" ]; then
+      echo "Systemd service not found. Run setup-local.sh to create it."
+      echo "Or use: kairo  (runs in foreground)"
+      exit 1
+    fi
+    sudo systemctl start "$SERVICE"
+    echo "KairoClaw started (background)"
+    echo "  http://localhost:18181"
+    echo "  kairo logs    to see output"
+    echo "  kairo stop    to stop"
+    ;;
+
+  stop)
+    sudo systemctl stop "$SERVICE"
+    echo "KairoClaw stopped."
+    ;;
+
+  restart)
+    echo "Building..."
+    pnpm --filter @agw/types build
+    pnpm --filter @agw/core build
+    cp -r packages/core/src/db/migrations packages/core/dist/db/
+    pnpm --filter @agw/ui build
+    echo ""
+    sudo systemctl restart "$SERVICE"
+    echo "KairoClaw rebuilt and restarted."
+    echo "  kairo logs    to see output"
+    ;;
+
+  logs)
+    journalctl -u "$SERVICE" -f --no-hostname -o cat
+    ;;
+
+  status)
+    if systemctl is-active "$SERVICE" &>/dev/null 2>&1; then
+      echo "KairoClaw is running (systemd)"
+      systemctl status "$SERVICE" --no-pager -l 2>/dev/null | head -5
+    elif pgrep -f "node.*packages/core/dist/index.js" &>/dev/null; then
+      echo "KairoClaw is running (foreground)"
+      PID=$(pgrep -f "node.*packages/core/dist/index.js")
+      echo "  PID: $PID"
+    else
+      echo "KairoClaw is not running."
+    fi
+    if curl -sf http://localhost:18181/api/v1/health &>/dev/null; then
+      echo "  Health: OK"
+    else
+      echo "  Health: not responding"
+    fi
+    ;;
+
+  dev)
+    echo "Starting KairoClaw in dev mode (watch)..."
+    echo "  http://localhost:18181"
+    echo "  Ctrl+C to stop"
+    echo ""
+    pnpm --filter @agw/types build
+    AGW_STATE_DIR="$DATA_DIR" AGW_CONFIG="$DATA_DIR/config.json" pnpm --filter @agw/core dev
+    ;;
+
+  *)
+    echo "kairo — KairoClaw CLI"
+    echo ""
+    echo "Usage: kairo [command]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)     Start in foreground"
+    echo "  build      Rebuild after code changes"
+    echo "  start      Start via systemd (background)"
+    echo "  stop       Stop systemd service"
+    echo "  restart    Rebuild + restart systemd"
+    echo "  logs       Tail logs (Ctrl+C to stop)"
+    echo "  status     Check if running"
+    echo "  dev        Start in dev mode (watch for changes)"
+    echo ""
+    echo "Data:    $DATA_DIR"
+    echo "Config:  $DATA_DIR/config.json"
+    echo "Project: $PROJECT_DIR"
+    ;;
+
+esac

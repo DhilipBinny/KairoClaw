@@ -14,6 +14,7 @@ import { MessageRepository, type MessageRow } from '../db/repositories/message.j
 import type { ChatArgs, ProviderResponse } from '@agw/types';
 import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { getSessionMemoryForCompaction } from './session-memory.js';
 
 const log = createModuleLogger('llm');
 
@@ -593,7 +594,6 @@ export async function compactSession(
   const workspace = config.agent?.workspace || '';
   if (workspace && scopeKey !== undefined) {
     try {
-      const { getSessionMemoryForCompaction } = await import('./session-memory.js');
       const sessionMemoryContent = getSessionMemoryForCompaction(workspace, scopeKey ?? null, sessionId);
       if (sessionMemoryContent) {
         summaryText = sessionMemoryContent;
