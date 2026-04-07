@@ -77,6 +77,8 @@ export interface AgentContext {
   ) => Promise<unknown>;
   /** Check if a tool is safe to run concurrently with other tools. */
   isToolConcurrencySafe?: (name: string) => boolean;
+  /** Check if a provider prefix (e.g. "anthropic") is configured and available. */
+  isProviderAvailable?: (providerPrefix: string) => boolean;
   /** Model ID override (defaults to config.model.primary). */
   model?: string;
   /** Sub-agent nesting depth (0 = top-level). */
@@ -119,7 +121,7 @@ export async function runAgent(
   if (context.model) {
     model = context.model;
   } else if (config.agent?.routing?.enabled) {
-    const routingResult = await routeModel(inbound, context.callLLM, config);
+    const routingResult = await routeModel(inbound, context.callLLM, config, context.isProviderAvailable);
     model = routingResult.model;
     log.info({ tier: routingResult.tier, reason: routingResult.reason, stage: routingResult.stage, model: routingResult.model, category: 'routing' }, 'Model routed');
     // Strip @model prefix from message text so the LLM doesn't see it
