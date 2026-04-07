@@ -21,6 +21,7 @@ import { MessageRepository } from '../db/repositories/message.js';
 import { hashApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+import { getModelShortName, shouldShowModelIndicator } from './utils.js';
 
 const log = createModuleLogger('channel.web');
 
@@ -371,7 +372,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                 text: result.text || '',
                 usage: result.usage,
                 ...(result.media && result.media.length > 0 ? { media: result.media.map((a: any) => ({ type: a.type, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption })) } : {}),
-                ...(config.agent?.showModelIndicator?.web && result.model ? { model: result.model } : {}),
+                ...(shouldShowModelIndicator(config.agent?.showModelIndicator?.web, result.userRole) && result.model
+                  ? { modelShortName: getModelShortName(result.model) }
+                  : {}),
                 requestId,
               });
             } catch (e: unknown) {

@@ -29,7 +29,7 @@ import type { DatabaseAdapter } from '../db/index.js';
 import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
-import { splitMessage, markdownToWhatsApp, appendModelIndicator } from './utils.js';
+import { splitMessage, markdownToWhatsApp, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
@@ -668,7 +668,7 @@ class WhatsAppChannel implements Channel {
 
         // Append model indicator if enabled (display only, not stored in DB)
         let displayText = result.text;
-        if (this.config.agent?.showModelIndicator?.whatsapp && result.model) {
+        if (shouldShowModelIndicator(this.config.agent?.showModelIndicator?.whatsapp, result.userRole) && result.model) {
           displayText = appendModelIndicator(displayText, result.model);
         }
 

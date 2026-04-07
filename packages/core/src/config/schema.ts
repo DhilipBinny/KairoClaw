@@ -181,10 +181,12 @@ const routingSchema = z.object({
   haikuPatterns: z.array(z.string()).default([]),
 });
 
+const modelIndicatorVisibility = z.enum(['off', 'admin_only', 'all']).default('off');
+
 const modelIndicatorSchema = z.object({
-  telegram: z.boolean().default(false),
-  whatsapp: z.boolean().default(false),
-  web: z.boolean().default(false),
+  telegram: modelIndicatorVisibility,
+  whatsapp: modelIndicatorVisibility,
+  web: modelIndicatorVisibility,
 });
 
 const agentSchema = z.object({
@@ -400,6 +402,7 @@ export const configDefaults: GatewayConfig = {
       budgetTokens: 10000,
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
+    showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
   },
   models: {
     catalog: {},

@@ -279,14 +279,22 @@ export interface RoutingConfig {
   haikuPatterns?: string[];
 }
 
+/**
+ * Model indicator visibility level.
+ * - 'off': never shown
+ * - 'admin_only': shown to admin and power_user roles only
+ * - 'all': shown to all users
+ */
+export type ModelIndicatorVisibility = 'off' | 'admin_only' | 'all';
+
 /** Model indicator visibility per channel. */
 export interface ModelIndicatorConfig {
-  /** Show model indicator on Telegram. Default: false. */
-  telegram: boolean;
-  /** Show model indicator on WhatsApp. Default: false. */
-  whatsapp: boolean;
-  /** Show model indicator on Web chat. Default: false. */
-  web: boolean;
+  /** Show model indicator on Telegram. Default: 'off'. */
+  telegram: ModelIndicatorVisibility;
+  /** Show model indicator on WhatsApp. Default: 'off'. */
+  whatsapp: ModelIndicatorVisibility;
+  /** Show model indicator on Web chat. Default: 'off'. */
+  web: ModelIndicatorVisibility;
 }
 
 /** Agent behaviour configuration. */

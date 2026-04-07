@@ -569,75 +569,31 @@
             <span class="field-hint">Show which model (Haiku, Sonnet, Opus) responded to each message. Display only — not stored in conversation history.</span>
           </div>
         </div>
+        {#each [['Telegram', 'agent.showModelIndicator.telegram'], ['WhatsApp', 'agent.showModelIndicator.whatsapp'], ['Web Chat', 'agent.showModelIndicator.web']] as [label, path]}
         <div class="field-row sub-field">
           <div class="field-info">
-            <label class="field-label">Telegram</label>
+            <label class="field-label" for="model-indicator-{path}">{label}</label>
           </div>
           <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('agent.showModelIndicator.telegram')}
-              role="switch"
-              aria-checked={!!getVal('agent.showModelIndicator.telegram')}
-              disabled={!!saving['agent.showModelIndicator.telegram']}
-              onclick={() => saveToggle('agent.showModelIndicator.telegram', !!getVal('agent.showModelIndicator.telegram'))}
+            <select
+              id="model-indicator-{path}"
+              class="select-input"
+              disabled={!!saving[path]}
+              value={getVal(path) || 'off'}
+              onchange={(e) => saveField(path, (e.target as HTMLSelectElement).value)}
             >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('agent.showModelIndicator.telegram') ? 'On' : 'Off'}</span>
-            </button>
-            {#if feedback['agent.showModelIndicator.telegram']?.msg}
-              <span class="field-feedback" class:ok={feedback['agent.showModelIndicator.telegram'].ok} class:err={!feedback['agent.showModelIndicator.telegram'].ok}>
-                {feedback['agent.showModelIndicator.telegram'].msg}
+              <option value="off">Off</option>
+              <option value="admin_only">Admin only</option>
+              <option value="all">All users</option>
+            </select>
+            {#if feedback[path]?.msg}
+              <span class="field-feedback" class:ok={feedback[path].ok} class:err={!feedback[path].ok}>
+                {feedback[path].msg}
               </span>
             {/if}
           </div>
         </div>
-        <div class="field-row sub-field">
-          <div class="field-info">
-            <label class="field-label">WhatsApp</label>
-          </div>
-          <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('agent.showModelIndicator.whatsapp')}
-              role="switch"
-              aria-checked={!!getVal('agent.showModelIndicator.whatsapp')}
-              disabled={!!saving['agent.showModelIndicator.whatsapp']}
-              onclick={() => saveToggle('agent.showModelIndicator.whatsapp', !!getVal('agent.showModelIndicator.whatsapp'))}
-            >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('agent.showModelIndicator.whatsapp') ? 'On' : 'Off'}</span>
-            </button>
-            {#if feedback['agent.showModelIndicator.whatsapp']?.msg}
-              <span class="field-feedback" class:ok={feedback['agent.showModelIndicator.whatsapp'].ok} class:err={!feedback['agent.showModelIndicator.whatsapp'].ok}>
-                {feedback['agent.showModelIndicator.whatsapp'].msg}
-              </span>
-            {/if}
-          </div>
-        </div>
-        <div class="field-row sub-field">
-          <div class="field-info">
-            <label class="field-label">Web Chat</label>
-          </div>
-          <div class="field-control">
-            <button
-              class="toggle-btn"
-              class:active={!!getVal('agent.showModelIndicator.web')}
-              role="switch"
-              aria-checked={!!getVal('agent.showModelIndicator.web')}
-              disabled={!!saving['agent.showModelIndicator.web']}
-              onclick={() => saveToggle('agent.showModelIndicator.web', !!getVal('agent.showModelIndicator.web'))}
-            >
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-label">{getVal('agent.showModelIndicator.web') ? 'On' : 'Off'}</span>
-            </button>
-            {#if feedback['agent.showModelIndicator.web']?.msg}
-              <span class="field-feedback" class:ok={feedback['agent.showModelIndicator.web'].ok} class:err={!feedback['agent.showModelIndicator.web'].ok}>
-                {feedback['agent.showModelIndicator.web'].msg}
-              </span>
-            {/if}
-          </div>
-        </div>
+        {/each}
       </div>
     </div>
 
