@@ -407,6 +407,7 @@ async function main(): Promise<void> {
           : { id: 'anonymous', role: 'user', elevated: false }),
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
+      isProviderAvailable: (prefix) => providerRegistry.hasProvider(prefix),
       tools: await toolRegistry.getDefinitions({
         userRole: resolvedUser?.role
           || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),

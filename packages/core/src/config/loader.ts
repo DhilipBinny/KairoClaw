@@ -127,6 +127,17 @@ export function loadConfig(configPath?: string): GatewayConfig {
     rawConfig = { ...configDefaults } as unknown as Record<string, unknown>;
   }
 
+  // One-time migrations for field type changes
+  // v1: showModelIndicator changed from boolean → 'off'|'admin_only'|'all'
+  const smi = (rawConfig as any)?.agent?.showModelIndicator;
+  if (smi && typeof smi === 'object') {
+    for (const ch of ['telegram', 'whatsapp', 'web'] as const) {
+      if (typeof smi[ch] === 'boolean') {
+        smi[ch] = smi[ch] ? 'all' : 'off';
+      }
+    }
+  }
+
   // Migrate: add new fields from defaults that don't exist yet
   const migrated = deepMerge(
     configDefaults as unknown as Record<string, unknown>,

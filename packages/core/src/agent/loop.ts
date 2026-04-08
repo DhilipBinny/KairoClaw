@@ -37,8 +37,20 @@ import { getModelCapabilities, estimateCost } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { filterOutput, checkOutputSafety } from '../security/output.js';
 import { sniffBase64Mime } from '../media/store.js';
-import { autoSummarizeToMemory } from './auto-memory.js';
+import { maybeExtractToProfile } from './auto-memory.js';
+import {
+  type SessionMemoryState,
+  createInitialState,
+  loadSessionMemoryState,
+  saveSessionMemoryState,
+  shouldExtractSessionMemory,
+  extractSessionMemory,
+} from './session-memory.js';
+import { routeModel, stripModelOverride } from './router.js';
 import { classifyError, logClassifiedError } from '../providers/errors.js';
+
+/** Sessions currently running memory extraction — prevents concurrent extraction races. */
+const _activeExtractions = new Set<string>();
 
 const log = createModuleLogger('llm');
 
@@ -65,6 +77,8 @@ export interface AgentContext {
   ) => Promise<unknown>;
   /** Check if a tool is safe to run concurrently with other tools. */
   isToolConcurrencySafe?: (name: string) => boolean;
+  /** Check if a provider prefix (e.g. "anthropic") is configured and available. */
+  isProviderAvailable?: (providerPrefix: string) => boolean;
   /** Model ID override (defaults to config.model.primary). */
   model?: string;
   /** Sub-agent nesting depth (0 = top-level). */
@@ -99,7 +113,24 @@ export async function runAgent(
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
 
   const maxToolRounds = config.agent?.maxToolRounds || 25;
-  const model = context.model || config.model.primary;
+
+  // ── Model routing ───────────────────────────────────────
+  // Route the message to the best model tier (fast/standard/powerful).
+  // context.model overrides routing (used by sub-agents, ephemeral sessions).
+  let model: string;
+  if (context.model) {
+    model = context.model;
+  } else if (config.agent?.routing?.enabled) {
+    const routingResult = await routeModel(inbound, context.callLLM, config, context.isProviderAvailable);
+    model = routingResult.model;
+    log.info({ tier: routingResult.tier, reason: routingResult.reason, stage: routingResult.stage, model: routingResult.model, category: 'routing' }, 'Model routed');
+    // Strip @model prefix from message text so the LLM doesn't see it
+    if (routingResult.stage === 'rule' && routingResult.reason.startsWith('user override')) {
+      inbound = { ...inbound, text: stripModelOverride(inbound.text) };
+    }
+  } else {
+    model = config.model.primary;
+  }
 
   // Tool executor bridge for SDK/CLI providers (in-process MCP)
   const sdkToolExecutor = context.executeTool
@@ -143,22 +174,33 @@ export async function runAgent(
     return { text: null };
   }
 
+  // ── Initialize session memory state ─────────────────────
+  let sessionMemoryState: SessionMemoryState | null = null;
+  if (!ephemeral && config.agent?.sessionMemory?.enabled !== false) {
+    sessionMemoryState = loadSessionMemoryState(session) ?? createInitialState();
+  }
+
   // ── Pre-turn compaction check (skip for ephemeral) ──────
   if (!ephemeral) {
     try {
-      await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId);
+      await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId, context.scopeKey);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       reqLog.warn({ err: msg }, 'Compaction check failed');
     }
   }
 
-  // ── Build system prompt ─────────────────────────────────
-  const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel);
-
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
+
+  // ── Build system prompt ─────────────────────────────────
+  // Skip session memory injection when a [Context Summary] compaction message exists —
+  // the summary already contains session memory content; injecting both wastes tokens.
+  const hasContextSummary = historyRows.some(
+    r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
+  );
+  const tools = context.tools ?? [];
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -668,21 +710,61 @@ export async function runAgent(
     await sessionRepo.incrementTurns(session.id);
   }
 
-  // ── Auto-summarize to memory (skip for ephemeral — sub-agents don't generate memory) ──
-  if (!ephemeral && totalInputTokens + totalOutputTokens > 0) {
-    autoSummarizeToMemory({
-      sessionId: session.id,
-      channel: inbound.channel,
-      scopeKey: context.scopeKey,
-      db,
-      config,
-      callLLM: context.callLLM,
-      minTurns: 5,
-    }).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      const stack = e instanceof Error ? e.stack : undefined;
-      reqLog.error({ err: msg, stack, sessionId: session.id, channel: inbound.channel, category: 'memory' }, 'Auto-memory summarization failed');
-    });
+  // ── Session memory extraction (fire-and-forget) ──────────────
+  // When extraction threshold is met:
+  //   1. Extract session memory (Haiku updates structured notes file)
+  //   2. Then extract long-term facts to profile (Haiku reads session notes → daily file)
+  // Profile extraction only runs when session memory was just updated —
+  // no point re-reading the same file every turn.
+  if (!ephemeral && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
+    const currentTokens = totalInputTokens;
+    const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
+    if (check.shouldExtract) {
+      // Skip if extraction is already in progress for this session (prevents race on rapid messages)
+      if (_activeExtractions.has(session.id)) {
+        reqLog.debug({ category: 'memory' }, 'Session memory extraction already in progress — skipping');
+      } else {
+        reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
+        _activeExtractions.add(session.id);
+        extractSessionMemory({
+          sessionId: session.id,
+          scopeKey: context.scopeKey ?? null,
+          db,
+          config,
+          state: sessionMemoryState,
+          currentTokens,
+          callLLM: context.callLLM,
+        }).then((newState) => {
+          sessionMemoryState = newState;
+          // Persist updated state to session metadata
+          if (sessionRepo) {
+            saveSessionMemoryState(session.id, newState, sessionRepo).catch((e) => {
+              reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
+            });
+          }
+          // Session memory just updated → extract long-term facts to profile
+          return maybeExtractToProfile({
+            sessionId: session.id,
+            channel: inbound.channel,
+            scopeKey: context.scopeKey,
+            db,
+            config,
+            callLLM: context.callLLM,
+            minTurns: 5,
+          });
+        }).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction or profile extraction failed');
+        }).finally(() => {
+          _activeExtractions.delete(session.id);
+        });
+      }
+    } else {
+      // Persist state even if no extraction (in case state was just initialized)
+      if (sessionMemoryState.extractionCount === 0 && sessionRepo) {
+        saveSessionMemoryState(session.id, sessionMemoryState, sessionRepo).catch(() => {});
+      }
+    }
   }
 
   return {
@@ -690,6 +772,8 @@ export async function runAgent(
     thinkingText: finalThinkingText,
     usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
     ...(collectedMedia.length > 0 ? { media: collectedMedia } : {}),
+    model,
+    userRole: context.user?.role,
   };
 }
 

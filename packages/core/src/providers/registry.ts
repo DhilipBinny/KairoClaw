@@ -110,6 +110,12 @@ export class ProviderRegistry {
     await this.initPromise;
   }
 
+  /** Check if a provider prefix (e.g. "anthropic", "openai", "ollama") is configured and available. */
+  hasProvider(providerPrefix: string): boolean {
+    this.ensureInitialized();
+    return !!this.providers[providerPrefix];
+  }
+
   private parseModelRef(modelRef?: string): { providerName: string; modelId: string } {
     const ref = modelRef || this.config.model.primary;
     const [providerName, ...modelParts] = ref.split('/');

@@ -120,6 +120,50 @@
   let savingCred = $state('');
   let credMsg: Record<string, { text: string; ok: boolean }> = $state({});
 
+  // ── Routing state ──
+  let showRouting = $state(false);
+  let routingEnabled = $state(false);
+  let routingFastModel = $state('anthropic/claude-haiku-4-5-20251001');
+  let routingPowerfulModel = $state('anthropic/claude-opus-4-6');
+  let routingLlmClassifier = $state(true);
+  let routingShortThreshold = $state(50);
+  let routingOpusPatterns = $state('');
+  let routingHaikuPatterns = $state('');
+  let routingSaving = $state(false);
+  let routingMsg = $state('');
+
+  function loadRoutingState() {
+    const routing = (config?.agent as Record<string, unknown>)?.routing as Record<string, unknown> | undefined;
+    if (routing) {
+      routingEnabled = routing.enabled === true;
+      if (routing.fastModel) routingFastModel = routing.fastModel as string;
+      if (routing.powerfulModel) routingPowerfulModel = routing.powerfulModel as string;
+      if (routing.llmClassifier !== undefined) routingLlmClassifier = routing.llmClassifier as boolean;
+      if (routing.shortMessageThreshold !== undefined) routingShortThreshold = routing.shortMessageThreshold as number;
+      if (Array.isArray(routing.opusPatterns)) routingOpusPatterns = (routing.opusPatterns as string[]).join('\n');
+      if (Array.isArray(routing.haikuPatterns)) routingHaikuPatterns = (routing.haikuPatterns as string[]).join('\n');
+    }
+  }
+
+  async function saveRouting() {
+    routingSaving = true;
+    routingMsg = '';
+    try {
+      await updateConfig('agent.routing.enabled', routingEnabled);
+      await updateConfig('agent.routing.fastModel', routingFastModel);
+      await updateConfig('agent.routing.powerfulModel', routingPowerfulModel);
+      await updateConfig('agent.routing.llmClassifier', routingLlmClassifier);
+      await updateConfig('agent.routing.shortMessageThreshold', routingShortThreshold);
+      await updateConfig('agent.routing.opusPatterns', routingOpusPatterns.split('\n').map((s: string) => s.trim()).filter(Boolean));
+      await updateConfig('agent.routing.haikuPatterns', routingHaikuPatterns.split('\n').map((s: string) => s.trim()).filter(Boolean));
+      routingMsg = 'Saved';
+      setTimeout(() => routingMsg = '', 2000);
+    } catch (e: unknown) {
+      routingMsg = e instanceof Error ? e.message : 'Save failed';
+    }
+    routingSaving = false;
+  }
+
   const providers = [
     { id: 'anthropic', name: 'Anthropic', description: 'Claude models (Sonnet, Opus, Haiku)', color: 'var(--accent)' },
     { id: 'openai', name: 'OpenAI', description: 'GPT-4, o1, o3, o4 models', color: 'var(--green)' },
@@ -271,6 +315,7 @@
         getProviderStatus().then(s => { providerStatus = s; }).catch(() => {}),
       ]);
       config = configData.config;
+      loadRoutingState();
     } catch (e) {
       console.error('Failed to load config:', e);
     } finally {
@@ -323,6 +368,93 @@
       {#if saveMessage}
         <div class="save-message" class:save-success={!saveMessage.startsWith('Failed')} class:save-error={saveMessage.startsWith('Failed')}>
           {saveMessage}
+        </div>
+      {/if}
+      <div class="current-model-actions">
+        <button class="btn btn-sm" onclick={() => { showRouting = !showRouting; }}>
+          {showRouting ? 'Close' : 'Routing'}
+        </button>
+        {#if routingEnabled}
+          <span class="routing-badge">Smart routing active</span>
+        {/if}
+      </div>
+
+      {#if showRouting}
+        <div class="routing-panel">
+          <div class="routing-section">
+            <h4>Routing Mode</h4>
+            <div class="routing-radios">
+              <label class="routing-radio">
+                <input type="radio" bind:group={routingEnabled} value={false} />
+                <div>
+                  <strong>Standard</strong>
+                  <span class="routing-hint">Use primary model for all messages</span>
+                </div>
+              </label>
+              <label class="routing-radio">
+                <input type="radio" bind:group={routingEnabled} value={true} />
+                <div>
+                  <strong>Smart</strong>
+                  <span class="routing-hint">Auto-pick Haiku / Sonnet / Opus per message</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {#if routingEnabled}
+            <div class="routing-section">
+              <h4>Model Assignment</h4>
+              <div class="routing-field">
+                <label>Fast <span class="routing-hint">(greetings, simple questions)</span></label>
+                <input type="text" bind:value={routingFastModel} />
+              </div>
+              <div class="routing-field">
+                <label>Standard <span class="routing-hint">(from primary model)</span></label>
+                <input type="text" value={getCurrentModel()} disabled />
+              </div>
+              <div class="routing-field">
+                <label>Powerful <span class="routing-hint">(complex reasoning)</span></label>
+                <input type="text" bind:value={routingPowerfulModel} />
+              </div>
+            </div>
+
+            <div class="routing-section">
+              <label class="routing-checkbox">
+                <input type="checkbox" bind:checked={routingLlmClassifier} />
+                <div>
+                  <strong>LLM Classifier</strong>
+                  <span class="routing-hint">Use Haiku to classify ambiguous messages (~200ms, more accurate)</span>
+                </div>
+              </label>
+            </div>
+
+            <div class="routing-section">
+              <h4>Advanced</h4>
+              <div class="routing-field">
+                <label>Short message threshold <span class="routing-hint">(chars)</span></label>
+                <input type="number" bind:value={routingShortThreshold} min="0" max="500" style="width: 80px" />
+              </div>
+              <div class="routing-field">
+                <label>Opus patterns <span class="routing-hint">(regex, one per line)</span></label>
+                <textarea bind:value={routingOpusPatterns} rows="2" placeholder="design.*architecture"></textarea>
+              </div>
+              <div class="routing-field">
+                <label>Haiku patterns <span class="routing-hint">(regex, one per line)</span></label>
+                <textarea bind:value={routingHaikuPatterns} rows="2" placeholder="translate.*to"></textarea>
+              </div>
+            </div>
+
+            <p class="routing-tip">Tip: Users can override per-message with <code>@haiku</code>, <code>@sonnet</code>, or <code>@opus</code> prefix.</p>
+          {/if}
+
+          <div class="routing-actions">
+            <button class="btn btn-sm btn-primary" onclick={saveRouting} disabled={routingSaving}>
+              {routingSaving ? 'Saving...' : 'Save Routing'}
+            </button>
+            {#if routingMsg}
+              <span class="routing-msg" class:routing-error={routingMsg.includes('fail')}>{routingMsg}</span>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
@@ -1221,4 +1353,28 @@
     .model-caps-inline { margin-left: 0; }
     .model-id { font-size: 13px; word-break: break-all; }
   }
+
+  /* ── Routing panel ── */
+  .current-model-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+  .routing-badge { font-size: 0.75rem; color: var(--green, #4ade80); background: rgba(74, 222, 128, 0.1); padding: 2px 8px; border-radius: 4px; }
+  .routing-panel { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .routing-section { margin-bottom: 16px; }
+  .routing-section h4 { font-size: 0.85rem; margin: 0 0 8px 0; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .routing-radios { display: flex; flex-direction: column; gap: 6px; }
+  .routing-radio, .routing-checkbox { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; padding: 6px; border-radius: 4px; }
+  .routing-radio:hover, .routing-checkbox:hover { background: var(--bg-hover, rgba(255,255,255,0.03)); }
+  .routing-radio input, .routing-checkbox input { margin-top: 3px; }
+  .routing-radio strong, .routing-checkbox strong { display: block; font-size: 0.9rem; }
+  .routing-hint { color: var(--text-muted); font-size: 0.8rem; }
+  .routing-field { margin-bottom: 10px; }
+  .routing-field label { display: block; margin-bottom: 3px; font-size: 0.85rem; }
+  .routing-field input, .routing-field textarea { width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input, #0d0d1a); color: var(--text); font-size: 0.85rem; }
+  .routing-field input:disabled { opacity: 0.5; }
+  .routing-field textarea { resize: vertical; font-family: monospace; font-size: 0.8rem; }
+  .routing-tip { color: var(--text-muted); font-size: 0.8rem; margin: 8px 0; }
+  .routing-tip code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-size: 0.8em; }
+  .routing-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .btn-primary { background: var(--accent, #6366f1) !important; color: white !important; }
+  .routing-msg { font-size: 0.85rem; color: var(--green, #4ade80); }
+  .routing-msg.routing-error { color: var(--error, #f87171); }
 </style>

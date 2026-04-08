@@ -242,6 +242,68 @@ export interface AgentThinkingConfig {
   showThinking: ThinkingShowConfig;
 }
 
+/** Session memory extraction configuration. */
+export interface SessionMemoryConfig {
+  /** Enable/disable session memory. Default: true. */
+  enabled?: boolean;
+  /** Model to use for extraction (e.g. 'claude-haiku-4-5-20251001'). */
+  extractionModel?: string;
+  /** Token count at which first extraction triggers. Default: 8000. */
+  initTokenThreshold?: number;
+  /** Token growth since last extraction before re-extracting. Default: 4000. */
+  growthTokenThreshold?: number;
+}
+
+/** Controls what memory is injected into the system prompt. */
+export interface ContextInjectionConfig {
+  /** Max chars of PROFILE.md to inject. Default: 3000. */
+  profileMaxChars?: number;
+  /** Max chars of session memory to inject. Default: 3000. */
+  sessionMemoryMaxChars?: number;
+  /** Number of daily session file days to inject. 0 = disable. Default: 3. */
+  dailySessionDays?: number;
+  /** Max chars per daily session file. Default: 1500. */
+  dailySessionMaxChars?: number;
+}
+
+/** Model routing configuration. */
+export interface RoutingConfig {
+  /** Enable intelligent model routing. Default: false. */
+  enabled?: boolean;
+  /** Force a specific model — overrides all routing. Empty string = use router. */
+  forceModel?: string;
+  /** Model for simple/fast tasks. Default: Haiku. */
+  fastModel?: string;
+  /** Model for complex/powerful tasks. Default: Opus. */
+  powerfulModel?: string;
+  /** Use LLM classifier for ambiguous messages (Stage 2). Default: true. */
+  llmClassifier?: boolean;
+  /** Max message length (chars) considered "short" for Haiku routing. Default: 50. */
+  shortMessageThreshold?: number;
+  /** Custom patterns that force Opus (regex strings). */
+  opusPatterns?: string[];
+  /** Custom patterns that force Haiku (regex strings). */
+  haikuPatterns?: string[];
+}
+
+/**
+ * Model indicator visibility level.
+ * - 'off': never shown
+ * - 'admin_only': shown to admin and power_user roles only
+ * - 'all': shown to all users
+ */
+export type ModelIndicatorVisibility = 'off' | 'admin_only' | 'all';
+
+/** Model indicator visibility per channel. */
+export interface ModelIndicatorConfig {
+  /** Show model indicator on Telegram. Default: 'off'. */
+  telegram: ModelIndicatorVisibility;
+  /** Show model indicator on WhatsApp. Default: 'off'. */
+  whatsapp: ModelIndicatorVisibility;
+  /** Show model indicator on Web chat. Default: 'off'. */
+  web: ModelIndicatorVisibility;
+}
+
 /** Agent behaviour configuration. */
 export interface AgentConfig {
   /** Display name of the assistant. */
@@ -258,6 +320,14 @@ export interface AgentConfig {
   keepRecentMessages: number;
   /** Extended thinking / chain-of-thought configuration. */
   thinking?: AgentThinkingConfig;
+  /** Session memory (structured per-session notes) configuration. */
+  sessionMemory?: SessionMemoryConfig;
+  /** Controls what memory is injected into the system prompt. */
+  contextInjection?: ContextInjectionConfig;
+  /** Model routing configuration. */
+  routing?: RoutingConfig;
+  /** Show which model responded (per channel). Off by default. */
+  showModelIndicator?: ModelIndicatorConfig;
 }
 
 /** User/auto-detected model capability overrides. */

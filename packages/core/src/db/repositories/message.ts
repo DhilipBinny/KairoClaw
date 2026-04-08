@@ -76,6 +76,14 @@ export class MessageRepository {
     await this.db.run('UPDATE messages SET content = ? WHERE id = ?', [content, id]);
   }
 
+  /** List messages in a session after a given message ID (for incremental processing). */
+  async listSinceId(sessionId: string, sinceId: number): Promise<MessageRow[]> {
+    return await this.db.query<MessageRow>(
+      'SELECT * FROM messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC',
+      [sessionId, sinceId],
+    );
+  }
+
   /** Delete a single message by id. */
   async deleteById(id: number): Promise<void> {
     await this.db.run('DELETE FROM messages WHERE id = ?', [id]);
