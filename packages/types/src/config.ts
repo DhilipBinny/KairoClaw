@@ -235,6 +235,30 @@ export interface AgentThinkingConfig {
   showThinking: ThinkingShowConfig;
 }
 
+/** Session memory extraction configuration. */
+export interface SessionMemoryConfig {
+  /** Enable/disable session memory. Default: true. */
+  enabled?: boolean;
+  /** Model to use for extraction (e.g. 'claude-haiku-4-5-20251001'). */
+  extractionModel?: string;
+  /** Token count at which first extraction triggers. Default: 8000. */
+  initTokenThreshold?: number;
+  /** Token growth since last extraction before re-extracting. Default: 4000. */
+  growthTokenThreshold?: number;
+}
+
+/** Controls what memory is injected into the system prompt. */
+export interface ContextInjectionConfig {
+  /** Max chars of PROFILE.md to inject. Default: 3000. */
+  profileMaxChars?: number;
+  /** Max chars of session memory to inject. Default: 3000. */
+  sessionMemoryMaxChars?: number;
+  /** Number of daily session file days to inject. 0 = disable. Default: 3. */
+  dailySessionDays?: number;
+  /** Max chars per daily session file. Default: 1500. */
+  dailySessionMaxChars?: number;
+}
+
 /** Agent behaviour configuration. */
 export interface AgentConfig {
   /** Display name of the assistant. */
@@ -251,6 +275,10 @@ export interface AgentConfig {
   keepRecentMessages: number;
   /** Extended thinking / chain-of-thought configuration. */
   thinking?: AgentThinkingConfig;
+  /** Session memory (structured per-session notes) configuration. */
+  sessionMemory?: SessionMemoryConfig;
+  /** Controls what memory is injected into the system prompt. */
+  contextInjection?: ContextInjectionConfig;
 }
 
 /** User/auto-detected model capability overrides. */

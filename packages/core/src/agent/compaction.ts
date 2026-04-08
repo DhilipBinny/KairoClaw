@@ -14,6 +14,7 @@ import { MessageRepository, type MessageRow } from '../db/repositories/message.j
 import type { ChatArgs, ProviderResponse } from '@agw/types';
 import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { getSessionMemoryForCompaction } from './session-memory.js';
 
 const log = createModuleLogger('llm');
 
@@ -487,7 +488,7 @@ export interface CompactionResult {
   tokens?: number;
   threshold?: number;
   reason?: string;
-  method?: 'llm-summary' | 'truncation' | 'soft-clean';
+  method?: 'session-memory' | 'llm-summary' | 'truncation' | 'soft-clean';
 }
 
 /**
@@ -568,6 +569,7 @@ export async function compactSession(
   db: DatabaseAdapter,
   config: GatewayConfig,
   callLLM?: CallLLMFn,
+  scopeKey?: string | null,
 ): Promise<CompactionResult> {
   const keepRecentMessages = config.agent?.keepRecentMessages ?? 10;
   const messageRepo = new MessageRepository(db);
@@ -585,28 +587,46 @@ export async function compactSession(
 
   const oldTokens = estimateMessageTokens(messages);
 
-  // Evict verbose tool results before summarization (reduces input by 60-80%)
-  const evictedOlder = evictToolResults(olderMessages);
-
-  // Attempt LLM-based summarization, fall back to extraction
+  // ── Try session memory first (no LLM call needed) ──────────
   let summaryText: string | null = null;
-  let method: 'llm-summary' | 'truncation' = 'truncation';
+  let method: 'session-memory' | 'llm-summary' | 'truncation' = 'truncation';
 
-  if (callLLM) {
+  const workspace = config.agent?.workspace || '';
+  if (workspace && scopeKey !== undefined) {
     try {
-      summaryText = await summarizeWithLLM(evictedOlder, callLLM, modelId);
-      if (summaryText) {
-        method = 'llm-summary';
+      const sessionMemoryContent = getSessionMemoryForCompaction(workspace, scopeKey ?? null, sessionId);
+      if (sessionMemoryContent) {
+        summaryText = sessionMemoryContent;
+        method = 'session-memory';
+        log.info({ sessionId, length: summaryText.length }, 'Compaction: using session memory as summary (no LLM call)');
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      log.warn({ err: errMsg }, 'LLM summarization threw, falling back to truncation');
+      log.debug({ err: errMsg }, 'Session memory not available for compaction, falling back');
     }
   }
 
-  // Fall back to simple extraction if LLM didn't produce a summary
+  // ── Fall back to LLM summarization ────────────────────────
   if (!summaryText) {
-    summaryText = buildCompactionSummary(evictedOlder);
+    // Evict verbose tool results before summarization (reduces input by 60-80%)
+    const evictedOlder = evictToolResults(olderMessages);
+
+    if (callLLM) {
+      try {
+        summaryText = await summarizeWithLLM(evictedOlder, callLLM, modelId);
+        if (summaryText) {
+          method = 'llm-summary';
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log.warn({ err: errMsg }, 'LLM summarization threw, falling back to truncation');
+      }
+    }
+
+    // Fall back to simple extraction if LLM didn't produce a summary
+    if (!summaryText) {
+      summaryText = buildCompactionSummary(evictedOlder);
+    }
   }
 
   // Delete all messages and re-insert compacted set WITHIN A TRANSACTION
@@ -650,7 +670,6 @@ export async function compactSession(
   // ── Post-compact file restoration ──────────────────────────
   // Re-inject recently touched files so the agent remembers what it was editing.
   // Scan ALL messages (including compacted ones) for file tool calls.
-  const workspace = config.agent?.workspace || '';
   let restoredFileCount = 0;
   if (workspace) {
     const touchedPaths = await extractTouchedFilePaths(sessionId, db);
@@ -719,6 +738,7 @@ export async function checkAndCompact(
   config: GatewayConfig,
   callLLM?: CallLLMFn,
   tenantId?: string,
+  scopeKey?: string | null,
 ): Promise<CompactionResult> {
   const caps = getModelCapabilities(modelId, config);
   const contextWindow = caps.contextWindow;
@@ -736,7 +756,7 @@ export async function checkAndCompact(
       const firstMsg = await messageRepo.listBySession(sessionId, 1);
       resolvedTenantId = firstMsg[0]?.tenant_id ?? 'default';
     }
-    return compactSession(sessionId, resolvedTenantId, modelId, db, config, callLLM);
+    return compactSession(sessionId, resolvedTenantId, modelId, db, config, callLLM, scopeKey);
   }
 
   // Stage 1: Soft compaction at 50% (strip tool results, no LLM call)
