@@ -37,7 +37,7 @@
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
-    "@dhilipbinny/kairo-enterprise": "^0.1.0"
+    "@bsigma-ai/kairo-enterprise": "^0.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

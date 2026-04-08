@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   // This prevents leaking tokens to child processes (e.g., Agent SDK subprocess)
   const sensitiveEnvVars = [
     'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
-    'OPENAI_API_KEY', 'KAIRO_LICENSE_KEY',
+    'OPENAI_API_KEY',
     'TELEGRAM_BOT_TOKEN', 'BRAVE_API_KEY',
   ];
   for (const key of sensitiveEnvVars) {
@@ -473,10 +473,10 @@ async function main(): Promise<void> {
         server.log.info('WhatsApp channel stopped via Settings');
       }
     }
-    // Provider toggle hot-reload
-    if (dotPath === 'providers.kairoPremium.enabled') {
+    // Kairo Premium config hot-reload (enabled, mode, defaultModel)
+    if (dotPath.startsWith('providers.kairoPremium.')) {
       await providerRegistry.reinitProviders();
-      server.log.info({ enabled: !!value }, 'Kairo Premium provider toggled via Settings');
+      server.log.info({ dotPath, value }, 'Kairo Premium config changed via Settings');
     }
     // Tool toggle hot-reload
     if (dotPath.startsWith('tools.') && dotPath.endsWith('.enabled')) {

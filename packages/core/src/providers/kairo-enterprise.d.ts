@@ -1,13 +1,12 @@
 /**
- * Type declarations for the optional @dhilipbinny/kairo-enterprise package.
+ * Type declarations for the optional @bsigma-ai/kairo-enterprise package.
  *
  * This package is not a dependency of KairoClaw — it's optionally installed
  * by enterprise customers. The dynamic import in kairo-premium.ts handles
  * the case where it's not installed.
  */
-declare module '@dhilipbinny/kairo-enterprise' {
+declare module '@bsigma-ai/kairo-enterprise' {
   export interface EnterpriseConfig {
-    licenseKey: string;
     authToken?: string;
     mode: 'oauth' | 'sdk';
     defaultModel?: string;
@@ -26,12 +25,6 @@ declare module '@dhilipbinny/kairo-enterprise' {
     note?: string;
   }
 
-  export function createProvider(config: EnterpriseConfig): EnterpriseProvider;
-  export function testConnection(config: EnterpriseConfig): Promise<TestResult>;
-  export function validateLicense(key: string): boolean;
-  export function isAvailable(): boolean;
-  export const VERSION: string;
-
   export interface ModelInfo {
     id: string;
     displayName: string;
@@ -39,5 +32,10 @@ declare module '@dhilipbinny/kairo-enterprise' {
     maxOutputTokens: number;
     capabilities: Record<string, unknown>;
   }
+
+  export function createProvider(config: EnterpriseConfig): EnterpriseProvider;
+  export function testConnection(config: EnterpriseConfig): Promise<TestResult>;
   export function listModels(authToken: string): Promise<ModelInfo[]>;
+  export function isAvailable(): boolean;
+  export const VERSION: string;
 }

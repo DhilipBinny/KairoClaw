@@ -191,7 +191,6 @@ export interface ProviderStatus {
   hasApiKey?: boolean;
   hasAuthToken?: boolean;
   hasBaseUrl?: boolean;
-  hasLicenseKey?: boolean;
   configured: boolean;
   available?: boolean;
   enabled?: boolean;

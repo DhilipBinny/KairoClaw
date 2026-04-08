@@ -717,7 +717,11 @@
           </div>
 
           {#if !providerStatus.kairoPremium.available}
-            <p class="premium-notice">Install the <code>@dhilipbinny/kairo-enterprise</code> package to enable premium authentication.</p>
+            <div class="premium-notice">
+              <p>Install the enterprise package to enable premium authentication:</p>
+              <code class="install-cmd">echo "@bsigma-ai:registry=https://npm.pkg.github.com" >> .npmrc && pnpm install @bsigma-ai/kairo-enterprise</code>
+              <p style="margin-top: 6px; font-size: 11px;">Requires a GitHub PAT with <code>read:packages</code> scope. Contact your administrator for access.</p>
+            </div>
           {:else}
             <!-- Enable/Disable toggle -->
             <div class="provider-toggle">
@@ -785,10 +789,6 @@
                 <span class="detail-label">Auth Token:</span>
                 <span class="detail-value">{providerStatus.kairoPremium.hasAuthToken ? '****' : 'Not set'}{providerStatus.kairoPremium.mode === 'sdk' && !providerStatus.kairoPremium.hasAuthToken ? ' (optional)' : ''}</span>
               </div>
-              <div class="detail-row">
-                <span class="detail-label">License:</span>
-                <span class="detail-value">{providerStatus.kairoPremium.hasLicenseKey ? '****' : 'Not set'}</span>
-              </div>
             </div>
 
             <div class="provider-actions">
@@ -809,12 +809,32 @@
                 onclick={() => {
                   showCredForm['kairo-premium'] = !showCredForm['kairo-premium'];
                   if (showCredForm['kairo-premium'] && !credForm['kairo-premium']) {
-                    credForm['kairo-premium'] = { authToken: '', licenseKey: '' };
+                    credForm['kairo-premium'] = { authToken: '' };
                   }
                 }}
               >
                 {showCredForm['kairo-premium'] ? 'Cancel' : 'Configure'}
               </button>
+              {#if providerStatus.kairoPremium.hasAuthToken}
+                <button
+                  class="btn btn-sm"
+                  onclick={async () => {
+                    savingCred = 'kairo-premium-clear';
+                    try {
+                      await saveProviderCredentials('kairo-premium', { authToken: '' });
+                      credMsg['kairo-premium'] = { text: 'Credentials cleared', ok: true };
+                      providerStatus = await getProviderStatus();
+                    } catch (e) {
+                      credMsg['kairo-premium'] = { text: e instanceof Error ? e.message : 'Failed', ok: false };
+                    } finally {
+                      savingCred = '';
+                    }
+                  }}
+                  disabled={savingCred === 'kairo-premium-clear'}
+                >
+                  {savingCred === 'kairo-premium-clear' ? 'Clearing...' : 'Clear Token'}
+                </button>
+              {/if}
             </div>
 
             {#if showCredForm['kairo-premium']}
@@ -828,15 +848,6 @@
                       </button>
                     </div>
                   </div>
-                <div class="cred-field">
-                  <label class="cred-label" for="kairo-license">License Key</label>
-                  <div class="cred-input-row">
-                    <input id="kairo-license" type={showPassword['kairo-license'] ? 'text' : 'password'} class="cred-input" bind:value={credForm['kairo-premium'].licenseKey} placeholder="KAIRO-..." />
-                    <button class="btn btn-xs" type="button" onclick={() => showPassword['kairo-license'] = !showPassword['kairo-license']}>
-                      {showPassword['kairo-license'] ? 'Hide' : 'Show'}
-                    </button>
-                  </div>
-                </div>
                 <div class="cred-actions">
                   <button
                     class="btn btn-sm btn-primary"
@@ -1011,7 +1022,16 @@
     font-size: 12px;
     color: var(--text-muted);
     padding: 8px 0;
-    font-style: italic;
+  }
+  .install-cmd {
+    display: block;
+    background: var(--bg-secondary, #1a1a2e);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-top: 6px;
+    word-break: break-all;
+    user-select: all;
   }
   .provider-toggle {
     padding: 8px 0;
