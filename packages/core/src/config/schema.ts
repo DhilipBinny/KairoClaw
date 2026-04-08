@@ -161,6 +161,39 @@ const thinkingSchema = z.object({
   showThinking: withObjectDefault(thinkingShowSchema),
 });
 
+const sessionMemorySchema = z.object({
+  enabled: z.boolean().default(true),
+  extractionModel: z.string().optional(),
+  initTokenThreshold: z.number().int().min(0).optional(),
+  growthTokenThreshold: z.number().int().min(0).optional(),
+});
+
+const contextInjectionSchema = z.object({
+  profileMaxChars: z.number().int().min(0).optional(),
+  sessionMemoryMaxChars: z.number().int().min(0).optional(),
+  dailySessionDays: z.number().int().min(0).optional(),
+  dailySessionMaxChars: z.number().int().min(0).optional(),
+});
+
+const routingSchema = z.object({
+  enabled: z.boolean().default(false),
+  forceModel: z.string().default(''),
+  fastModel: z.string().default('anthropic/claude-haiku-4-5-20251001'),
+  powerfulModel: z.string().default('anthropic/claude-opus-4-6'),
+  llmClassifier: z.boolean().default(true),
+  shortMessageThreshold: z.number().int().min(0).default(50),
+  opusPatterns: z.array(z.string()).default([]),
+  haikuPatterns: z.array(z.string()).default([]),
+});
+
+const modelIndicatorVisibility = z.enum(['off', 'admin_only', 'all']).default('off');
+
+const modelIndicatorSchema = z.object({
+  telegram: modelIndicatorVisibility,
+  whatsapp: modelIndicatorVisibility,
+  web: modelIndicatorVisibility,
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -169,6 +202,10 @@ const agentSchema = z.object({
   softCompactionThreshold: z.number().min(0).max(1).default(0.50),
   keepRecentMessages: z.number().int().min(0).default(10),
   thinking: withObjectDefault(thinkingSchema),
+  sessionMemory: withObjectDefault(sessionMemorySchema),
+  contextInjection: withObjectDefault(contextInjectionSchema),
+  routing: withObjectDefault(routingSchema),
+  showModelIndicator: withObjectDefault(modelIndicatorSchema),
 });
 
 const modelsCatalogSchema = z.object({
@@ -374,6 +411,7 @@ export const configDefaults: GatewayConfig = {
       budgetTokens: 10000,
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
+    showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
   },
   models: {
     catalog: {},
