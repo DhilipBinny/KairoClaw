@@ -553,6 +553,50 @@
       </div>
     </div>
 
+    <!-- Model Indicator -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-muted)">
+          <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+          <line x1="7" y1="7" x2="7.01" y2="7"></line>
+        </svg>
+        Model Indicator
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label">Model Indicator</label>
+            <span class="field-hint">Show which model (Haiku, Sonnet, Opus) responded to each message. Display only — not stored in conversation history.</span>
+          </div>
+        </div>
+        {#each [['Telegram', 'agent.showModelIndicator.telegram'], ['WhatsApp', 'agent.showModelIndicator.whatsapp'], ['Web Chat', 'agent.showModelIndicator.web']] as [label, path]}
+        <div class="field-row sub-field">
+          <div class="field-info">
+            <label class="field-label" for="model-indicator-{path}">{label}</label>
+          </div>
+          <div class="field-control">
+            <select
+              id="model-indicator-{path}"
+              class="select-input"
+              disabled={!!saving[path]}
+              value={getVal(path) || 'off'}
+              onchange={(e) => saveField(path, (e.target as HTMLSelectElement).value)}
+            >
+              <option value="off">Off</option>
+              <option value="admin_only">Admin only</option>
+              <option value="all">All users</option>
+            </select>
+            {#if feedback[path]?.msg}
+              <span class="field-feedback" class:ok={feedback[path].ok} class:err={!feedback[path].ok}>
+                {feedback[path].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+        {/each}
+      </div>
+    </div>
+
     <!-- Session Settings -->
     <div class="section">
       <h2 class="section-title">

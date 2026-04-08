@@ -181,6 +181,14 @@ const routingSchema = z.object({
   haikuPatterns: z.array(z.string()).default([]),
 });
 
+const modelIndicatorVisibility = z.enum(['off', 'admin_only', 'all']).default('off');
+
+const modelIndicatorSchema = z.object({
+  telegram: modelIndicatorVisibility,
+  whatsapp: modelIndicatorVisibility,
+  web: modelIndicatorVisibility,
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -192,6 +200,7 @@ const agentSchema = z.object({
   sessionMemory: withObjectDefault(sessionMemorySchema),
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
+  showModelIndicator: withObjectDefault(modelIndicatorSchema),
 });
 
 const modelsCatalogSchema = z.object({
@@ -393,6 +402,7 @@ export const configDefaults: GatewayConfig = {
       budgetTokens: 10000,
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
+    showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
   },
   models: {
     catalog: {},

@@ -19,7 +19,7 @@ import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
-import { splitMessage } from './utils.js';
+import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection } from '../security/input.js';
 
@@ -521,8 +521,14 @@ class TelegramChannel implements Channel {
           // If no media was sent successfully, fall through to text
         }
 
+        // Append model indicator if enabled (display only, not stored in DB)
+        let displayText = result.text;
+        if (shouldShowModelIndicator(this.config.agent?.showModelIndicator?.telegram, result.userRole) && result.model) {
+          displayText = appendModelIndicator(displayText, result.model);
+        }
+
         // Split long messages (Telegram limit: 4096 chars)
-        const chunks = splitMessage(result.text, 4000);
+        const chunks = splitMessage(displayText, 4000);
         for (const chunk of chunks) {
           await sendWithRetry(ctx, chunk, {
             parse_mode: 'Markdown',
