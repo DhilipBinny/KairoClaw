@@ -62,15 +62,12 @@ export class ProviderRegistry {
       log.info('Anthropic provider initialized (API key)');
     }
 
-    // Kairo Premium: proprietary auth via @dhilipbinny/kairo-enterprise package (OAuth + SDK)
+    // Kairo Premium: proprietary auth via @bsigma-ai/kairo-enterprise package (OAuth + SDK)
     if (cfg.kairoPremium?.enabled === true && await isKairoPremiumAvailable()) {
-      const licenseKey = this.secretsStore?.get('kairo', 'licenseKey') || '';
       const authToken = this.secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
-      if (licenseKey) {
-        const premium = await createKairoPremiumProvider(this.config, licenseKey, authToken);
-        if (premium) {
-          this.providers['kairo-premium'] = premium;
-        }
+      const premium = await createKairoPremiumProvider(this.config, authToken);
+      if (premium) {
+        this.providers['kairo-premium'] = premium;
       }
     }
 

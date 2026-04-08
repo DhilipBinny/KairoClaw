@@ -16,7 +16,7 @@ const ENV_TO_SECRETS: Array<{ envKey: string; namespace: string; secretKey: stri
   { envKey: 'ANTHROPIC_BASE_URL', namespace: 'providers.anthropic', secretKey: 'baseUrl' },
   { envKey: 'OPENAI_API_KEY', namespace: 'providers.openai', secretKey: 'apiKey' },
   { envKey: 'ANTHROPIC_AUTH_TOKEN', namespace: 'kairo.providers.anthropic', secretKey: 'authToken' },
-  { envKey: 'KAIRO_LICENSE_KEY', namespace: 'kairo', secretKey: 'licenseKey' },
+  // KAIRO_LICENSE_KEY removed — license system deferred to future release
   { envKey: 'OLLAMA_BASE_URL', namespace: 'providers.ollama', secretKey: 'baseUrl' },
   { envKey: 'TELEGRAM_BOT_TOKEN', namespace: 'channels.telegram', secretKey: 'botToken' },
   { envKey: 'BRAVE_API_KEY', namespace: 'tools.webSearch', secretKey: 'apiKey' },

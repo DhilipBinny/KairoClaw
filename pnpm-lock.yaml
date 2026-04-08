@@ -64,9 +64,9 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.5.0)
     optionalDependencies:
-      '@dhilipbinny/kairo-enterprise':
-        specifier: ^0.1.0
-        version: 0.1.0
+      '@bsigma-ai/kairo-enterprise':
+        specifier: ^0.2.0
+        version: 0.2.0
 
   packages/core:
     dependencies:
@@ -180,8 +180,8 @@ packages:
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
 
-  '@anthropic-ai/claude-agent-sdk@0.2.92':
-    resolution: {integrity: sha512-loYyxVUC5gBwHjGi9Fv0b84mduJTp9Z3Pum+y/7IVQDb4NynKfVQl6l4VeDKZaW+1QTQtd25tY4hwUznD7Krqw==}
+  '@anthropic-ai/claude-agent-sdk@0.2.96':
+    resolution: {integrity: sha512-EK2L4xpcWMNRSE7Zr0mjty/LCB4q60FmUjI+Z0ui91sd3xL1BVj6fhoZsfZFb9IYWkA309IIcrDIfvJXD8yNbw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       zod: ^4.0.0
@@ -236,6 +236,10 @@ packages:
   '@borewit/text-codec@0.2.2':
     resolution: {integrity: sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ==}
 
+  '@bsigma-ai/kairo-enterprise@0.2.0':
+    resolution: {integrity: sha512-6QR5qovBtwjifMUEc9iDuFcY8N1Kye7+N+qkf6aa7x8jVL3l47emxZ/+8JOjkC4OUcCBgQekhW1ArvSLkJQjNg==, tarball: https://npm.pkg.github.com/download/@bsigma-ai/kairo-enterprise/0.2.0/189d1c3eb83dfb09c3a273c5c9807d61d34d0b93}
+    engines: {node: '>=20'}
+
   '@cacheable/memory@2.0.8':
     resolution: {integrity: sha512-FvEb29x5wVwu/Kf93IWwsOOEuhHh6dYCJF3vcKLzXc0KXIW181AOzv6ceT4ZpBHDvAfG60eqb+ekmrnLHIy+jw==}
 
@@ -245,10 +249,6 @@ packages:
 
   '@cacheable/utils@2.4.0':
     resolution: {integrity: sha512-PeMMsqjVq+bF0WBsxFBxr/WozBJiZKY0rUojuaCoIaKnEl3Ju1wfEwS+SV1DU/cSe8fqHIPiYJFif8T3MVt4cQ==}
-
-  '@dhilipbinny/kairo-enterprise@0.1.0':
-    resolution: {integrity: sha512-ppYpNqrj1kj/hj1lcy1Z2VSc7b539BXPwZopnkf2HhEvZ1iCW3J6RZ9rB5X+L/CQuPVZGVmnHAqH7zHeDMwDhg==, tarball: https://npm.pkg.github.com/download/@dhilipbinny/kairo-enterprise/0.1.0/20c5a3424dc54b1437be31e4ec71f5287f177ce6}
-    engines: {node: '>=20'}
 
   '@emnapi/runtime@1.9.0':
     resolution: {integrity: sha512-QN75eB0IH2ywSpRpNddCRfQIhmJYBCJ1x5Lb3IscKAL8bMnVAKnRg8dCoXbHzVLLH7P38N2Z3mtulB7W0J0FKw==}
@@ -640,8 +640,8 @@ packages:
   '@hapi/hoek@9.3.0':
     resolution: {integrity: sha512-/c6rf4UJlmHlC9b5BaNvzAcFv7HZ2QHaV0D4/HNlBdvFnvQq8RI4kYdhyPCl7Xj+oWvTWQ8ujhqS53LIgAe6KQ==}
 
-  '@hono/node-server@1.19.12':
-    resolution: {integrity: sha512-txsUW4SQ1iilgE0l9/e9VQWmELXifEFvmdA1j6WFh/aFPj99hIntrSsq/if0UWyGVkmrRPKA1wCeP+UCr1B9Uw==}
+  '@hono/node-server@1.19.13':
+    resolution: {integrity: sha512-TsQLe4i2gvoTtrHje625ngThGBySOgSK3Xo2XRYOdqGN1teR8+I7vchQC46uLJi8OF62YTYA3AhSpumtkhsaKQ==}
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
@@ -1901,8 +1901,8 @@ packages:
     resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
     engines: {node: '>=12.0.0'}
 
-  hono@4.12.10:
-    resolution: {integrity: sha512-mx/p18PLy5og9ufies2GOSUqep98Td9q4i/EF6X7yJgAiIopxqdfIO3jbqsi3jRgTgw88jMDEzVKi+V2EF+27w==}
+  hono@4.12.12:
+    resolution: {integrity: sha512-p1JfQMKaceuCbpJKAPKVqyqviZdS0eUxH9v82oWo1kb9xjQ5wA6iP3FNVAPDFlz5/p7d45lO+BpSk1tuSZMF4Q==}
     engines: {node: '>=16.9.0'}
 
   hookified@1.15.1:
@@ -2984,7 +2984,7 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
 
-  '@anthropic-ai/claude-agent-sdk@0.2.92(zod@4.3.6)':
+  '@anthropic-ai/claude-agent-sdk@0.2.96(zod@4.3.6)':
     dependencies:
       '@anthropic-ai/sdk': 0.80.0(zod@4.3.6)
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
@@ -3038,6 +3038,16 @@ snapshots:
 
   '@borewit/text-codec@0.2.2': {}
 
+  '@bsigma-ai/kairo-enterprise@0.2.0':
+    dependencies:
+      '@anthropic-ai/claude-agent-sdk': 0.2.96(zod@4.3.6)
+      '@anthropic-ai/sdk': 0.52.0
+      zod: 4.3.6
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - supports-color
+    optional: true
+
   '@cacheable/memory@2.0.8':
     dependencies:
       '@cacheable/utils': 2.4.0
@@ -3055,17 +3065,6 @@ snapshots:
     dependencies:
       hashery: 1.5.0
       keyv: 5.6.0
-
-  '@dhilipbinny/kairo-enterprise@0.1.0':
-    dependencies:
-      '@anthropic-ai/claude-agent-sdk': 0.2.92(zod@4.3.6)
-      '@anthropic-ai/sdk': 0.52.0
-      '@dhilipbinny/kairo-enterprise': 'link:'
-      zod: 4.3.6
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - supports-color
-    optional: true
 
   '@emnapi/runtime@1.9.0':
     dependencies:
@@ -3335,9 +3334,9 @@ snapshots:
 
   '@hapi/hoek@9.3.0': {}
 
-  '@hono/node-server@1.19.12(hono@4.12.10)':
+  '@hono/node-server@1.19.13(hono@4.12.12)':
     dependencies:
-      hono: 4.12.10
+      hono: 4.12.12
     optional: true
 
   '@humanfs/core@0.19.1': {}
@@ -3489,7 +3488,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(zod@4.3.6)':
     dependencies:
-      '@hono/node-server': 1.19.12(hono@4.12.10)
+      '@hono/node-server': 1.19.13(hono@4.12.12)
       ajv: 8.18.0
       ajv-formats: 3.0.1(ajv@8.18.0)
       content-type: 1.0.5
@@ -3499,7 +3498,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1
       express-rate-limit: 8.3.2(express@5.2.1)
-      hono: 4.12.10
+      hono: 4.12.12
       jose: 6.2.2
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -4684,7 +4683,7 @@ snapshots:
 
   highlight.js@11.11.1: {}
 
-  hono@4.12.10:
+  hono@4.12.12:
     optional: true
 
   hookified@1.15.1: {}

@@ -395,19 +395,17 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         }));
         return { success: true, models };
       } else if (provider === 'kairo-premium') {
-        // Test Kairo Premium via @dhilipbinny/kairo-enterprise package
+        // Test Kairo Premium via @bsigma-ai/kairo-enterprise package
         const { isKairoPremiumAvailable, testKairoPremiumConnection } = await import('../providers/kairo-premium.js');
         if (!await isKairoPremiumAvailable()) {
           return { success: false, error: 'Kairo Enterprise package not installed.' };
         }
         const kAuthToken = secretsStore?.get('kairo.providers.anthropic', 'authToken') || reqAuthToken || '';
-        const kLicenseKey = secretsStore?.get('kairo', 'licenseKey') || '';
         const kMethod = (config.providers?.kairoPremium?.mode || 'oauth') as 'oauth' | 'sdk';
         if (!kAuthToken && kMethod === 'oauth') return { success: false, error: 'No auth token configured' };
-        if (!kLicenseKey) return { success: false, error: 'No license key configured' };
 
         const { listKairoPremiumModels } = await import('../providers/kairo-premium.js');
-        const result = await testKairoPremiumConnection({ licenseKey: kLicenseKey, authToken: kAuthToken, mode: kMethod });
+        const result = await testKairoPremiumConnection({ authToken: kAuthToken, mode: kMethod });
         if (result.success) {
           // Fetch models using OAuth token if available (works for both modes — same account)
           const tokenForModels = secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
@@ -456,9 +454,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       kairoPremium: {
         available: premiumAvailable,
         hasAuthToken: hasVal(secretsStore?.get('kairo.providers.anthropic', 'authToken')),
-        hasLicenseKey: hasVal(secretsStore?.get('kairo', 'licenseKey')),
-        configured: hasVal(secretsStore?.get('kairo', 'licenseKey'))
-          && ((config.providers?.kairoPremium?.mode || 'oauth') === 'sdk' || hasVal(secretsStore?.get('kairo.providers.anthropic', 'authToken'))),
+        configured: (config.providers?.kairoPremium?.mode || 'oauth') === 'sdk'
+          || hasVal(secretsStore?.get('kairo.providers.anthropic', 'authToken')),
         enabled: config.providers?.kairoPremium?.enabled ?? false,
         mode: config.providers?.kairoPremium?.mode || 'oauth',
       },
@@ -509,16 +506,26 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         secretsStore.set('kairo.providers.anthropic', 'authToken', kairoPremiumBody.authToken || '');
         changed = true;
       }
-      if (kairoPremiumBody.licenseKey !== undefined) {
-        secretsStore.set('kairo', 'licenseKey', kairoPremiumBody.licenseKey || '');
-        changed = true;
-      }
-      // Auto-enable/disable based on credential state (SDK mode doesn't need authToken)
+      // Auto-enable/disable based on credential state
       const hasToken = !!secretsStore.get('kairo.providers.anthropic', 'authToken');
-      const hasLicense = !!secretsStore.get('kairo', 'licenseKey');
       const mode = config.providers?.kairoPremium?.mode || 'oauth';
       if (config.providers.kairoPremium) {
-        config.providers.kairoPremium.enabled = hasLicense && (mode === 'sdk' || hasToken);
+        const shouldEnable = mode === 'sdk' || hasToken;
+        config.providers.kairoPremium.enabled = shouldEnable;
+        // Persist enabled state to disk so it survives restarts
+        try {
+          const stateDir = config._stateDir;
+          if (stateDir) {
+            const configPath = path.join(stateDir, 'config.json');
+            if (fs.existsSync(configPath)) {
+              const raw = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+              if (!raw.providers) raw.providers = {};
+              if (!raw.providers.kairoPremium) raw.providers.kairoPremium = {};
+              raw.providers.kairoPremium.enabled = shouldEnable;
+              fs.writeFileSync(configPath, JSON.stringify(raw, null, 2), { mode: 0o600 });
+            }
+          }
+        } catch { /* non-critical — config will be correct in memory */ }
       }
     }
 
