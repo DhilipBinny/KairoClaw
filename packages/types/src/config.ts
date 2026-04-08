@@ -259,6 +259,26 @@ export interface ContextInjectionConfig {
   dailySessionMaxChars?: number;
 }
 
+/** Model routing configuration. */
+export interface RoutingConfig {
+  /** Enable intelligent model routing. Default: false. */
+  enabled?: boolean;
+  /** Force a specific model — overrides all routing. Empty string = use router. */
+  forceModel?: string;
+  /** Model for simple/fast tasks. Default: Haiku. */
+  fastModel?: string;
+  /** Model for complex/powerful tasks. Default: Opus. */
+  powerfulModel?: string;
+  /** Use LLM classifier for ambiguous messages (Stage 2). Default: true. */
+  llmClassifier?: boolean;
+  /** Max message length (chars) considered "short" for Haiku routing. Default: 50. */
+  shortMessageThreshold?: number;
+  /** Custom patterns that force Opus (regex strings). */
+  opusPatterns?: string[];
+  /** Custom patterns that force Haiku (regex strings). */
+  haikuPatterns?: string[];
+}
+
 /** Agent behaviour configuration. */
 export interface AgentConfig {
   /** Display name of the assistant. */
@@ -279,6 +299,8 @@ export interface AgentConfig {
   sessionMemory?: SessionMemoryConfig;
   /** Controls what memory is injected into the system prompt. */
   contextInjection?: ContextInjectionConfig;
+  /** Model routing configuration. */
+  routing?: RoutingConfig;
 }
 
 /** User/auto-detected model capability overrides. */

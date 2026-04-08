@@ -57,6 +57,8 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'channels.whatsapp.enabled', 'channels.whatsapp.allowFrom', 'channels.whatsapp.groupAllowFrom', 'channels.whatsapp.groupsEnabled', 'channels.whatsapp.groupRequireMention', 'channels.whatsapp.sendReadReceipts',
       'channels.whatsapp.outboundPolicy', 'channels.whatsapp.outboundAllowlist',
       'channels.telegram.outboundPolicy', 'channels.telegram.outboundAllowlist',
+      'agent.routing.enabled', 'agent.routing.forceModel', 'agent.routing.fastModel', 'agent.routing.powerfulModel',
+      'agent.routing.llmClassifier', 'agent.routing.shortMessageThreshold', 'agent.routing.opusPatterns', 'agent.routing.haikuPatterns',
       'tools.exec.enabled', 'tools.exec.timeout',
       'tools.webSearch.enabled',
       'tools.webFetch.enabled', 'tools.webFetch.maxChars',
