@@ -2,6 +2,72 @@
  * Shared utilities for channel implementations.
  */
 
+// ── Model indicator ─────────────────────────────────────
+
+const SUPERSCRIPT_MAP: Record<string, string> = {
+  'A': 'ᴬ', 'B': 'ᴮ', 'C': 'ᶜ', 'D': 'ᴰ', 'E': 'ᴱ', 'F': 'ᶠ', 'G': 'ᴳ', 'H': 'ᴴ',
+  'I': 'ᴵ', 'J': 'ᴶ', 'K': 'ᴷ', 'L': 'ᴸ', 'M': 'ᴹ', 'N': 'ᴺ', 'O': 'ᴼ', 'P': 'ᴾ',
+  'Q': 'ᵠ', 'R': 'ᴿ', 'S': 'ˢ', 'T': 'ᵀ', 'U': 'ᵁ', 'V': 'ⱽ', 'W': 'ᵂ', 'X': 'ˣ',
+  'Y': 'ʸ', 'Z': 'ᶻ',
+  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
+  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '-': '⁻', '.': '·', ' ': ' ',
+};
+
+/**
+ * Convert a string to Unicode superscript characters.
+ * Characters not in the map pass through unchanged.
+ *
+ * @example
+ * toSuperscript('gpt-4.1-mini') // 'ᴳᴾᵀ⁻⁴·¹⁻ᴹᴵᴺᴵ'
+ * toSuperscript('claude-4-opus') // 'ᶜᴸᴬᵁᴰᴱ⁻⁴⁻ᴼᴾᵁˢ'
+ */
+export function toSuperscript(label: string): string {
+  return [...label.toUpperCase()].map((c) => SUPERSCRIPT_MAP[c] ?? c).join('');
+}
+
+/**
+ * Extract short model name from full model ID.
+ * Exported so the WebSocket payload can send the resolved short name,
+ * avoiding duplicated resolution logic in the UI.
+ */
+export function getModelShortName(modelId: string): string {
+  const lower = modelId.toLowerCase();
+  // Anthropic family
+  if (lower.includes('haiku')) return 'haiku';
+  if (lower.includes('sonnet')) return 'sonnet';
+  if (lower.includes('opus')) return 'opus';
+  // Extract model name after provider prefix (e.g. "openai/gpt-4o" → "gpt-4o")
+  const parts = modelId.split('/');
+  return parts[parts.length - 1] || modelId;
+}
+
+/**
+ * Determine if the model indicator should be shown for a given user role.
+ * - 'off': never shown
+ * - 'admin_only': shown to admin and power_user roles only
+ * - 'all': shown to all users
+ */
+export function shouldShowModelIndicator(
+  setting: string | undefined,
+  userRole: string | undefined,
+): boolean {
+  if (!setting || setting === 'off') return false;
+  if (setting === 'all') return true;
+  // 'admin_only': show for admin and power_user
+  return userRole === 'admin' || userRole === 'power_user';
+}
+
+/**
+ * Append a small model indicator to message text.
+ * For display only — not stored in DB, not sent to LLM.
+ */
+export function appendModelIndicator(text: string, modelId: string | undefined): string {
+  if (!text || !modelId) return text;
+  const shortName = getModelShortName(modelId);
+  return `${text}\n\n${toSuperscript(shortName)}`;
+}
+
 // ── Markdown → WhatsApp formatting ───────────────────────
 
 /**

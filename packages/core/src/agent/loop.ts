@@ -755,6 +755,8 @@ export async function runAgent(
     thinkingText: finalThinkingText,
     usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
     ...(collectedMedia.length > 0 ? { media: collectedMedia } : {}),
+    model,
+    userRole: context.user?.role,
   };
 }
 

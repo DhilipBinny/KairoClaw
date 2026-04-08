@@ -282,6 +282,10 @@
       </div>
     {/if}
 
+    {#if message.modelShortName && message.role === 'assistant' && !message.isStreaming}
+      <span class="model-indicator">{message.modelShortName}</span>
+    {/if}
+
     {#if message.media && message.media.length > 0}
       <div class="media-attachments">
         {#each message.media as attachment}
@@ -387,6 +391,15 @@
   .error-avatar {
     background: var(--red) !important;
     box-shadow: 0 2px 8px rgba(244, 63, 94, 0.3) !important;
+  }
+  .model-indicator {
+    display: inline-block;
+    font-size: 0.65rem;
+    color: var(--text-muted, #666);
+    opacity: 0.5;
+    margin-top: 4px;
+    font-family: monospace;
+    letter-spacing: 0.5px;
   }
   .message-body {
     flex: 1;
