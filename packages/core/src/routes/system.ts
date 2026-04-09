@@ -151,7 +151,31 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       checks.push({ name: 'Ollama', status: 'warn', message: `Not reachable: ${msg.split('\n')[0]}` });
     }
 
-    // 4. Check Telegram
+    // 4. Check Kairo Premium
+    if (config.providers?.kairoPremium?.enabled) {
+      try {
+        const { isKairoPremiumAvailable, testKairoPremiumConnection } = await import('../providers/kairo-premium.js');
+        if (!await isKairoPremiumAvailable()) {
+          checks.push({ name: 'Kairo Premium', status: 'error', message: 'Enterprise package not installed' });
+        } else {
+          const kAuthToken = secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
+          const kMode = (config.providers.kairoPremium.mode || 'oauth') as 'oauth' | 'sdk';
+          const result = await testKairoPremiumConnection({ authToken: kAuthToken, mode: kMode });
+          if (result.success) {
+            checks.push({ name: 'Kairo Premium', status: 'ok', message: `Connected (${kMode}) — ${result.model || 'ok'}` });
+          } else {
+            checks.push({ name: 'Kairo Premium', status: 'error', message: result.error || 'Connection failed' });
+          }
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        checks.push({ name: 'Kairo Premium', status: 'error', message: `Check failed: ${msg}` });
+      }
+    } else {
+      checks.push({ name: 'Kairo Premium', status: 'skip', message: 'Not enabled' });
+    }
+
+    // 5. Check Telegram (renumbered from 4)
     if (config.channels.telegram?.enabled) {
       const tgBotToken = secretsStore?.get('channels.telegram', 'botToken') || config.channels.telegram?.botToken;
       if (tgBotToken && !tgBotToken.startsWith('${')) {
