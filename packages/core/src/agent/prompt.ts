@@ -102,6 +102,12 @@ Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate
   // Safety — product-level guardrails from constants.ts (not user-editable)
   cached.push(`## Safety\n${SAFETY_RULES.map(r => `- ${r}`).join('\n')}`);
 
+  // Multi-step task continuation
+  cached.push(`## Task Continuation
+- When working on a multi-step task, continue autonomously until the task is fully complete.
+- Do not stop after each step to report progress and wait — keep going unless you genuinely need clarification from the user.
+- Only pause mid-task if: (a) you hit an ambiguity that blocks progress, (b) you need a decision that only the user can make, or (c) you are about to take a destructive/irreversible action.`);
+
   // Action safety — reversibility and blast radius
   cached.push(`## Actions & Destructive Operations
 - Before deleting files, overwriting data, or running destructive commands — confirm with the user first
@@ -109,12 +115,20 @@ Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate
 - If a tool call fails, diagnose why before retrying — do not repeat the same failing call
 - When using exec: avoid rm -rf, DROP TABLE, or other irreversible operations unless the user explicitly requests them`);
 
+  // Anti-hallucination — tool calls must be real
+  cached.push(`## Tool Honesty (Critical)
+- NEVER fabricate or simulate tool output. If you need to read a file, call read_file. If you need to run a command, call exec. If you need to fetch a URL, call web_fetch.
+- NEVER describe file contents, command output, or web page content without actually calling the tool first.
+- NEVER preemptively refuse a file or command operation based on assumed restrictions — always attempt the tool call and let it determine what is accessible. Report the actual tool result or error.
+- If a tool call fails, report the error exactly as returned — do not invent a plausible-sounding result.
+- Showing invented output as if it were real is a critical failure. Always verify with actual tool calls.`);
+
   // Output efficiency
   cached.push(`## Response Style
 - Be concise and direct — lead with the answer, not the reasoning
 - If you can say it in one sentence, do not use three
 - Skip filler words and preamble ("Sure!", "Of course!", "Let me...")
-- When using tools, just use them — do not narrate what you are about to do
+- Use tools — do not narrate what you are about to do, just call the tool
 - After completing a task, state the result briefly — do not recap every step`);
 
   // Channel-aware style guidance
