@@ -45,6 +45,32 @@
   let selectedSession: string | null = $state(null);
   let selectedMessages: SessionMessage[] = $state([]);
   let timeline: TimelineEntry[] = $state([]);
+
+  interface TurnGroup {
+    number: number;
+    entries: TimelineEntry[];
+  }
+
+  let turnGroups = $derived((): TurnGroup[] => {
+    // Re-sort chronologically for grouping
+    const sorted = [...timeline].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    const groups: TimelineEntry[][] = [];
+    let current: TimelineEntry[] = [];
+    for (const entry of sorted) {
+      if (entry.type === 'message' && entry.message?.role === 'user') {
+        if (current.length > 0) groups.push(current);
+        current = [entry];
+      } else {
+        current.push(entry);
+      }
+    }
+    if (current.length > 0) groups.push(current);
+    // Reverse for newest-first, assign turn numbers from original order
+    return groups.reverse().map((entries, i, arr) => ({
+      number: arr.length - i,
+      entries,
+    }));
+  });
   let loadingMessages = $state(false);
   let deleteInProgress = $state('');
 
@@ -125,7 +151,7 @@
       for (const tc of tcData.toolCalls) {
         entries.push({ type: 'tool_call', timestamp: tc.created_at, toolCall: tc });
       }
-      entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      entries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
       timeline = entries;
     } catch (e) {
       console.error('Failed to load session:', e);
@@ -291,37 +317,42 @@
           <div class="loading"><span class="spinner"></span> Loading messages...</div>
         {:else}
           <div class="messages-list">
-            {#each timeline as entry}
-              {#if entry.type === 'message' && entry.message}
-                <div class="message-row" class:user={entry.message.role === 'user'} class:assistant={entry.message.role === 'assistant'} class:system={entry.message.role === 'system'}>
-                  <div class="message-role">
-                    <Badge variant={entry.message.role === 'user' ? 'blue' : entry.message.role === 'system' ? 'yellow' : 'green'}>{entry.message.role}</Badge>
-                  </div>
-                  <div class="message-content">{entry.message.content?.slice(0, 2000) || ''}{(entry.message.content?.length ?? 0) > 2000 ? '...' : ''}</div>
-                </div>
-              {:else if entry.type === 'tool_call' && entry.toolCall}
-                <div class="tool-call-row" class:error={entry.toolCall.status === 'error'}>
-                  <div class="tool-call-header">
-                    <Badge variant={entry.toolCall.status === 'error' ? 'red' : entry.toolCall.status === 'denied' ? 'yellow' : 'default'}>
-                      {entry.toolCall.tool_name}
-                    </Badge>
-                    {#if entry.toolCall.duration_ms}
-                      <span class="tool-duration">{entry.toolCall.duration_ms}ms</span>
-                    {/if}
-                    <span class="tool-status" class:success={entry.toolCall.status === 'success'} class:err={entry.toolCall.status === 'error'}>{entry.toolCall.status}</span>
-                  </div>
-                  <details class="tool-details">
-                    <summary>Arguments</summary>
-                    <pre class="tool-json">{formatJson(entry.toolCall.arguments)}</pre>
-                  </details>
-                  {#if entry.toolCall.result}
-                    <details class="tool-details">
-                      <summary>Result</summary>
-                      <pre class="tool-json">{formatJson(entry.toolCall.result)}</pre>
-                    </details>
+            {#each turnGroups() as turn (turn.number)}
+              <div class="turn-group">
+                <div class="turn-label">Turn {turn.number}</div>
+                {#each turn.entries as entry}
+                  {#if entry.type === 'message' && entry.message}
+                    <div class="message-row" class:user={entry.message.role === 'user'} class:assistant={entry.message.role === 'assistant'} class:system={entry.message.role === 'system'}>
+                      <div class="message-role">
+                        <Badge variant={entry.message.role === 'user' ? 'blue' : entry.message.role === 'system' ? 'yellow' : 'green'}>{entry.message.role}</Badge>
+                      </div>
+                      <div class="message-content">{entry.message.content?.slice(0, 2000) || ''}{(entry.message.content?.length ?? 0) > 2000 ? '...' : ''}</div>
+                    </div>
+                  {:else if entry.type === 'tool_call' && entry.toolCall}
+                    <div class="tool-call-row" class:error={entry.toolCall.status === 'error'}>
+                      <div class="tool-call-header">
+                        <Badge variant={entry.toolCall.status === 'error' ? 'red' : entry.toolCall.status === 'denied' ? 'yellow' : 'default'}>
+                          {entry.toolCall.tool_name}
+                        </Badge>
+                        {#if entry.toolCall.duration_ms}
+                          <span class="tool-duration">{entry.toolCall.duration_ms}ms</span>
+                        {/if}
+                        <span class="tool-status" class:success={entry.toolCall.status === 'success'} class:err={entry.toolCall.status === 'error'}>{entry.toolCall.status}</span>
+                      </div>
+                      <details class="tool-details">
+                        <summary>Arguments</summary>
+                        <pre class="tool-json">{formatJson(entry.toolCall.arguments)}</pre>
+                      </details>
+                      {#if entry.toolCall.result}
+                        <details class="tool-details">
+                          <summary>Result</summary>
+                          <pre class="tool-json">{formatJson(entry.toolCall.result)}</pre>
+                        </details>
+                      {/if}
+                    </div>
                   {/if}
-                </div>
-              {/if}
+                {/each}
+              </div>
             {:else}
               <div class="empty">No messages in this session</div>
             {/each}
@@ -495,8 +526,38 @@
     padding: 2px 8px;
     border-radius: var(--radius-sm);
   }
-  .messages-list { flex: 1; overflow-y: auto; padding: 12px; }
-  .message-row { padding: 12px 14px; margin-bottom: 8px; border-radius: var(--radius); }
+  .messages-list {
+    flex: 1;
+    overflow-y: scroll;
+    padding: 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .messages-list::-webkit-scrollbar { width: 6px; }
+  .messages-list::-webkit-scrollbar-track { background: transparent; }
+  .messages-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .messages-list::-webkit-scrollbar-thumb:hover { background: var(--text-ghost); }
+
+  /* Turn grouping */
+  .turn-group {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 12px;
+  }
+  .turn-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-ghost);
+    padding: 5px 12px;
+    background: var(--bg-raised);
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .message-row { padding: 12px 14px; border-top: 1px solid var(--border-subtle); }
+  .message-row:first-of-type { border-top: none; }
   .message-row.user { background: var(--bg-void); }
   .message-row.assistant { background: var(--bg-raised); }
   .message-role { margin-bottom: 6px; }
@@ -506,8 +567,7 @@
   /* Tool call rows */
   .tool-call-row {
     padding: 8px 14px;
-    margin-bottom: 4px;
-    border-radius: var(--radius);
+    border-top: 1px solid var(--border-subtle);
     background: var(--bg-surface);
     border-left: 3px solid var(--accent);
     font-size: 12px;
