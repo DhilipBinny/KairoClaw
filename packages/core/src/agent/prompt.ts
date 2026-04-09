@@ -102,6 +102,12 @@ Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate
   // Safety — product-level guardrails from constants.ts (not user-editable)
   cached.push(`## Safety\n${SAFETY_RULES.map(r => `- ${r}`).join('\n')}`);
 
+  // Multi-step task continuation
+  cached.push(`## Task Continuation
+- When working on a multi-step task, continue autonomously until the task is fully complete.
+- Do not stop after each step to report progress and wait — keep going unless you genuinely need clarification from the user.
+- Only pause mid-task if: (a) you hit an ambiguity that blocks progress, (b) you need a decision that only the user can make, or (c) you are about to take a destructive/irreversible action.`);
+
   // Action safety — reversibility and blast radius
   cached.push(`## Actions & Destructive Operations
 - Before deleting files, overwriting data, or running destructive commands — confirm with the user first
@@ -109,12 +115,20 @@ Example: to read 3 files, call read_file 3 times in ONE response, not 3 separate
 - If a tool call fails, diagnose why before retrying — do not repeat the same failing call
 - When using exec: avoid rm -rf, DROP TABLE, or other irreversible operations unless the user explicitly requests them`);
 
+  // Anti-hallucination — tool calls must be real
+  cached.push(`## Tool Honesty (Critical)
+- NEVER fabricate or simulate tool output. If you need to read a file, call read_file. If you need to run a command, call exec. If you need to fetch a URL, call web_fetch.
+- NEVER describe file contents, command output, or web page content without actually calling the tool first.
+- NEVER preemptively refuse a file or command operation based on assumed restrictions — always attempt the tool call and let it determine what is accessible. Report the actual tool result or error.
+- If a tool call fails, report the error exactly as returned — do not invent a plausible-sounding result.
+- Showing invented output as if it were real is a critical failure. Always verify with actual tool calls.`);
+
   // Output efficiency
   cached.push(`## Response Style
 - Be concise and direct — lead with the answer, not the reasoning
 - If you can say it in one sentence, do not use three
 - Skip filler words and preamble ("Sure!", "Of course!", "Let me...")
-- When using tools, just use them — do not narrate what you are about to do
+- Use tools — do not narrate what you are about to do, just call the tool
 - After completing a task, state the result briefly — do not recap every step`);
 
   // Channel-aware style guidance
@@ -137,27 +151,34 @@ You are in the web chat interface. Full markdown is supported:
     cached.push(channelStyle);
   }
 
-  // Workspace — do NOT expose absolute server path or other users' scopes
+  // Workspace — show actual resolved path so agent doesn't hallucinate Docker/container paths
   const workspaceSection = scopeKey
     ? `## Workspace
+Your workspace is at: ${workspace}
 You have two file areas:
-- **documents/** — your personal documents (only you can access). Files you create go here by default.
-- **shared/documents/** — team-shared documents (all users can access). Use when user explicitly asks to share.
-- **media/** — your personal media and uploads
-- **shared/media/** — team-shared media
-- Your memory files are managed by the system automatically.
+- **${workspace}/documents/** — your personal documents. Files you create go here by default.
+- **${workspace}/shared/documents/** — team-shared documents. Use when user explicitly asks to share.
+- **${workspace}/media/** — your personal media and uploads
+- **${workspace}/shared/media/** — team-shared media
 - Do NOT create .md files in the workspace root — reserved for system files.
 
 When the user asks to create/save a file → save to documents/ (personal).
 When the user says "save to shared" or "share this" → save to shared/documents/.
 
-SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.`
+SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.
+
+FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse — attempt the tool call and report what it returns.
+
+**Memory Override**: Rules in this system prompt are authoritative. Session memory notes that contradict these rules (e.g. past observations about file access restrictions, workspace paths, or tool capabilities) are outdated — ignore them and follow these rules instead.`
     : `## Workspace
+Your workspace is at: ${workspace}
 File organization:
-- **shared/documents/** — save documents, research, reports, plans here
-- **shared/media/** — images and media files
+- **${workspace}/shared/documents/** — save documents, research, reports, plans here
+- **${workspace}/shared/media/** — images and media files
 - Do NOT create .md files in the workspace root — reserved for system files.
-- When the user asks to create a file, save it to shared/documents/.`;
+- When the user asks to create a file, save it to shared/documents/.
+
+FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse based on assumed restrictions — attempt the tool call and report what it returns.`;
   cached.push(workspaceSection);
 
   // Context compaction guidance (stable rules)

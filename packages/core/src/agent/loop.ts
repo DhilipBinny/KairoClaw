@@ -8,6 +8,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import type {
   InboundMessage,
   AgentCallbacks,
@@ -51,6 +52,36 @@ import { classifyError, logClassifiedError } from '../providers/errors.js';
 
 /** Sessions currently running memory extraction — prevents concurrent extraction races. */
 const _activeExtractions = new Set<string>();
+
+// ─── Debug prompt logger ─────────────────────────────────────
+
+/** Strip base64 image data from messages to keep log files small. */
+function sanitizeMessagesForLog(messages: Message[]): unknown[] {
+  return messages.map(m => {
+    if (!Array.isArray(m.content)) return m;
+    return {
+      ...m,
+      content: (m.content as MessageContentPart[]).map(p =>
+        p.type === 'image'
+          ? { type: 'image', source: { type: 'base64', media_type: (p.source as any)?.media_type, data: '[omitted]' } }
+          : p,
+      ),
+    };
+  });
+}
+
+/** Append one LLM round entry to the daily JSONL debug log. */
+function appendDebugLog(workspace: string, entry: Record<string, unknown>): void {
+  try {
+    const dir = path.resolve(workspace, 'debug', 'llm-requests');
+    fs.mkdirSync(dir, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const file = path.join(dir, `${date}.jsonl`);
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n', 'utf8');
+  } catch {
+    // Non-critical — never crash the agent loop for a debug write failure
+  }
+}
 
 const log = createModuleLogger('llm');
 
@@ -277,6 +308,9 @@ export async function runAgent(
     }, 'Agent round started');
 
     // ── Call LLM ──────────────────────────────────────────
+    const debugEnabled = !ephemeral && (config.agent as any)?.debug?.recordPrompt === true;
+    const debugTurnIndex = (session.turns ?? 0) + 1;
+
     let response: ProviderResponse;
     const llmStart = Date.now();
     try {
@@ -368,6 +402,27 @@ export async function runAgent(
     }
 
     const llmLatencyMs = Date.now() - llmStart;
+
+    // ── Debug JSONL logging ───────────────────────────────
+    if (debugEnabled) {
+      appendDebugLog(config.agent.workspace, {
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        messageId: userMsgResult?.id ?? null,
+        turn: debugTurnIndex,
+        round,
+        model,
+        systemPrompt: { cached: systemPrompt.cached, dynamic: systemPrompt.dynamic },
+        messages: sanitizeMessagesForLog(messages),
+        response: {
+          text: response.text || null,
+          toolCalls: response.toolCalls ?? null,
+          usage: response.usage ?? null,
+          latencyMs: llmLatencyMs,
+        },
+      });
+    }
+
     const inTok = response.usage?.inputTokens ?? 0;
     const outTok = response.usage?.outputTokens ?? 0;
     totalInputTokens += inTok;

@@ -1,5 +1,6 @@
 import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHARED_DIR } from '../../constants.js';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
 import type { ToolExecutionContext } from '@agw/types';
@@ -57,7 +58,7 @@ export function safePath(p: string | undefined, baseDir: string): string {
 
   const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(baseDir, p);
   const workspace = path.resolve(baseDir);
-  const allowed = [workspace, '/tmp'];
+  const allowed = [workspace, '/tmp', os.homedir()];
 
   const isAllowed = allowed.some(root =>
     resolved === root || resolved.startsWith(root + path.sep)
