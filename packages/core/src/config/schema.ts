@@ -189,6 +189,10 @@ const modelIndicatorSchema = z.object({
   web: modelIndicatorVisibility,
 });
 
+const debugSchema = z.object({
+  recordPrompt: z.boolean().default(false),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant'),
   workspace: z.string().default('workspace'),
@@ -201,6 +205,7 @@ const agentSchema = z.object({
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
+  debug: withObjectDefault(debugSchema),
 });
 
 const modelsCatalogSchema = z.object({
@@ -403,6 +408,7 @@ export const configDefaults: GatewayConfig = {
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
     showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
+    debug: { recordPrompt: false },
   },
   models: {
     catalog: {},

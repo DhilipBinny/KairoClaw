@@ -1,8 +1,11 @@
 import type { FastifyPluginAsync } from 'fastify';
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
-import { getDb, getTenantId, assertSessionAccess } from './utils.js';
+import { getDb, getTenantId, assertSessionAccess, getConfig } from './utils.js';
 
 export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/v1/sessions — list sessions for current tenant
@@ -140,6 +143,60 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return { success: true };
+  });
+
+  // GET /api/v1/sessions/:id/debug-prompt?messageId=<id> — fetch recorded LLM entries for a turn by message ID
+  app.get('/api/v1/sessions/:id/debug-prompt', async (request, reply) => {
+    const db = getDb(request);
+    const tenantId = getTenantId(request);
+    const { id } = request.params as { id: string };
+    const query = request.query as { messageId?: string };
+
+    // Admin only — debug data is sensitive
+    if (request.user?.role !== 'admin') {
+      return reply.code(403).send({ error: 'Admin only' });
+    }
+
+    const sessionRepo = new SessionRepository(db);
+    const session = await sessionRepo.getById(id, tenantId);
+    if (!session) return reply.code(404).send({ error: 'Session not found' });
+
+    const config = getConfig(request);
+    const workspace = config.agent?.workspace || 'workspace';
+    const debugDir = path.resolve(workspace, 'debug', 'llm-requests');
+
+    if (!fs.existsSync(debugDir)) {
+      return reply.code(404).send({ error: 'No debug logs found. Enable debug.recordPrompt in settings first.' });
+    }
+
+    const targetMessageId = query.messageId ? parseInt(query.messageId) : null;
+    type DebugEntry = { sessionId: string; ts: string; turn: number; messageId?: number };
+
+    const found: DebugEntry[] = [];
+    for (let daysAgo = 0; daysAgo <= 7; daysAgo++) {
+      const d = new Date(Date.now() - daysAgo * 86400000);
+      const date = d.toISOString().slice(0, 10);
+      const file = path.join(debugDir, `${date}.jsonl`);
+      if (!fs.existsSync(file)) continue;
+
+      const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
+      for await (const line of rl) {
+        if (!line.trim()) continue;
+        try {
+          const entry = JSON.parse(line) as DebugEntry;
+          if (entry.sessionId !== id) continue;
+          if (targetMessageId !== null && entry.messageId !== targetMessageId) continue;
+          found.push(entry);
+        } catch { /* skip malformed lines */ }
+      }
+      if (found.length > 0) break;
+    }
+
+    if (found.length === 0) {
+      return reply.code(404).send({ error: 'No debug log found for this turn. Make sure debug.recordPrompt was enabled when this session ran.' });
+    }
+
+    return { entries: found };
   });
 
   // DELETE /api/v1/sessions/:id/messages/:messageId — delete a specific message

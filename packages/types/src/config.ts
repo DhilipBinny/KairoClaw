@@ -321,6 +321,11 @@ export interface AgentConfig {
   routing?: RoutingConfig;
   /** Show which model responded (per channel). Off by default. */
   showModelIndicator?: ModelIndicatorConfig;
+  /** Debug settings (admin only). */
+  debug?: {
+    /** Record every LLM call (input + output) to JSONL files in workspace/debug/. */
+    recordPrompt?: boolean;
+  };
 }
 
 /** User/auto-detected model capability overrides. */
