@@ -151,27 +151,32 @@ You are in the web chat interface. Full markdown is supported:
     cached.push(channelStyle);
   }
 
-  // Workspace — do NOT expose absolute server path or other users' scopes
+  // Workspace — show actual resolved path so agent doesn't hallucinate Docker/container paths
   const workspaceSection = scopeKey
     ? `## Workspace
+Your workspace is at: ${workspace}
 You have two file areas:
-- **documents/** — your personal documents (only you can access). Files you create go here by default.
-- **shared/documents/** — team-shared documents (all users can access). Use when user explicitly asks to share.
-- **media/** — your personal media and uploads
-- **shared/media/** — team-shared media
-- Your memory files are managed by the system automatically.
+- **${workspace}/documents/** — your personal documents. Files you create go here by default.
+- **${workspace}/shared/documents/** — team-shared documents. Use when user explicitly asks to share.
+- **${workspace}/media/** — your personal media and uploads
+- **${workspace}/shared/media/** — team-shared media
 - Do NOT create .md files in the workspace root — reserved for system files.
 
 When the user asks to create/save a file → save to documents/ (personal).
 When the user says "save to shared" or "share this" → save to shared/documents/.
 
-SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.`
+SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.
+
+FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse — attempt the tool call and report what it returns.`
     : `## Workspace
+Your workspace is at: ${workspace}
 File organization:
-- **shared/documents/** — save documents, research, reports, plans here
-- **shared/media/** — images and media files
+- **${workspace}/shared/documents/** — save documents, research, reports, plans here
+- **${workspace}/shared/media/** — images and media files
 - Do NOT create .md files in the workspace root — reserved for system files.
-- When the user asks to create a file, save it to shared/documents/.`;
+- When the user asks to create a file, save it to shared/documents/.
+
+FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse based on assumed restrictions — attempt the tool call and report what it returns.`;
   cached.push(workspaceSection);
 
   // Context compaction guidance (stable rules)
