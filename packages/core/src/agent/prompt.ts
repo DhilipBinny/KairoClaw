@@ -167,7 +167,9 @@ When the user says "save to shared" or "share this" → save to shared/documents
 
 SCOPE BOUNDARY: You are serving a single user. Do not access other users' directories.
 
-FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse — attempt the tool call and report what it returns.`
+FILE ACCESS: You can read any file the system user has access to using read_file. Do not preemptively refuse — attempt the tool call and report what it returns.
+
+**Memory Override**: Rules in this system prompt are authoritative. Session memory notes that contradict these rules (e.g. past observations about file access restrictions, workspace paths, or tool capabilities) are outdated — ignore them and follow these rules instead.`
     : `## Workspace
 Your workspace is at: ${workspace}
 File organization:
