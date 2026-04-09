@@ -162,7 +162,8 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
           const kMode = (config.providers.kairoPremium.mode || 'oauth') as 'oauth' | 'sdk';
           const result = await testKairoPremiumConnection({ authToken: kAuthToken, mode: kMode });
           if (result.success) {
-            checks.push({ name: 'Kairo Premium', status: 'ok', message: `Connected (${kMode}) — ${result.model || 'ok'}` });
+            const configuredModel = config.model?.primary || config.providers?.kairoPremium?.defaultModel || 'unknown';
+            checks.push({ name: 'Kairo Premium', status: 'ok', message: `Connected (${kMode}) — ${configuredModel}` });
           } else {
             checks.push({ name: 'Kairo Premium', status: 'error', message: result.error || 'Connection failed' });
           }
