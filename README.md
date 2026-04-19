@@ -18,12 +18,13 @@ One agent. Every channel. Full control.
 </p>
 
 <p align="center">
-  <a href="#highlights">Highlights</a> &nbsp;&middot;&nbsp;
+  <a href="#why-kairoclaw">Why</a> &nbsp;&middot;&nbsp;
   <a href="#get-started">Get Started</a> &nbsp;&middot;&nbsp;
+  <a href="#features">Features</a> &nbsp;&middot;&nbsp;
   <a href="#multi-user">Multi-User</a> &nbsp;&middot;&nbsp;
   <a href="#tools--plugins">Tools</a> &nbsp;&middot;&nbsp;
   <a href="#security">Security</a> &nbsp;&middot;&nbsp;
-  <a href="#documentation">Docs</a>
+  <a href="#docs">Docs</a>
 </p>
 
 <!-- TODO: Add demo GIF or screenshot -->
@@ -31,30 +32,20 @@ One agent. Every channel. Full control.
 
 ---
 
-<br/>
+## Why KairoClaw
 
-> Deploy one instance. Add your team. Everyone gets their own memory, files, and permissions — but shares the same AI brain.
->
-> Chat from Telegram. Reply from WhatsApp. Continue on the web. It's all one conversation.
+Most AI tools lock you into one chat window, one provider, one user. KairoClaw is different:
 
-<br/>
+- **One conversation across every channel** — start on Telegram, continue on WhatsApp, finish on the web. Same memory, same context.
+- **Your team, your rules** — add users with role-based permissions. Each person gets isolated memory and workspace.
+- **Any provider, automatic failover** — Anthropic, OpenAI, Ollama. If one goes down, the next picks up. No code changes.
+- **Self-hosted** — your data stays on your infrastructure. No third-party cloud dependency.
 
-## Highlights
+---
 
-| | Feature | |
-|---|---|---|
-| **Channels** | Telegram, WhatsApp, Web Chat | Same AI, same memory, all channels |
-| **Multi-User** | Admin, Power User, User roles | Per-user workspace, memory, permissions |
-| **Tools** | 19 built-in + MCP + CLI + HTTP + OpenAPI plugins | Shell, files, web, email, cron, sub-agents |
-| **Memory** | Auto-extracted long-term profile + daily sessions | Per-user isolated, cross-channel unified |
-| **Scheduling** | Cron, interval, one-shot | Multi-channel delivery, per-user ownership |
-| **Providers** | Anthropic, OpenAI, Ollama | Auto-failover, cost tracking, per-user usage |
-| **Security** | AES-256-GCM secrets, scope isolation, RBAC | Tamper-evident audit trail |
-| **Database** | SQLite (default) or PostgreSQL | Auto-migration between them |
+## Get Started
 
-<br/>
-
-## Get started
+### Docker (recommended)
 
 ```bash
 git clone https://github.com/DhilipBinny/KairoClaw.git
@@ -62,69 +53,66 @@ cd KairoClaw
 docker compose up -d
 ```
 
-Open **http://localhost:18181**, paste your API key, and start chatting.
+Open **http://localhost:18181**, paste your API key, and start chatting. Works with **Anthropic** (Claude), **OpenAI** (GPT-4o), or **Ollama** (local models).
 
-Works with **Anthropic** (Claude), **OpenAI** (GPT-4o), or **Ollama** (local models). Automatic failover between providers.
-
-<details>
-<summary>Install from source</summary>
-
-<br/>
+### Bare Metal
 
 ```bash
-pnpm install && pnpm build && pnpm start
+git clone https://github.com/DhilipBinny/KairoClaw.git
+cd KairoClaw
+./scripts/setup-local.sh
 ```
 
-Requires Node.js 22+.
+Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build` commands. Requires Node.js 22+.
 
-</details>
+---
 
-<br/>
+## Features
+
+| Feature | What it does |
+|---------|-------------|
+| **Multi-Channel** | Telegram, WhatsApp, Web Chat — unified conversation across all channels |
+| **Multi-Provider** | Anthropic (Claude), OpenAI (GPT-4o), Ollama (local) — auto-failover chain |
+| **Multi-User** | Admin, Power User, User roles — per-user workspace, memory, permissions |
+| **Smart Memory** | Auto-extracted user profile + session context. Cross-channel, per-user isolated |
+| **Model Router** | Auto-selects fast/balanced/powerful model per message complexity. Save costs on simple messages |
+| **Smart Compaction** | Two-stage context management — session notes as free compaction summary, eliminates redundant LLM calls |
+| **20+ Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader |
+| **Plugin System** | MCP servers, CLI wrappers, HTTP APIs, OpenAPI auto-discovery — extend without code |
+| **Cron Scheduling** | Cron, interval, one-shot tasks with multi-channel delivery |
+| **Admin Dashboard** | 14 admin pages — providers, users, sessions, logs, usage, cron, plugins, settings |
+| **Encrypted Secrets** | AES-256-GCM envelope encryption for all API keys and tokens |
+| **Database** | SQLite (default) or PostgreSQL — auto-migration between them |
+| **Model Indicator** | See which model responded per message — configurable per channel and role |
+
+---
 
 ## Multi-User
 
 Add your team, family, or clients. Each person gets isolated memory, files, and tool access.
 
-| Role | What they can do |
-|------|-----------------|
-| **Admin** | Everything — full dashboard, all tools unrestricted, manage users |
-| **Power User** | All tools (sandboxed) — exec, file writes, cron jobs with scoped access |
+| Role | Access |
+|------|--------|
+| **Admin** | Full dashboard, all tools unrestricted, manage users |
+| **Power User** | All tools (sandboxed) — exec, file writes, cron with scoped access |
 | **User** | Safe tools only — read files, search web, chat. No exec, no file writes |
 
-**One person, all channels** — link a Telegram account AND WhatsApp number to the same user. One memory, one scope, regardless of channel.
+**One person, all channels** — link Telegram + WhatsApp to the same user. One memory, one scope.
 
-**Onboarding** — someone messages your bot? One click: create account + link channel + approve. They get an API key for web chat too.
+**Onboarding** — someone messages your bot? One click: create account, link channel, approve.
 
-See [Multi-User docs](docs/MULTI-USER.md) for the full guide.
-
-<br/>
-
-## Admin Dashboard
-
-14 admin pages + 4 user portal pages.
-
-| Admin pages | User portal (`/my/`) |
-|---|---|
-| Dashboard, Personas, Providers & Models | Dashboard |
-| Channels, Users, Settings | My Sessions |
-| MCP Servers, Plugins | My Usage |
-| Cron Jobs, Sessions, Scoped Channels | My Cron Jobs |
-| Logs, Usage, Database | |
-
-Non-admin users see "My Dashboard" in the sidebar. Admin sees the full admin panel.
-
-<br/>
+---
 
 ## Tools & Plugins
 
-**19 built-in tools** — file read/write/edit, shell exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection.
+**20+ built-in tools** — file read/write/edit, shell exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection.
 
-**Tool permissions** — admin configures per role from Settings:
+**Tool permissions** per role from Settings:
 
 | Level | Effect |
 |---|---|
 | Allow | Available to all users |
-| Power User only | Admin + users with Power User flag |
+| Power User only | Admin + Power User flag required |
 | Confirm first | Agent asks before executing |
 | Deny | Hidden from agent, blocked at execution |
 
@@ -135,25 +123,38 @@ Non-admin users see "My Dashboard" in the sidebar. Admin sees the full admin pan
 | **MCP** | Model Context Protocol servers | GitHub, Slack, Postgres |
 | **CLI** | Wraps any binary with safety controls | `gh`, `docker`, `kubectl`, `jq` |
 | **HTTP** | Wraps any REST API with typed params | Currency API, image generation |
-| **OpenAPI** | Auto-discovers tools from `/openapi.json` | Self-hosted GPU services |
+| **OpenAPI** | Auto-discovers tools from spec | Self-hosted GPU services |
 
-<br/>
+---
 
 ## Security
 
 | Layer | What it does |
 |---|---|
 | **Encryption at rest** | AES-256-GCM envelope encryption for all API keys and secrets |
-| **Per-user scope isolation** | File tools, exec, and memory search enforce user boundaries |
+| **Scope isolation** | File tools, exec, and memory enforce per-user boundaries |
 | **Tool RBAC** | DB-driven, admin-configurable, double-enforced (prompt + execution) |
 | **Exec sandboxing** | Admin = unrestricted, Power User = sandboxed, User = denied |
 | **Output redaction** | API keys, tokens, secrets auto-stripped from agent responses |
 | **Audit trail** | Tamper-evident hash chain on all tool calls and admin actions |
-| **Deactivation** | Instant lockout across API, WebSocket, and channels |
 
-<br/>
+---
 
-## Documentation
+## Admin Dashboard
+
+14 admin pages + 4 user portal pages.
+
+| Admin | User Portal (`/my/`) |
+|---|---|
+| Dashboard, Personas, Providers & Models | Dashboard |
+| Channels, Users, Settings | My Sessions |
+| MCP Servers, Plugins | My Usage |
+| Cron Jobs, Sessions, Scoped Channels | My Cron Jobs |
+| Logs, Usage, Database | |
+
+---
+
+## Docs
 
 | Document | Description |
 |---|---|
@@ -162,10 +163,7 @@ Non-admin users see "My Dashboard" in the sidebar. Admin sees the full admin pan
 | [Channels](docs/CHANNELS.md) | Telegram, WhatsApp, Web Chat — setup, features, constraints |
 | [Database](docs/DATABASE.md) | SQLite vs PostgreSQL, migration, Docker Compose |
 | [Memory](docs/MEMORY.md) | Auto-memory system, per-user scoping, consolidation |
-| [Constraints](docs/CONSTRAINTS.md) | Outbound security, LID resolution, tool guardrails |
 | [Product Features](docs/PRODUCT_FEATURES.md) | Complete feature inventory with metrics |
-
-<br/>
 
 ---
 
