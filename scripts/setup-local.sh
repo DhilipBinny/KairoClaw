@@ -159,7 +159,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
       "apiKey": "\${ANTHROPIC_API_KEY}",
       "authToken": "\${ANTHROPIC_AUTH_TOKEN}",
       "baseUrl": "",
-      "defaultModel": "claude-sonnet-4-20250514"
+      "defaultModel": "claude-sonnet-4-6"
     },
     "openai": {
       "apiKey": "\${OPENAI_API_KEY}",
@@ -167,11 +167,11 @@ if [ ! -f "$CONFIG_FILE" ]; then
     },
     "ollama": {
       "baseUrl": "\${OLLAMA_BASE_URL}",
-      "defaultModel": "llama3"
+      "defaultModel": "llama3.3"
     }
   },
   "model": {
-    "primary": "anthropic/claude-sonnet-4-20250514",
+    "primary": "anthropic/claude-sonnet-4-6",
     "fallback": ""
   },
   "channels": {

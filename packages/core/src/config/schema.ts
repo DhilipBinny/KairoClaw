@@ -17,7 +17,7 @@ function withObjectDefault<T extends z.ZodTypeAny>(schema: T) {
 const anthropicProviderSchema = z.object({
   apiKey: z.string().default(''),
   baseUrl: z.string().default(''),
-  defaultModel: z.string().default('claude-sonnet-4-20250514'),
+  defaultModel: z.string().default('claude-sonnet-4-6'),
   apiKeyFile: z.string().optional(),
 });
 
@@ -35,7 +35,7 @@ const ollamaProviderSchema = z.object({
 const kairoPremiumSchema = z.object({
   enabled: z.boolean().default(false),
   mode: z.enum(['oauth', 'sdk']).default('oauth'),
-  defaultModel: z.string().default('claude-sonnet-4-20250514'),
+  defaultModel: z.string().default('claude-sonnet-4-6'),
 });
 
 const providersSchema = z.object({
@@ -53,7 +53,7 @@ const gatewayNetworkSchema = z.object({
 });
 
 const modelSelectionSchema = z.object({
-  primary: z.string().default('anthropic/claude-sonnet-4-20250514'),
+  primary: z.string().default('anthropic/claude-sonnet-4-6'),
   fallback: z.string().default(''),
   fallbackChain: z.array(z.string()).optional(),
 });
@@ -324,12 +324,12 @@ export const configDefaults: GatewayConfig = {
     anthropic: {
       apiKey: '${ANTHROPIC_API_KEY}',
       baseUrl: '',
-      defaultModel: 'claude-sonnet-4-20250514',
+      defaultModel: 'claude-sonnet-4-6',
     },
     kairoPremium: {
       enabled: false,
       mode: 'oauth',
-      defaultModel: 'claude-sonnet-4-20250514',
+      defaultModel: 'claude-sonnet-4-6',
     },
     openai: {
       apiKey: '${OPENAI_API_KEY}',
@@ -341,7 +341,7 @@ export const configDefaults: GatewayConfig = {
     },
   },
   model: {
-    primary: 'anthropic/claude-sonnet-4-20250514',
+    primary: 'anthropic/claude-sonnet-4-6',
     fallback: '',
   },
   channels: {
