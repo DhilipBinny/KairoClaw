@@ -36,6 +36,9 @@
     "uuid": "^11.1.0",
     "ws": "^8.18.0"
   },
+  "optionalDependencies": {
+    "@bsigma-ai/kairo-enterprise": "^0.2.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^3.2.4",

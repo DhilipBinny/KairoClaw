@@ -192,6 +192,9 @@ export interface ProviderStatus {
   hasAuthToken?: boolean;
   hasBaseUrl?: boolean;
   configured: boolean;
+  available?: boolean;
+  enabled?: boolean;
+  mode?: string;
 }
 
 export async function getProviderStatus(): Promise<Record<string, ProviderStatus>> {

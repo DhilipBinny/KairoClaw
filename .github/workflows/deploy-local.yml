@@ -8,31 +8,39 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [deploy/railway]
+    branches: [deploy/railway, feature/kairo-premium-provider]
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: self-hosted
     timeout-minutes: 15
-    # Only deploy if CI passed on deploy/railway (or if manually triggered)
+    # Only deploy if CI passed on allowed branches (or if manually triggered)
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'deploy/railway')
+       (github.event.workflow_run.head_branch == 'deploy/railway' ||
+        github.event.workflow_run.head_branch == 'feature/kairo-premium-provider'))
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: deploy/railway
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
 
       - name: Build Docker image
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           docker tag kairoclaw:latest kairoclaw:prev 2>/dev/null || true
-          docker build -t kairoclaw:latest -t kairoclaw:$SHORT_SHA .
+          # Use BuildKit secret — token never baked into image layers
+          echo "$GITHUB_PKG_TOKEN" > /tmp/.github_token
+          DOCKER_BUILDKIT=1 docker build \
+            --secret id=github_token,src=/tmp/.github_token \
+            -t kairoclaw:latest -t kairoclaw:$SHORT_SHA .
+          rm -f /tmp/.github_token
           echo "Built kairoclaw:$SHORT_SHA"
+        env:
+          GITHUB_PKG_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
 
       - name: Deploy stack
         run: |

@@ -1,6 +1,7 @@
 import type { GatewayConfig, ProviderInterface, ProviderResponse, ChatArgs } from '@agw/types';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
+import { createKairoPremiumProvider, isKairoPremiumAvailable } from './kairo-premium.js';
 import { classifyError, logClassifiedError } from './errors.js';
 import { createModuleLogger } from '../observability/logger.js';
 import type { SecretsStore } from '../secrets/store.js';
@@ -28,7 +29,7 @@ interface FailoverEvent {
 export class ProviderRegistry {
   private providers: Record<string, ProviderInterface> = {};
   private config: GatewayConfig;
-  private initialized = false;
+  private initPromise: Promise<void> | null = null;
   private failoverLog: FailoverEvent[] = [];
   private secretsStore?: SecretsStore;
 
@@ -40,32 +41,34 @@ export class ProviderRegistry {
     this.secretsStore = store;
   }
 
-  private initProviders(): void {
+  private async initProviders(): Promise<void> {
     const cfg = this.config.providers;
 
-    // Anthropic: supports API key OR OAuth/setup-token
-    // Priority: SecretsStore > process.env > config (resolved from .env)
+    // Anthropic: API key auth (standard billing)
     const anthropicApiKey = this.secretsStore?.get('providers.anthropic', 'apiKey')
       || cfg.anthropic?.apiKey || '';
-    const anthropicAuthToken = this.secretsStore?.get('providers.anthropic', 'authToken')
-      || process.env.ANTHROPIC_AUTH_TOKEN || cfg.anthropic?.authToken || '';
     const anthropicBaseUrl = this.secretsStore?.get('providers.anthropic', 'baseUrl')
       || process.env.ANTHROPIC_BASE_URL || cfg.anthropic?.baseUrl || '';
 
-    if (anthropicApiKey || anthropicAuthToken) {
+    if (anthropicApiKey) {
       this.providers.anthropic = new AnthropicProvider(
         {
-          apiKey: anthropicApiKey || undefined,
-          authToken: anthropicAuthToken || undefined,
+          apiKey: anthropicApiKey,
           baseUrl: anthropicBaseUrl || undefined,
           defaultModel: cfg.anthropic?.defaultModel || 'claude-sonnet-4-20250514',
         },
         this.config,
       );
-      log.info(
-        { auth: (this.providers.anthropic as AnthropicProvider).authType },
-        'Anthropic provider initialized',
-      );
+      log.info('Anthropic provider initialized (API key)');
+    }
+
+    // Kairo Premium: proprietary auth via @bsigma-ai/kairo-enterprise package (OAuth + SDK)
+    if (cfg.kairoPremium?.enabled === true && await isKairoPremiumAvailable()) {
+      const authToken = this.secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
+      const premium = await createKairoPremiumProvider(this.config, authToken);
+      if (premium) {
+        this.providers['kairo-premium'] = premium;
+      }
     }
 
     const openaiApiKey = this.secretsStore?.get('providers.openai', 'apiKey')
@@ -95,11 +98,13 @@ export class ProviderRegistry {
       log.info('Ollama provider initialized');
     }
 
-    this.initialized = true;
   }
 
-  private ensureInitialized(): void {
-    if (!this.initialized) this.initProviders();
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.initProviders();
+    }
+    await this.initPromise;
   }
 
   /** Check if a provider prefix (e.g. "anthropic", "openai", "ollama") is configured and available. */
@@ -118,8 +123,8 @@ export class ProviderRegistry {
    * Get a provider and resolved model ID for a model reference.
    * Model references are "provider/model-id" or just "model-id" (uses primary).
    */
-  getProvider(modelRef?: string): { provider: ProviderInterface; model: string } {
-    this.ensureInitialized();
+  async getProvider(modelRef?: string): Promise<{ provider: ProviderInterface; model: string }> {
+    await this.ensureInitialized();
 
     const { providerName, modelId } = this.parseModelRef(modelRef);
     const provider = this.providers[providerName];
@@ -159,13 +164,13 @@ export class ProviderRegistry {
    * tries the fallback provider. Retries with exponential backoff on 429.
    */
   async callWithFailover(chatArgs: ChatArgs): Promise<ProviderResponse> {
-    this.ensureInitialized();
+    await this.ensureInitialized();
 
     const { providerName, modelId } = this.parseModelRef(chatArgs.model);
     const primary = this.providers[providerName];
     if (!primary) {
       // will throw with helpful message
-      this.getProvider(chatArgs.model);
+      await this.getProvider(chatArgs.model);
       throw new Error('unreachable');
     }
 
@@ -262,18 +267,18 @@ export class ProviderRegistry {
   /**
    * Reinitialize providers from updated config.
    */
-  reinitProviders(): void {
+  async reinitProviders(): Promise<void> {
     this.providers = {};
-    this.initialized = false;
-    this.initProviders();
+    this.initPromise = null;
+    await this.ensureInitialized();
     log.info({ providers: Object.keys(this.providers) }, 'Providers reinitialized');
   }
 
   /**
    * List initialized provider names with info.
    */
-  listProviders(): ProviderInfo[] {
-    this.ensureInitialized();
+  async listProviders(): Promise<ProviderInfo[]> {
+    await this.ensureInitialized();
     return Object.keys(this.providers).map((name) => ({ name }));
   }
 

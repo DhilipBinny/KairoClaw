@@ -11,7 +11,13 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc ./
 COPY packages/types/package.json packages/types/
 COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
-RUN pnpm install
+# Install deps — GitHub Packages token injected via BuildKit secret (never in image layers)
+RUN --mount=type=secret,id=github_token \
+    if [ -f /run/secrets/github_token ]; then \
+      echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/github_token)" >> .npmrc; \
+    fi && \
+    pnpm install && \
+    sed -i '/_authToken/d' .npmrc
 
 # Stage 2: Lint + Build (lint catches bugs, build catches type errors)
 FROM deps AS build
@@ -56,14 +62,19 @@ COPY scripts/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Install prod deps, compile native modules, then remove build tools (one layer)
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
-    && pnpm install --prod --frozen-lockfile \
+RUN --mount=type=secret,id=github_token \
+    apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && if [ -f /run/secrets/github_token ]; then \
+         echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/github_token)" >> .npmrc; \
+       fi \
+    && pnpm install --prod \
+    && sed -i '/_authToken/d' .npmrc \
     && apt-get purge -y python3 make g++ \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.cache /tmp/*
 
-# Data directory
-RUN mkdir -p /data && chown node:node /data
+# Data directory + Claude CLI config directory (for SDK/CLI mode)
+RUN mkdir -p /data /home/node/.claude && chown -R node:node /data /home/node
 
 ENV NODE_ENV=production \
     AGW_STATE_DIR=/data \

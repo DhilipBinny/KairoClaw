@@ -38,6 +38,7 @@
   let testingProvider: Record<string, boolean> = $state({});
   let testResults: Record<string, TestResult | null> = $state({});
   let savingModel = $state('');
+  let premiumToggleWarning = $state('');
   let saveMessage = $state('');
   let providerStatus: Record<string, ProviderStatus> = $state({});
 
@@ -260,7 +261,7 @@
     showCredForm[providerId] = !showCredForm[providerId];
     if (showCredForm[providerId] && !credForm[providerId]) {
       if (providerId === 'anthropic') {
-        credForm[providerId] = { authType: 'apiKey', apiKey: '', authToken: '', baseUrl: '' };
+        credForm[providerId] = { apiKey: '', baseUrl: '' };
       } else if (providerId === 'openai') {
         credForm[providerId] = { apiKey: '' };
       } else if (providerId === 'ollama') {
@@ -276,11 +277,7 @@
       const form = credForm[providerId];
       const creds: { apiKey?: string; authToken?: string; baseUrl?: string } = {};
       if (providerId === 'anthropic') {
-        if (form.authType === 'apiKey') {
-          creds.apiKey = form.apiKey;
-        } else {
-          creds.authToken = form.authToken;
-        }
+        creds.apiKey = form.apiKey;
         if (form.baseUrl) creds.baseUrl = form.baseUrl;
       } else if (providerId === 'openai') {
         creds.apiKey = form.apiKey;
@@ -483,7 +480,7 @@
               {#if provider.id === 'anthropic'}
                 <div class="detail-row">
                   <span class="detail-label">Auth:</span>
-                  <span class="detail-value">{providerStatus.anthropic?.hasAuthToken ? 'OAuth Token' : 'API Key'}</span>
+                  <span class="detail-value">API Key</span>
                 </div>
               {/if}
               {#if provider.id === 'openai'}
@@ -530,39 +527,14 @@
             <div class="cred-form">
               {#if provider.id === 'anthropic'}
                 <div class="cred-field">
-                  <label class="cred-label">Auth Type</label>
-                  <div class="cred-radio-group">
-                    <label class="cred-radio">
-                      <input type="radio" value="apiKey" bind:group={credForm[provider.id].authType} />
-                      API Key
-                    </label>
-                    <label class="cred-radio">
-                      <input type="radio" value="authToken" bind:group={credForm[provider.id].authType} />
-                      Auth Token
-                    </label>
-                  </div>
-                </div>
-                {#if credForm[provider.id].authType === 'apiKey'}
-                  <div class="cred-field">
-                    <label class="cred-label" for="anthropic-apikey">API Key</label>
-                    <div class="cred-input-row">
-                      <input id="anthropic-apikey" type={showPassword['anthropic-apikey'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="sk-ant-..." />
-                      <button class="btn btn-xs" type="button" onclick={() => showPassword['anthropic-apikey'] = !showPassword['anthropic-apikey']}>
-                        {showPassword['anthropic-apikey'] ? 'Hide' : 'Show'}
+                  <label class="cred-label" for="anthropic-apikey">API Key</label>
+                  <div class="cred-input-row">
+                    <input id="anthropic-apikey" type={showPassword['anthropic-apikey'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].apiKey} placeholder="your-anthropic-api-key" />
+                    <button class="btn btn-xs" type="button" onclick={() => showPassword['anthropic-apikey'] = !showPassword['anthropic-apikey']}>
+                      {showPassword['anthropic-apikey'] ? 'Hide' : 'Show'}
                       </button>
                     </div>
                   </div>
-                {:else}
-                  <div class="cred-field">
-                    <label class="cred-label" for="anthropic-token">Auth Token</label>
-                    <div class="cred-input-row">
-                      <input id="anthropic-token" type={showPassword['anthropic-token'] ? 'text' : 'password'} class="cred-input" bind:value={credForm[provider.id].authToken} placeholder="Auth token..." />
-                      <button class="btn btn-xs" type="button" onclick={() => showPassword['anthropic-token'] = !showPassword['anthropic-token']}>
-                        {showPassword['anthropic-token'] ? 'Hide' : 'Show'}
-                      </button>
-                    </div>
-                  </div>
-                {/if}
                 <div class="cred-field">
                   <label class="cred-label" for="anthropic-baseurl">Base URL (optional)</label>
                   <input id="anthropic-baseurl" type="text" class="cred-input" bind:value={credForm[provider.id].baseUrl} placeholder="https://api.anthropic.com" />
@@ -719,6 +691,239 @@
 
         </div>
       {/each}
+
+      <!-- Kairo Premium Provider -->
+      {#if providerStatus.kairoPremium}
+        <div class="card provider-card premium-card">
+          <div class="provider-header">
+            <div class="provider-info">
+              <div class="provider-name-row">
+                <span class="provider-dot" style="background: var(--cost)"></span>
+                <h3 class="provider-name">Kairo Premium</h3>
+              </div>
+              <p class="provider-desc">Use your Claude Pro/Max subscription — no per-token API fees</p>
+            </div>
+            {#if !providerStatus.kairoPremium.available}
+              <Badge variant="default">Not installed</Badge>
+            {:else if !providerStatus.kairoPremium.enabled}
+              <Badge variant="default">Disabled</Badge>
+            {:else if providerStatus.kairoPremium.configured}
+              <Badge variant={testResults['kairo-premium']?.success ? 'green' : 'yellow'}>
+                {testResults['kairo-premium']?.success ? 'Connected' : 'Configured'}
+              </Badge>
+            {:else}
+              <Badge variant="default">Not configured</Badge>
+            {/if}
+          </div>
+
+          {#if !providerStatus.kairoPremium.available}
+            <div class="premium-notice">
+              <p>Install the enterprise package to enable premium authentication:</p>
+              <code class="install-cmd">echo "@bsigma-ai:registry=https://npm.pkg.github.com" >> .npmrc && pnpm install @bsigma-ai/kairo-enterprise</code>
+              <p style="margin-top: 6px; font-size: 11px;">Requires a GitHub PAT with <code>read:packages</code> scope. Contact your administrator for access.</p>
+            </div>
+          {:else}
+            <!-- Enable/Disable toggle -->
+            <div class="provider-toggle">
+              <label class="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={providerStatus.kairoPremium.enabled}
+                  onchange={async (e) => {
+                    const checkbox = e.target as HTMLInputElement;
+                    const enabled = checkbox.checked;
+
+                    if (!enabled) {
+                      const primary = getCurrentModel();
+                      const fallback = getFallbackModel();
+                      const isDefault = primary.startsWith('kairo-premium/');
+                      const isFallback = fallback.startsWith('kairo-premium/');
+
+                      if (isDefault || isFallback) {
+                        checkbox.checked = true;
+                        const which = isDefault && isFallback ? 'default and fallback model'
+                          : isDefault ? 'default model' : 'fallback model';
+                        premiumToggleWarning = `Cannot disable — Kairo Premium is your ${which}. Change it first.`;
+                        return;
+                      }
+                    }
+
+                    premiumToggleWarning = '';
+                    await updateConfig('providers.kairoPremium.enabled', enabled);
+                    providerStatus = { ...providerStatus, kairoPremium: { ...providerStatus.kairoPremium, enabled } };
+                  }}
+                />
+                <span>{providerStatus.kairoPremium.enabled ? 'Enabled' : 'Disabled'}</span>
+              </label>
+              {#if premiumToggleWarning}
+                <div class="toggle-warning">{premiumToggleWarning}</div>
+              {/if}
+            </div>
+
+            <!-- Mode selector -->
+            <div class="provider-details">
+              <div class="detail-row">
+                <span class="detail-label">Mode:</span>
+                <select
+                  class="mode-select"
+                  value={providerStatus.kairoPremium.mode || 'oauth'}
+                  onchange={async (e) => {
+                    const mode = (e.target as HTMLSelectElement).value;
+                    await updateConfig('providers.kairoPremium.mode', mode);
+                    providerStatus = { ...providerStatus, kairoPremium: { ...providerStatus.kairoPremium, mode } };
+                  }}
+                >
+                  <option value="oauth">OAuth Token (Anthropic subscription)</option>
+                  <option value="sdk">Claude CLI/SDK (local CLI)</option>
+                </select>
+              </div>
+
+              {#if providerStatus.kairoPremium.mode === 'sdk'}
+                <p class="mode-hint">Uses the Claude CLI installed on the server. Auth token optional for LLM calls, but needed to list available models.</p>
+              {:else}
+                <p class="mode-hint">Uses an Anthropic OAuth token for direct API access via your Claude Pro/Max subscription.</p>
+              {/if}
+
+              <!-- Credentials summary -->
+              <div class="detail-row">
+                <span class="detail-label">Auth Token:</span>
+                <span class="detail-value">{providerStatus.kairoPremium.hasAuthToken ? '****' : 'Not set'}{providerStatus.kairoPremium.mode === 'sdk' && !providerStatus.kairoPremium.hasAuthToken ? ' (optional)' : ''}</span>
+              </div>
+            </div>
+
+            <div class="provider-actions">
+              <button
+                class="btn btn-sm"
+                onclick={() => handleTest('kairo-premium')}
+                disabled={testingProvider['kairo-premium']}
+              >
+                {#if testingProvider['kairo-premium']}
+                  <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
+                  Testing...
+                {:else}
+                  Test Connection
+                {/if}
+              </button>
+              <button
+                class="btn btn-sm"
+                onclick={() => {
+                  showCredForm['kairo-premium'] = !showCredForm['kairo-premium'];
+                  if (showCredForm['kairo-premium'] && !credForm['kairo-premium']) {
+                    credForm['kairo-premium'] = { authToken: '' };
+                  }
+                }}
+              >
+                {showCredForm['kairo-premium'] ? 'Cancel' : 'Configure'}
+              </button>
+              {#if providerStatus.kairoPremium.hasAuthToken}
+                <button
+                  class="btn btn-sm"
+                  onclick={async () => {
+                    savingCred = 'kairo-premium-clear';
+                    try {
+                      await saveProviderCredentials('kairo-premium', { authToken: '' });
+                      credMsg['kairo-premium'] = { text: 'Credentials cleared', ok: true };
+                      providerStatus = await getProviderStatus();
+                    } catch (e) {
+                      credMsg['kairo-premium'] = { text: e instanceof Error ? e.message : 'Failed', ok: false };
+                    } finally {
+                      savingCred = '';
+                    }
+                  }}
+                  disabled={savingCred === 'kairo-premium-clear'}
+                >
+                  {savingCred === 'kairo-premium-clear' ? 'Clearing...' : 'Clear Token'}
+                </button>
+              {/if}
+            </div>
+
+            {#if showCredForm['kairo-premium']}
+              <div class="cred-form">
+                <div class="cred-field">
+                    <label class="cred-label" for="kairo-token">Auth Token (Anthropic OAuth){providerStatus.kairoPremium.mode === 'sdk' ? ' — optional, for model listing' : ''}</label>
+                    <div class="cred-input-row">
+                      <input id="kairo-token" type={showPassword['kairo-token'] ? 'text' : 'password'} class="cred-input" bind:value={credForm['kairo-premium'].authToken} placeholder="your-oauth-token" />
+                      <button class="btn btn-xs" type="button" onclick={() => showPassword['kairo-token'] = !showPassword['kairo-token']}>
+                        {showPassword['kairo-token'] ? 'Hide' : 'Show'}
+                      </button>
+                    </div>
+                  </div>
+                <div class="cred-actions">
+                  <button
+                    class="btn btn-sm btn-primary"
+                    onclick={async () => {
+                      savingCred = 'kairo-premium';
+                      try {
+                        await saveProviderCredentials('kairo-premium', credForm['kairo-premium']);
+                        credMsg['kairo-premium'] = { text: 'Saved', ok: true };
+                        showCredForm['kairo-premium'] = false;
+                        providerStatus = await getProviderStatus();
+                      } catch (e) {
+                        credMsg['kairo-premium'] = { text: e instanceof Error ? e.message : 'Failed', ok: false };
+                      } finally {
+                        savingCred = '';
+                      }
+                    }}
+                    disabled={savingCred === 'kairo-premium'}
+                  >
+                    {savingCred === 'kairo-premium' ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+                {#if credMsg['kairo-premium']}
+                  <div class="cred-msg" class:cred-msg-ok={credMsg['kairo-premium'].ok} class:cred-msg-err={!credMsg['kairo-premium'].ok}>
+                    {credMsg['kairo-premium'].text}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
+            {#if testResults['kairo-premium']}
+              {@const result = testResults['kairo-premium']}
+              <div class="test-result-inline" class:success={result.success} class:failure={!result.success}>
+                <h4 class="test-result-title">Test Result</h4>
+                {#if result.success}
+                  <Badge variant="green">Connected</Badge>
+                  {#if result.model}<span class="test-detail">Model: {result.model}</span>{/if}
+                  {#if result.models && result.models.length > 0}
+                    <div class="models-list">
+                      <h4>Available Models ({result.models.length})</h4>
+                      <div class="models-select-grid">
+                        {#each result.models as model}
+                          {@const fullRef = `kairo-premium/${model.id}`}
+                          {@const isDefault = getCurrentModel() === fullRef}
+                          {@const isFallback = getFallbackModel() === fullRef}
+                          <div class="model-row" class:active-model={isDefault} class:fallback-model={isFallback && !isDefault}>
+                            <div class="model-row-info">
+                              <code class="model-row-name">{model.name || model.id}</code>
+                            </div>
+                            <div class="model-row-actions">
+                              {#if isDefault}<Badge variant="green">Default</Badge>{/if}
+                              {#if isFallback}<Badge variant="yellow">Fallback</Badge>{/if}
+                              {#if !isDefault}
+                                <button class="btn btn-xs" onclick={() => handleSetDefault('kairo-premium', model.id)} disabled={savingModel === model.id}>
+                                  Set Default
+                                </button>
+                              {/if}
+                              {#if !isFallback}
+                                <button class="btn btn-xs" onclick={() => handleSetFallback('kairo-premium', model.id)} disabled={savingModel === model.id}>
+                                  Set Fallback
+                                </button>
+                              {/if}
+                            </div>
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  {/if}
+                {:else}
+                  <Badge variant="red">Failed</Badge>
+                  <span class="test-detail">{result.error}</span>
+                {/if}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -809,6 +1014,61 @@
   .provider-card {
     padding: 20px 22px;
     transition: border-color var(--duration) var(--ease);
+  }
+  .premium-card {
+    border-left: 3px solid var(--cost);
+  }
+  .premium-notice {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 8px 0;
+  }
+  .install-cmd {
+    display: block;
+    background: var(--bg-secondary, #1a1a2e);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-top: 6px;
+    word-break: break-all;
+    user-select: all;
+  }
+  .provider-toggle {
+    padding: 8px 0;
+  }
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    cursor: pointer;
+  }
+  .mode-select {
+    background: var(--bg-secondary, #1a1a2e);
+    color: var(--text, #e0e0e0);
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .mode-hint {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+    margin: 4px 0 8px;
+    font-style: italic;
+  }
+  .toggle-warning {
+    margin-top: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--warning, #f59e0b);
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 4px;
+    border-left: 3px solid var(--warning, #f59e0b);
   }
   .provider-card:hover {
     border-color: var(--border);

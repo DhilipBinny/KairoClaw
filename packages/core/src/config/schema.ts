@@ -16,11 +16,9 @@ function withObjectDefault<T extends z.ZodTypeAny>(schema: T) {
 
 const anthropicProviderSchema = z.object({
   apiKey: z.string().default(''),
-  authToken: z.string().default(''),
   baseUrl: z.string().default(''),
   defaultModel: z.string().default('claude-sonnet-4-20250514'),
   apiKeyFile: z.string().optional(),
-  authTokenFile: z.string().optional(),
 });
 
 const openaiProviderSchema = z.object({
@@ -34,10 +32,17 @@ const ollamaProviderSchema = z.object({
   defaultModel: z.string().default('llama3.3'),
 });
 
+const kairoPremiumSchema = z.object({
+  enabled: z.boolean().default(false),
+  mode: z.enum(['oauth', 'sdk']).default('oauth'),
+  defaultModel: z.string().default('claude-sonnet-4-20250514'),
+});
+
 const providersSchema = z.object({
   anthropic: withObjectDefault(anthropicProviderSchema),
   openai: withObjectDefault(openaiProviderSchema),
   ollama: withObjectDefault(ollamaProviderSchema),
+  kairoPremium: withObjectDefault(kairoPremiumSchema),
 });
 
 const gatewayNetworkSchema = z.object({
@@ -318,8 +323,12 @@ export const configDefaults: GatewayConfig = {
   providers: {
     anthropic: {
       apiKey: '${ANTHROPIC_API_KEY}',
-      authToken: '${ANTHROPIC_AUTH_TOKEN}',
       baseUrl: '',
+      defaultModel: 'claude-sonnet-4-20250514',
+    },
+    kairoPremium: {
+      enabled: false,
+      mode: 'oauth',
       defaultModel: 'claude-sonnet-4-20250514',
     },
     openai: {

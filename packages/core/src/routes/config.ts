@@ -69,9 +69,21 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.email.rateLimit.perMinute', 'tools.email.rateLimit.perHour', 'tools.email.rateLimit.perDay', 'tools.email.rateLimit.perRecipientPerHour',
       'tools.transcription.enabled', 'tools.transcription.baseUrl', 'tools.transcription.model', 'tools.transcription.language',
       'tools.browse.enabled', 'tools.browse.remoteAccess',
+      'providers.kairoPremium.enabled', 'providers.kairoPremium.mode', 'providers.kairoPremium.defaultModel',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
+    }
+
+    // Guard: prevent disabling kairo-premium while it's the active model
+    if (dotPath === 'providers.kairoPremium.enabled' && value === false) {
+      const primary = config.model?.primary || '';
+      const fallback = config.model?.fallback || '';
+      if (primary.startsWith('kairo-premium') || fallback.startsWith('kairo-premium')) {
+        const which = primary.startsWith('kairo-premium') && fallback.startsWith('kairo-premium')
+          ? 'default and fallback model' : primary.startsWith('kairo-premium') ? 'default model' : 'fallback model';
+        return reply.code(400).send({ error: `Cannot disable Kairo Premium — it is your ${which}. Change it first.` });
+      }
     }
 
     // Read raw config from disk to avoid saving resolved env vars / internal fields
