@@ -42,7 +42,7 @@ export class AnthropicProvider implements ProviderInterface {
     }
 
     this.client = new Anthropic(clientOpts as ConstructorParameters<typeof Anthropic>[0]);
-    this.defaultModel = defaultModel || 'claude-sonnet-4-20250514';
+    this.defaultModel = defaultModel || 'claude-sonnet-4-6';
   }
 
   async chat(args: ChatArgs): Promise<ProviderResponse> {

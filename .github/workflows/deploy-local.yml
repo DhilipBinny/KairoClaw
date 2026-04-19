@@ -8,19 +8,18 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [deploy/railway, feature/kairo-premium-provider]
+    branches: [deploy/railway]
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: self-hosted
     timeout-minutes: 15
-    # Only deploy if CI passed on allowed branches (or if manually triggered)
+    # Only deploy if CI passed on deploy/railway (or if manually triggered)
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       (github.event.workflow_run.head_branch == 'deploy/railway' ||
-        github.event.workflow_run.head_branch == 'feature/kairo-premium-provider'))
+       github.event.workflow_run.head_branch == 'deploy/railway')
 
     steps:
       - name: Checkout code

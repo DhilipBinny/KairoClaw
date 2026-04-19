@@ -132,7 +132,7 @@ export interface GatewayNetworkConfig {
 
 /** Active model selection. */
 export interface ModelSelectionConfig {
-  /** Primary model in `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-20250514`). */
+  /** Primary model in `provider/model-id` format (e.g. `anthropic/claude-sonnet-4-6`). */
   primary: string;
   /** Fallback model used when the primary fails. Empty string means no fallback. */
   fallback: string;

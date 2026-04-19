@@ -55,7 +55,7 @@ export class ProviderRegistry {
         {
           apiKey: anthropicApiKey,
           baseUrl: anthropicBaseUrl || undefined,
-          defaultModel: cfg.anthropic?.defaultModel || 'claude-sonnet-4-20250514',
+          defaultModel: cfg.anthropic?.defaultModel || 'claude-sonnet-4-6',
         },
         this.config,
       );

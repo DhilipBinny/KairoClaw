@@ -77,19 +77,10 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         };
         const authLabel = 'API Key';
         const resp = await fetch(
-          (config.providers.anthropic.baseUrl || 'https://api.anthropic.com') + '/v1/messages',
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              model: config.model?.primary?.split('/').pop() || 'claude-sonnet-4-20250514',
-              max_tokens: 1,
-              messages: [{ role: 'user', content: 'ping' }],
-            }),
-            signal: AbortSignal.timeout(10000),
-          },
+          (config.providers.anthropic.baseUrl || 'https://api.anthropic.com') + '/v1/models?limit=1',
+          { headers, signal: AbortSignal.timeout(10000) },
         );
-        if (resp.ok || resp.status === 400) {
+        if (resp.ok) {
           checks.push({ name: 'Anthropic API', status: 'ok', message: `Connected (${authLabel})` });
         } else if (resp.status === 401) {
           checks.push({ name: 'Anthropic API', status: 'error', message: `Invalid ${authLabel} (401)` });
@@ -315,27 +306,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         }
 
         if (models.length === 0) {
-          const testResp = await fetch(
-            (baseUrl || 'https://api.anthropic.com') + '/v1/messages',
-            {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 1,
-                messages: [{ role: 'user', content: 'hi' }],
-              }),
-              signal: AbortSignal.timeout(10000),
-            },
-          );
-          if (testResp.status === 401) {
-            return { success: false, error: 'Invalid credentials (401)' };
-          }
-          models = [
-            { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-            { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
-          ].map((m) => ({ ...m, capabilities: getModelCapabilities(m.id) }));
+          return { success: false, error: 'Could not list models — check credentials' };
         }
 
         return {
@@ -651,7 +622,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
   // GET /api/v1/admin/model — current model configuration and capabilities
   app.get('/api/v1/admin/model', { preHandler: [requireRole('admin')] }, async (request) => {
     const config = getConfig(request);
-    const primaryRef = config.model?.primary || 'anthropic/claude-sonnet-4-20250514';
+    const primaryRef = config.model?.primary || 'anthropic/claude-sonnet-4-6';
     const fallbackRef = config.model?.fallback || '';
 
     function resolveModelInfo(ref: string) {
