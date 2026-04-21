@@ -242,6 +242,14 @@ export async function saveModelCapabilities(
   return request('/admin/models/capabilities', { method: 'PATCH', body: { modelId, capabilities } });
 }
 
+export async function refreshModelCapabilities(): Promise<{ success: boolean; fetched: number; providers: string[]; capabilities: Record<string, Record<string, unknown>> }> {
+  return request('/admin/models/refresh', { method: 'POST' });
+}
+
+export async function getAllModelCapabilities(): Promise<{ capabilities: Record<string, Record<string, unknown>> }> {
+  return request('/admin/models/capabilities');
+}
+
 export async function saveChannelCredentials(
   channelId: string,
   credentials: { botToken?: string },

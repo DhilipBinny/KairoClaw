@@ -208,8 +208,22 @@ const agentSchema = z.object({
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
 });
 
+const modelCapabilityEntrySchema = z.object({
+  contextWindow: z.number().default(128000),
+  maxOutputTokens: z.number().default(8192),
+  timeoutMs: z.number().default(120000),
+  costPer1M: z.object({ input: z.number(), output: z.number() }).nullable().default(null),
+  provider: z.string().default('unknown'),
+  supportsVision: z.boolean().default(true),
+  supportsToolCalling: z.boolean().default(true),
+  supportsStreaming: z.boolean().default(true),
+  supportsThinking: z.boolean().default(false),
+  displayName: z.string().optional(),
+  source: z.enum(['auto', 'manual']).default('auto'),
+}).partial();
+
 const modelsCatalogSchema = z.object({
-  catalog: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
+  capabilities: z.record(z.string(), modelCapabilityEntrySchema).default({}),
 });
 
 const mcpServerConfigSchema = z.object({
@@ -414,7 +428,7 @@ export const configDefaults: GatewayConfig = {
     showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
   },
   models: {
-    catalog: {},
+    capabilities: {},
   },
   mcp: {
     servers: {},

@@ -298,7 +298,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
               id: m.id,
               name: m.display_name || m.id,
               created: m.created_at,
-              capabilities: getModelCapabilities(m.id),
+              capabilities: getModelCapabilities(m.id, config),
             }));
           }
         } catch {
@@ -332,7 +332,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
               m.id.includes('o3') ||
               m.id.includes('o4'),
           )
-          .map((m) => ({ id: m.id, name: m.id, capabilities: getModelCapabilities(m.id) }))
+          .map((m) => ({ id: m.id, name: m.id, capabilities: getModelCapabilities(m.id, config) }))
           .sort((a, b) => a.id.localeCompare(b.id));
         return { success: true, models: chatModels };
       } else if (provider === 'ollama') {
@@ -545,6 +545,11 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       await providerRegistry.reinitProviders();
     }
 
+    // Refresh model capabilities in background (new credentials may access new models)
+    import('../models/refresh.js').then(({ refreshModelCapabilities }) =>
+      refreshModelCapabilities(config, secretsStore).catch(() => { /* non-critical */ })
+    );
+
     return { success: true };
   });
 
@@ -682,12 +687,12 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
       return reply.code(500).send({ error: 'Failed to read config file' });
     }
 
-    // Update models.catalog
+    // Update models.capabilities
     if (!rawConfig.models) rawConfig.models = {};
     const models = rawConfig.models as Record<string, unknown>;
-    if (!models.catalog) models.catalog = {};
-    const catalog = models.catalog as Record<string, Record<string, unknown>>;
-    catalog[body.modelId] = { ...(catalog[body.modelId] || {}), ...body.capabilities };
+    if (!models.capabilities) models.capabilities = {};
+    const capabilities = models.capabilities as Record<string, Record<string, unknown>>;
+    capabilities[body.modelId] = { ...(capabilities[body.modelId] || {}), ...body.capabilities, source: 'manual' };
 
     // Write back
     try {
@@ -697,14 +702,29 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     }
 
     // Update in-memory config
-    if (!config.models) (config as any).models = { catalog: {} };
-    if (!config.models.catalog) config.models.catalog = {};
-    config.models.catalog[body.modelId] = {
-      ...(config.models.catalog[body.modelId] || {}),
+    if (!config.models) (config as any).models = { capabilities: {} };
+    if (!config.models.capabilities) config.models.capabilities = {};
+    config.models.capabilities[body.modelId] = {
+      ...(config.models.capabilities[body.modelId] || {}),
       ...body.capabilities,
+      source: 'manual',
     };
 
-    return { success: true, modelId: body.modelId, capabilities: catalog[body.modelId] };
+    return { success: true, modelId: body.modelId, capabilities: capabilities[body.modelId] };
+  });
+
+  // POST /api/v1/admin/models/refresh — auto-fetch capabilities from all provider APIs
+  app.post('/api/v1/admin/models/refresh', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = getConfig(request);
+    const { refreshModelCapabilities } = await import('../models/refresh.js');
+    const result = await refreshModelCapabilities(config, secretsStore);
+    return { success: true, ...result, capabilities: config.models?.capabilities || {} };
+  });
+
+  // GET /api/v1/admin/models/capabilities — get all model capabilities
+  app.get('/api/v1/admin/models/capabilities', { preHandler: [requireRole('admin')] }, async (request) => {
+    const config = getConfig(request);
+    return { capabilities: config.models?.capabilities || {} };
   });
 
   // ── Export/Import state directory ──────────────────────
