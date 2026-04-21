@@ -135,8 +135,11 @@ function parseOllamaModel(
 
 /**
  * Merge auto-fetched capabilities into config.
- * Preserves entries with source: "manual" (admin edits).
- * Returns the merged capabilities map.
+ *
+ * Rules:
+ *  - source: "manual" → skip entirely (admin owns all fields)
+ *  - source: "auto"   → replace with fetched data, but carry forward
+ *    costPer1M from existing entry (no provider API returns pricing)
  */
 function mergeCapabilities(
   existing: Record<string, Partial<ModelCapabilities>>,
@@ -145,7 +148,9 @@ function mergeCapabilities(
   const merged = { ...existing };
   for (const [id, caps] of Object.entries(fetched)) {
     if (merged[id]?.source === 'manual') continue;
+    const existingCost = merged[id]?.costPer1M;
     merged[id] = caps;
+    if (existingCost && !caps.costPer1M) merged[id].costPer1M = existingCost;
   }
   return merged;
 }
