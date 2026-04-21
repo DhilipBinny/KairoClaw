@@ -1104,12 +1104,6 @@
                 {/if}
               </span>
               <span class="mc-col-actions">
-                {#if !isDefault}
-                  <button class="btn btn-xs" onclick={() => handleSetDefault(entry.provider && entry.provider !== 'unknown' ? entry.provider : 'anthropic', entry.id)} disabled={savingModel === entry.id}>Default</button>
-                {/if}
-                {#if !isFallback}
-                  <button class="btn btn-xs" onclick={() => handleSetFallback(entry.provider && entry.provider !== 'unknown' ? entry.provider : 'anthropic', entry.id)} disabled={savingModel === entry.id}>Fallback</button>
-                {/if}
                 <button class="btn btn-xs" onclick={() => startCapEdit(entry)}>Edit</button>
               </span>
             </div>
@@ -1624,7 +1618,7 @@
   .mc-filter { margin-bottom: 12px; }
   .mc-filter-input { width: 100%; padding: 6px 10px; font-size: 13px; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border, #333); border-radius: 4px; color: var(--text); }
   .mc-table { font-size: 12px; overflow-x: auto; }
-  .mc-row { display: grid; grid-template-columns: 2fr 1fr 0.8fr 0.5fr 0.5fr 0.5fr 1fr 0.7fr 1.5fr; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle, #222); }
+  .mc-row { display: grid; grid-template-columns: 2fr 1fr 0.8fr 0.5fr 0.5fr 0.5fr 1fr 0.7fr 0.5fr; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle, #222); }
   .mc-header-row { font-weight: 600; color: var(--text-muted); border-bottom: 2px solid var(--border, #333); padding-bottom: 8px; margin-bottom: 4px; }
   .mc-row:hover:not(.mc-header-row) { background: var(--bg-hover, #1a1a2e); }
   .mc-col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
