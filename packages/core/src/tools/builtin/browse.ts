@@ -343,7 +343,7 @@ ACTIONS:
               const filePath = path.join(mediaDir, filename);
               try {
                 fs.mkdirSync(mediaDir, { recursive: true });
-                fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+                fs.writeFileSync(filePath, new Uint8Array(buffer), { mode: 0o600 });
                 return {
                   success: true,
                   url: result.url || '',
@@ -523,7 +523,7 @@ ACTIONS:
             const filePath = path.join(mediaDir, filename);
             try {
               fs.mkdirSync(mediaDir, { recursive: true });
-              fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+              fs.writeFileSync(filePath, new Uint8Array(buffer), { mode: 0o600 });
             } catch (e: unknown) {
               return { error: `Failed to save screenshot: ${e instanceof Error ? e.message : 'disk error'}` };
             }
