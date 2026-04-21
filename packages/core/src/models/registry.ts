@@ -1,142 +1,158 @@
 import type { GatewayConfig, ModelCapabilities, CostEstimate } from '@agw/types';
 
 // ══════════════════════════════════════════════
-// Built-in model capabilities
+// Model capabilities registry
 // ══════════════════════════════════════════════
-// These are defaults for known models. Users can override
-// any value via config.models.catalog in config.json.
+// Primary source: config.models.capabilities (auto-fetched from APIs + admin edits)
+// Fallback: safe defaults (vision: true, tools: true for modern LLMs)
 
-const MODEL_CAPABILITIES: Record<string, Partial<ModelCapabilities>> = {
-  // ── Anthropic ──
-  'claude-opus-4-6': {
-    contextWindow: 200000,
-    maxOutputTokens: 16384,
-    timeoutMs: 180000,
-    costPer1M: { input: 15, output: 75 },
-    provider: 'anthropic',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-    supportsThinking: true,
-  },
-  'claude-sonnet-4-6': {
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
-    timeoutMs: 120000,
-    costPer1M: { input: 3, output: 15 },
-    provider: 'anthropic',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-    supportsThinking: true,
-  },
-  'claude-haiku-4-5-20251001': {
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
-    timeoutMs: 60000,
-    costPer1M: { input: 0.8, output: 4 },
-    provider: 'anthropic',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-  },
-
-  // ── OpenAI ──
-  'gpt-4.1': {
-    contextWindow: 1047576,
-    maxOutputTokens: 32768,
-    timeoutMs: 120000,
-    costPer1M: { input: 2, output: 8 },
-    provider: 'openai',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-  },
-  'gpt-4o': {
-    contextWindow: 128000,
-    maxOutputTokens: 16384,
-    timeoutMs: 120000,
-    costPer1M: { input: 2.5, output: 10 },
-    provider: 'openai',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-  },
-  'gpt-4o-mini': {
-    contextWindow: 128000,
-    maxOutputTokens: 16384,
-    timeoutMs: 60000,
-    costPer1M: { input: 0.15, output: 0.6 },
-    provider: 'openai',
-    supportsVision: true,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-  },
-  'o3-mini': {
-    contextWindow: 200000,
-    maxOutputTokens: 100000,
-    timeoutMs: 120000,
-    costPer1M: { input: 1.1, output: 4.4 },
-    provider: 'openai',
-    supportsVision: false,
-    supportsToolCalling: true,
-    supportsStreaming: true,
-  },
-};
-
+/** Safe defaults for unknown models — assumes modern LLM capabilities. */
 const MODEL_DEFAULTS: ModelCapabilities = {
   contextWindow: 128000,
   maxOutputTokens: 8192,
   timeoutMs: 120000,
   costPer1M: null,
   provider: 'unknown',
-  supportsVision: false,
+  supportsVision: true,
   supportsToolCalling: true,
   supportsStreaming: true,
   supportsThinking: false,
 };
 
 /**
+ * Strip provider prefix from model reference.
+ * "kairo-premium/claude-opus-4-7" → "claude-opus-4-7"
+ * "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6"
+ * "claude-opus-4-7" → "claude-opus-4-7" (no prefix)
+ */
+function stripProviderPrefix(modelRef: string): string {
+  const slashIdx = modelRef.indexOf('/');
+  return slashIdx >= 0 ? modelRef.slice(slashIdx + 1) : modelRef;
+}
+
+/**
  * Look up capabilities for a model ID.
- * Priority: config.models.catalog > built-in exact > built-in substring > defaults
+ * Priority:
+ *   1. config.models.capabilities exact match (by bare model ID)
+ *   2. config.models.capabilities substring match
+ *   3. Safe defaults
  */
 function getModelCapabilities(
-  modelId: string | undefined,
+  modelRef: string | undefined,
   config?: GatewayConfig,
 ): ModelCapabilities {
-  if (!modelId) return { ...MODEL_DEFAULTS };
+  if (!modelRef) return { ...MODEL_DEFAULTS };
 
-  // 1. User overrides in config.models.catalog (exact match)
-  const catalog = config?.models?.catalog;
-  if (catalog?.[modelId]) {
-    return { ...MODEL_DEFAULTS, ...catalog[modelId] };
-  }
+  const bareId = stripProviderPrefix(modelRef);
+  const caps = config?.models?.capabilities;
 
-  // 2. Exact match in built-in table
-  if (MODEL_CAPABILITIES[modelId]) {
-    return { ...MODEL_DEFAULTS, ...MODEL_CAPABILITIES[modelId] };
-  }
+  if (caps) {
+    // 1. Exact match
+    if (caps[bareId]) {
+      return { ...MODEL_DEFAULTS, ...caps[bareId] };
+    }
 
-  // 3. Substring match (e.g. "anthropic/claude-opus-4-6" contains "claude-opus-4-6")
-  // Sort by length descending so longer (more specific) matches win first
-  const key = Object.keys(MODEL_CAPABILITIES)
-    .filter(k => modelId.includes(k))
-    .sort((a, b) => b.length - a.length)[0];
-  if (key) {
-    return { ...MODEL_DEFAULTS, ...MODEL_CAPABILITIES[key] };
-  }
+    // 2. Exact match on full ref (backward compat)
+    if (caps[modelRef] && modelRef !== bareId) {
+      return { ...MODEL_DEFAULTS, ...caps[modelRef] };
+    }
 
-  // 4. Check catalog with substring match too
-  if (catalog) {
-    const catKey = Object.keys(catalog)
-      .filter(k => modelId.includes(k))
+    // 3. Substring match — longest match wins
+    const key = Object.keys(caps)
+      .filter(k => bareId.includes(k) || modelRef.includes(k))
       .sort((a, b) => b.length - a.length)[0];
-    if (catKey) {
-      return { ...MODEL_DEFAULTS, ...catalog[catKey] };
+    if (key) {
+      return { ...MODEL_DEFAULTS, ...caps[key] };
     }
   }
 
   return { ...MODEL_DEFAULTS };
+}
+
+/**
+ * Parse Anthropic /v1/models response into capabilities entries.
+ */
+function parseAnthropicModels(
+  data: { data?: Array<Record<string, unknown>> },
+): Record<string, Partial<ModelCapabilities>> {
+  const result: Record<string, Partial<ModelCapabilities>> = {};
+  for (const m of data.data || []) {
+    const id = m.id as string;
+    if (!id) continue;
+
+    const caps = m.capabilities as Record<string, Record<string, unknown>> | undefined;
+    const isOpus = id.includes('opus');
+
+    result[id] = {
+      contextWindow: (m.max_input_tokens as number) || 200000,
+      maxOutputTokens: (m.max_tokens as number) || (isOpus ? 16384 : 8192),
+      supportsVision: caps?.image_input?.supported === true,
+      supportsThinking: caps?.thinking?.supported === true,
+      supportsToolCalling: true,
+      supportsStreaming: true,
+      timeoutMs: isOpus ? 180000 : 120000,
+      provider: 'anthropic',
+      displayName: (m.display_name as string) || id,
+      source: 'auto' as const,
+    };
+  }
+  return result;
+}
+
+/**
+ * Parse Ollama /api/show response into capabilities entry.
+ */
+function parseOllamaModel(
+  name: string,
+  showData: Record<string, unknown>,
+): Partial<ModelCapabilities> {
+  const ollamaCaps = showData.capabilities as string[] | undefined;
+  const modelInfo = showData.model_info as Record<string, unknown> | undefined;
+
+  let contextWindow = 128000;
+  if (modelInfo) {
+    for (const [k, v] of Object.entries(modelInfo)) {
+      if (k.endsWith('.context_length') && typeof v === 'number') {
+        contextWindow = v;
+        break;
+      }
+    }
+  }
+
+  return {
+    contextWindow,
+    maxOutputTokens: 8192,
+    supportsVision: ollamaCaps?.includes('vision') ?? false,
+    supportsToolCalling: ollamaCaps?.includes('tools') ?? false,
+    supportsStreaming: true,
+    supportsThinking: false,
+    timeoutMs: 120000,
+    provider: 'ollama',
+    displayName: name,
+    source: 'auto' as const,
+  };
+}
+
+/**
+ * Merge auto-fetched capabilities into config.
+ *
+ * Rules:
+ *  - source: "manual" → skip entirely (admin owns all fields)
+ *  - source: "auto"   → replace with fetched data, but carry forward
+ *    costPer1M from existing entry (no provider API returns pricing)
+ */
+function mergeCapabilities(
+  existing: Record<string, Partial<ModelCapabilities>>,
+  fetched: Record<string, Partial<ModelCapabilities>>,
+): Record<string, Partial<ModelCapabilities>> {
+  const merged = { ...existing };
+  for (const [id, caps] of Object.entries(fetched)) {
+    if (merged[id]?.source === 'manual') continue;
+    const existingCost = merged[id]?.costPer1M;
+    merged[id] = caps;
+    if (existingCost && !caps.costPer1M) merged[id].costPer1M = existingCost;
+  }
+  return merged;
 }
 
 /**
@@ -157,4 +173,12 @@ function estimateCost(
   return { input: inputCost, output: outputCost, total: inputCost + outputCost };
 }
 
-export { MODEL_CAPABILITIES, MODEL_DEFAULTS, getModelCapabilities, estimateCost };
+export {
+  MODEL_DEFAULTS,
+  getModelCapabilities,
+  estimateCost,
+  stripProviderPrefix,
+  parseAnthropicModels,
+  parseOllamaModel,
+  mergeCapabilities,
+};

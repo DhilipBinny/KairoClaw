@@ -127,6 +127,10 @@ export interface ModelCapabilities {
   supportsStreaming: boolean;
   /** Whether the model supports extended thinking / chain-of-thought. */
   supportsThinking: boolean;
+  /** Human-readable display name (e.g. "Claude Opus 4.7"). */
+  displayName?: string;
+  /** How this entry was created: 'auto' (fetched from API) or 'manual' (admin edit). */
+  source?: 'auto' | 'manual';
 }
 
 /**

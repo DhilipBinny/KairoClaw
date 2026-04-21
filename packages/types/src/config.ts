@@ -330,10 +330,10 @@ export interface AgentConfig {
   showModelIndicator?: ModelIndicatorConfig;
 }
 
-/** User/auto-detected model capability overrides. */
+/** Model capabilities — auto-fetched from provider APIs + admin overrides. */
 export interface ModelsCatalogConfig {
-  /** Model overrides keyed by model ID. */
-  catalog: Record<string, Partial<import('./provider.js').ModelCapabilities>>;
+  /** Model capabilities keyed by model ID (e.g. "claude-opus-4-7", "gpt-4o"). */
+  capabilities: Record<string, Partial<import('./provider.js').ModelCapabilities>>;
 }
 
 /** MCP server configuration section. */

@@ -63,11 +63,20 @@ export async function isKairoPremiumAvailable(): Promise<boolean> {
 }
 
 /** List available models via enterprise package. */
-export async function listKairoPremiumModels(authToken: string): Promise<{ id: string; displayName: string }[]> {
+/** Raw model data from the enterprise package — includes full Anthropic API response fields. */
+export interface PremiumModelInfo {
+  id: string;
+  displayName: string;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  capabilities?: Record<string, unknown>;
+}
+
+export async function listKairoPremiumModels(authToken: string): Promise<PremiumModelInfo[]> {
   const mod = await loadEnterprise();
   if (!mod) return [];
   try {
-    return await mod.listModels(authToken);
+    return await mod.listModels(authToken) as PremiumModelInfo[];
   } catch {
     return [];
   }
