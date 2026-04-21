@@ -41,7 +41,7 @@ function makeConfig(routing?: Partial<RoutingConfig>): GatewayConfig {
     channels: {} as any,
     session: { resetHour: 4, idleMinutes: 240 },
     tools: {} as any,
-    models: { catalog: {} },
+    models: { capabilities: {} },
     mcp: { servers: {} },
   } as GatewayConfig;
 }

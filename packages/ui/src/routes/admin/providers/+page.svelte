@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, testProvider, updateConfig, saveProviderCredentials, getModelInfo, saveModelCapabilities, getProviderStatus } from '$lib/api';
+  import { getConfig, testProvider, updateConfig, saveProviderCredentials, getModelInfo, saveModelCapabilities, getProviderStatus, refreshModelCapabilities, getAllModelCapabilities } from '$lib/api';
   import type { ModelInfo, ProviderStatus } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
@@ -64,6 +64,110 @@
   let capsMsg = $state('');
   /** When set, saving caps will also set this model as default/fallback after save. */
   let pendingModelAction: { type: 'default' | 'fallback'; providerId: string; modelId: string } | null = $state(null);
+
+  // ── Model Capabilities section state ──
+  interface CapEntry {
+    id: string;
+    displayName?: string;
+    provider?: string;
+    contextWindow?: number;
+    maxOutputTokens?: number;
+    supportsVision?: boolean;
+    supportsThinking?: boolean;
+    supportsToolCalling?: boolean;
+    timeoutMs?: number;
+    costPer1M?: { input: number; output: number } | null;
+    source?: 'auto' | 'manual';
+  }
+  let allCapabilities: CapEntry[] = $state([]);
+  let loadingCaps = $state(false);
+  let refreshingCaps = $state(false);
+  let capsFilter = $state('');
+  let editingCapId: string | null = $state(null);
+  let capEditForm = $state<Record<string, unknown>>({});
+  let savingCapEdit = $state(false);
+  let capEditMsg = $state('');
+
+  async function loadCapabilities() {
+    loadingCaps = true;
+    try {
+      const data = await getAllModelCapabilities();
+      allCapabilities = Object.entries(data.capabilities || {}).map(([id, caps]) => ({
+        id,
+        ...(caps as Record<string, unknown>),
+      })) as CapEntry[];
+    } catch { allCapabilities = []; }
+    loadingCaps = false;
+  }
+
+  let refreshMsg = $state('');
+  async function handleRefreshCaps() {
+    refreshingCaps = true;
+    refreshMsg = '';
+    try {
+      const result = await refreshModelCapabilities();
+      allCapabilities = Object.entries(result.capabilities || {}).map(([id, caps]) => ({
+        id,
+        ...(caps as Record<string, unknown>),
+      })) as CapEntry[];
+      refreshMsg = `Refreshed: ${result.fetched} models from ${result.providers?.join(', ') || 'none'}`;
+      await loadModelInfo();
+    } catch (e) {
+      refreshMsg = `Refresh failed: ${e instanceof Error ? e.message : 'Unknown error'}`;
+    }
+    refreshingCaps = false;
+  }
+
+  function startCapEdit(entry: CapEntry) {
+    editingCapId = entry.id;
+    capEditForm = {
+      contextWindow: entry.contextWindow || 128000,
+      maxOutputTokens: entry.maxOutputTokens || 8192,
+      supportsVision: entry.supportsVision ?? true,
+      supportsThinking: entry.supportsThinking ?? false,
+      supportsToolCalling: entry.supportsToolCalling ?? true,
+      timeoutMs: entry.timeoutMs || 120000,
+      costInputPerM: entry.costPer1M?.input ?? '',
+      costOutputPerM: entry.costPer1M?.output ?? '',
+    };
+    capEditMsg = '';
+  }
+
+  async function saveCapEdit() {
+    if (!editingCapId) return;
+    savingCapEdit = true;
+    try {
+      const costInput = Number(capEditForm.costInputPerM);
+      const costOutput = Number(capEditForm.costOutputPerM);
+      const caps: Record<string, unknown> = {
+        contextWindow: Number(capEditForm.contextWindow),
+        maxOutputTokens: Number(capEditForm.maxOutputTokens),
+        supportsVision: capEditForm.supportsVision,
+        supportsThinking: capEditForm.supportsThinking,
+        supportsToolCalling: capEditForm.supportsToolCalling,
+        timeoutMs: Number(capEditForm.timeoutMs),
+        costPer1M: (costInput > 0 && costOutput > 0) ? { input: costInput, output: costOutput } : null,
+      };
+      await saveModelCapabilities(editingCapId, caps);
+      capEditMsg = 'Saved';
+      editingCapId = null;
+      await loadCapabilities();
+      await loadModelInfo();
+    } catch (e) {
+      capEditMsg = e instanceof Error ? e.message : 'Failed';
+    }
+    savingCapEdit = false;
+  }
+
+  function filteredCapabilities(): CapEntry[] {
+    if (!capsFilter) return allCapabilities;
+    const f = capsFilter.toLowerCase();
+    return allCapabilities.filter(c =>
+      c.id.toLowerCase().includes(f) ||
+      (c.displayName || '').toLowerCase().includes(f) ||
+      (c.provider || '').toLowerCase().includes(f)
+    );
+  }
 
   /** Check if a model has verified capabilities (in master list or user overrides). */
   function hasKnownCaps(caps?: ModelCaps): boolean {
@@ -313,6 +417,7 @@
         getConfig(),
         loadModelInfo(),
         getProviderStatus().then(s => { providerStatus = s; }).catch(() => {}),
+        loadCapabilities(),
       ]);
       config = configData.config;
       loadRoutingState();
@@ -926,6 +1031,121 @@
       {/if}
     </div>
   {/if}
+
+  <!-- ── Model Capabilities Section ────────────────────────── -->
+  {#if !loading}
+    <div class="card model-caps-card">
+      <div class="model-caps-header">
+        <div>
+          <h3 class="mc-title">Model Capabilities</h3>
+          <p class="section-desc">Auto-fetched from provider APIs. Edit to override.</p>
+        </div>
+        <button
+          class="btn btn-sm"
+          onclick={handleRefreshCaps}
+          disabled={refreshingCaps}
+        >
+          {refreshingCaps ? 'Refreshing...' : 'Refresh from APIs'}
+        </button>
+      </div>
+      {#if refreshMsg}
+        <p class="mc-refresh-msg" class:mc-refresh-error={refreshMsg.startsWith('Refresh failed')}>{refreshMsg}</p>
+      {/if}
+
+      {#if allCapabilities.length > 0}
+        <div class="mc-filter">
+          <input
+            type="text"
+            class="mc-filter-input"
+            placeholder="Filter models..."
+            bind:value={capsFilter}
+          />
+        </div>
+
+        <div class="mc-table">
+          <div class="mc-row mc-header-row">
+            <span class="mc-col-name">Model</span>
+            <span class="mc-col-provider">Provider</span>
+            <span class="mc-col-ctx">Context</span>
+            <span class="mc-col-cap mc-col-vision">Vision</span>
+            <span class="mc-col-cap mc-col-think">Think</span>
+            <span class="mc-col-cap mc-col-tools">Tools</span>
+            <span class="mc-col-cost">Cost/1M</span>
+            <span class="mc-col-source">Source</span>
+            <span class="mc-col-actions">Actions</span>
+          </div>
+
+          {#each filteredCapabilities() as entry}
+            {@const fullRef = (entry.provider && entry.provider !== 'unknown' ? entry.provider + '/' : '') + entry.id}
+            {@const currentModel = getCurrentModel()}
+            {@const fallbackModelRef = getFallbackModel()}
+            {@const bareCurrentModel = currentModel.includes('/') ? currentModel.split('/').slice(1).join('/') : currentModel}
+            {@const bareFallbackModel = fallbackModelRef.includes('/') ? fallbackModelRef.split('/').slice(1).join('/') : fallbackModelRef}
+            {@const isDefault = currentModel === fullRef || bareCurrentModel === entry.id}
+            {@const isFallback = fallbackModelRef === fullRef || bareFallbackModel === entry.id}
+
+            <div class="mc-row" class:active-model={isDefault} class:fallback-model={isFallback && !isDefault}>
+              <span class="mc-col-name">
+                <code class="model-id">{entry.displayName || entry.id}</code>
+                {#if isDefault}<Badge variant="green">Default</Badge>{/if}
+                {#if isFallback}<Badge variant="yellow">Fallback</Badge>{/if}
+              </span>
+              <span class="mc-col-provider">{entry.provider || '—'}</span>
+              <span class="mc-col-ctx">{entry.contextWindow ? formatTokens(entry.contextWindow) : '—'}</span>
+              <span class="mc-col-cap mc-col-vision">{entry.supportsVision ? '✓' : '—'}</span>
+              <span class="mc-col-cap mc-col-think">{entry.supportsThinking ? '✓' : '—'}</span>
+              <span class="mc-col-cap mc-col-tools">{entry.supportsToolCalling ? '✓' : '—'}</span>
+              <span class="mc-col-cost">{entry.costPer1M ? `$${entry.costPer1M.input}/$${entry.costPer1M.output}` : '—'}</span>
+              <span class="mc-col-source">
+                {#if entry.source === 'manual'}
+                  <Badge variant="yellow">manual</Badge>
+                {:else}
+                  <Badge variant="default">auto</Badge>
+                {/if}
+              </span>
+              <span class="mc-col-actions">
+                {#if !isDefault}
+                  <button class="btn btn-xs" onclick={() => handleSetDefault(entry.provider && entry.provider !== 'unknown' ? entry.provider : 'anthropic', entry.id)} disabled={savingModel === entry.id}>Default</button>
+                {/if}
+                {#if !isFallback}
+                  <button class="btn btn-xs" onclick={() => handleSetFallback(entry.provider && entry.provider !== 'unknown' ? entry.provider : 'anthropic', entry.id)} disabled={savingModel === entry.id}>Fallback</button>
+                {/if}
+                <button class="btn btn-xs" onclick={() => startCapEdit(entry)}>Edit</button>
+              </span>
+            </div>
+
+            {#if editingCapId === entry.id}
+              <div class="mc-edit-row">
+                <div class="mc-edit-grid">
+                  <label>Context Window <input type="number" bind:value={capEditForm.contextWindow} /></label>
+                  <label>Max Output <input type="number" bind:value={capEditForm.maxOutputTokens} /></label>
+                  <label>Timeout (ms) <input type="number" bind:value={capEditForm.timeoutMs} /></label>
+                  <label>Cost Input/1M <input type="number" step="0.01" bind:value={capEditForm.costInputPerM} placeholder="e.g. 3" /></label>
+                  <label>Cost Output/1M <input type="number" step="0.01" bind:value={capEditForm.costOutputPerM} placeholder="e.g. 15" /></label>
+                </div>
+                <div class="mc-edit-checks">
+                  <label><input type="checkbox" bind:checked={capEditForm.supportsVision} /> Vision</label>
+                  <label><input type="checkbox" bind:checked={capEditForm.supportsThinking} /> Thinking</label>
+                  <label><input type="checkbox" bind:checked={capEditForm.supportsToolCalling} /> Tools</label>
+                </div>
+                <div class="mc-edit-actions">
+                  <button class="btn btn-sm btn-primary" onclick={saveCapEdit} disabled={savingCapEdit}>
+                    {savingCapEdit ? 'Saving...' : 'Save'}
+                  </button>
+                  <button class="btn btn-sm" onclick={() => { editingCapId = null; }}>Cancel</button>
+                  {#if capEditMsg}<span class="mc-edit-msg">{capEditMsg}</span>{/if}
+                </div>
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {:else if loadingCaps}
+        <p class="mc-empty">Loading model capabilities...</p>
+      {:else}
+        <p class="mc-empty">No model capabilities yet. Click "Refresh from APIs" or test a provider connection.</p>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1361,9 +1581,7 @@
     .model-row-actions {
       flex-wrap: wrap;
     }
-    .caps-row {
-      flex-wrap: wrap;
-    }
+    .caps-row { flex-wrap: wrap; }
     .caps-input { width: 100%; }
     .current-model {
       flex-direction: column;
@@ -1397,4 +1615,66 @@
   .btn-primary { background: var(--accent, #6366f1) !important; color: white !important; }
   .routing-msg { font-size: 0.85rem; color: var(--green, #4ade80); }
   .routing-msg.routing-error { color: var(--error, #f87171); }
+
+  /* ── Model Capabilities Section ── */
+  .model-caps-card { padding: 20px 24px; margin-top: 24px; }
+  .model-caps-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .mc-title { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+  .section-desc { font-size: 12px; color: var(--text-muted); }
+  .mc-filter { margin-bottom: 12px; }
+  .mc-filter-input { width: 100%; padding: 6px 10px; font-size: 13px; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border, #333); border-radius: 4px; color: var(--text); }
+  .mc-table { font-size: 12px; overflow-x: auto; }
+  .mc-row { display: grid; grid-template-columns: 2fr 1fr 0.8fr 0.5fr 0.5fr 0.5fr 1fr 0.7fr 1.5fr; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle, #222); }
+  .mc-header-row { font-weight: 600; color: var(--text-muted); border-bottom: 2px solid var(--border, #333); padding-bottom: 8px; margin-bottom: 4px; }
+  .mc-row:hover:not(.mc-header-row) { background: var(--bg-hover, #1a1a2e); }
+  .mc-col-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+  .mc-col-provider { color: var(--text-muted); }
+  .mc-col-ctx { text-align: center; }
+  .mc-col-cap { text-align: center; }
+  .mc-col-cost { text-align: center; font-size: 11px; color: var(--text-muted); }
+  .mc-col-source { text-align: center; }
+  .mc-col-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .model-id { font-size: 12px; }
+  .mc-empty { color: var(--text-muted); font-size: 13px; padding: 20px 0; text-align: center; }
+  .mc-edit-row { padding: 12px 8px; background: var(--bg-secondary, #1a1a2e); border-radius: 6px; margin: 4px 0 8px; }
+  .mc-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .mc-edit-grid label { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px; }
+  .mc-edit-grid input { padding: 4px 6px; font-size: 12px; background: var(--bg, #0d0d1a); border: 1px solid var(--border, #333); border-radius: 3px; color: var(--text); }
+  .mc-edit-checks { display: flex; gap: 12px; margin-bottom: 8px; font-size: 12px; }
+  .mc-edit-checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .mc-edit-actions { display: flex; align-items: center; gap: 8px; }
+  .mc-edit-msg { font-size: 12px; color: var(--green, #4ade80); }
+  .mc-refresh-msg { font-size: 12px; color: var(--green, #4ade80); margin-bottom: 12px; }
+  .mc-refresh-error { color: var(--error, #f87171); }
+
+  @media (max-width: 900px) {
+    .model-caps-header { flex-direction: column; gap: 8px; }
+    .mc-header-row { display: none; }
+    .mc-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 10px 8px;
+      border: 1px solid var(--border-subtle, #222);
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+    .mc-col-name { white-space: normal; flex-wrap: wrap; }
+    .mc-col-provider::before { content: 'Provider: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-ctx::before { content: 'Context: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-cap { text-align: left; }
+    .mc-col-vision::before { content: 'Vision: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-think::before { content: 'Think: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-tools::before { content: 'Tools: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-cost { text-align: left; }
+    .mc-col-cost::before { content: 'Cost: '; color: var(--text-muted); font-size: 11px; }
+    .mc-col-source { text-align: left; }
+    .mc-col-actions { justify-content: flex-start; }
+    .mc-edit-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 480px) {
+    .mc-edit-grid { grid-template-columns: 1fr; }
+    .mc-edit-checks { flex-direction: column; gap: 6px; }
+  }
 </style>

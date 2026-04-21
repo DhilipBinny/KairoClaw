@@ -218,7 +218,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     "softCompactionThreshold": 0.5,
     "keepRecentMessages": 10
   },
-  "models": { "catalog": {} },
+  "models": { "capabilities": {} },
   "mcp": { "servers": {} }
 }
 CFGEOF

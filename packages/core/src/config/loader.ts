@@ -138,6 +138,13 @@ export function loadConfig(configPath?: string): GatewayConfig {
     }
   }
 
+  // v2: models.catalog renamed to models.capabilities
+  const modelsSection = (rawConfig as any)?.models;
+  if (modelsSection?.catalog && !modelsSection.capabilities) {
+    modelsSection.capabilities = modelsSection.catalog;
+    delete modelsSection.catalog;
+  }
+
   // Migrate: add new fields from defaults that don't exist yet
   const migrated = deepMerge(
     configDefaults as unknown as Record<string, unknown>,

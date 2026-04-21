@@ -226,7 +226,12 @@ async function main(): Promise<void> {
   const providerRegistry = new ProviderRegistry(config);
   providerRegistry.setSecretsStore(secretsStore);
 
-  // 6e. Initialize audit service
+  // 6e. Auto-fetch model capabilities from provider APIs (background, non-blocking)
+  import('./models/refresh.js').then(({ refreshModelCapabilities }) =>
+    refreshModelCapabilities(config, secretsStore).catch(() => { /* non-critical */ })
+  );
+
+  // 6f. Initialize audit service
   const auditService = new AuditService(db);
 
   // 7. Initialize tool registry with built-in tools (config-aware filtering)
@@ -476,6 +481,10 @@ async function main(): Promise<void> {
     // Kairo Premium config hot-reload (enabled, mode, defaultModel)
     if (dotPath.startsWith('providers.kairoPremium.')) {
       await providerRegistry.reinitProviders();
+      // Refresh model capabilities (new provider config may access different models)
+      import('./models/refresh.js').then(({ refreshModelCapabilities }) =>
+        refreshModelCapabilities(config, secretsStore).catch(() => { /* non-critical */ })
+      );
       server.log.info({ dotPath, value }, 'Kairo Premium config changed via Settings');
     }
     // Tool toggle hot-reload
