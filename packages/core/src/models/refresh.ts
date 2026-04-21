@@ -79,25 +79,27 @@ async function doRefresh(
     }
   }
 
-  // 2. Kairo Premium (OAuth — uses same Anthropic models API)
-  if (config.providers?.kairoPremium?.enabled) {
+  // 2. Kairo Premium (OAuth — same Anthropic models, reuse parseAnthropicModels)
+  if (config.providers?.kairoPremium?.enabled && Object.keys(allFetched).length === 0) {
     const kAuthToken = secretsStore?.get('kairo.providers.anthropic', 'authToken') || '';
     if (kAuthToken) {
       try {
         const { listKairoPremiumModels } = await import('../providers/kairo-premium.js');
         const models = await listKairoPremiumModels(kAuthToken);
-        for (const m of models) {
-          // Only add if not already fetched from Anthropic API key path
-          if (!allFetched[m.id]) {
-            allFetched[m.id] = {
-              displayName: m.displayName,
-              provider: 'anthropic',
-              source: 'auto' as const,
-            };
-          }
+        if (models.length > 0) {
+          // Convert to the same format parseAnthropicModels expects
+          const apiFormat = models.map(m => ({
+            id: m.id,
+            display_name: m.displayName,
+            max_input_tokens: m.maxInputTokens || 0,
+            max_tokens: m.maxOutputTokens || 0,
+            capabilities: m.capabilities || {},
+          }));
+          const parsed = parseAnthropicModels({ data: apiFormat });
+          allFetched = { ...allFetched, ...parsed };
+          providers.push('kairo-premium');
+          log.info({ count: Object.keys(parsed).length }, 'Fetched Kairo Premium model capabilities');
         }
-        if (models.length > 0) providers.push('kairo-premium');
-        log.info({ count: models.length }, 'Fetched Kairo Premium model list');
       } catch (e) {
         log.warn({ err: (e as Error).message }, 'Failed to fetch Kairo Premium models');
       }
