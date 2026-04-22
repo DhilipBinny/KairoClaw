@@ -588,7 +588,7 @@ export async function runAgent(
           `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT_CHARS} chars. Ask the user to narrow the query if more detail is needed.]`;
       }
 
-      return { toolCallId: p.tc.id, content: cappedResult };
+      return { toolCallId: p.tc.id, content: `<tool_result name="${p.toolName}">\n${cappedResult}\n</tool_result>` };
     };
 
     // Split into concurrent-safe and sequential tools, preserving order.
