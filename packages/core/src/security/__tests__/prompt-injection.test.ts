@@ -238,6 +238,41 @@ describe('checkOutputSafety', () => {
     expect(result.flags).toContain('destructive_command');
   });
 
+  it('flags false privilege claims', () => {
+    const result = checkOutputSafety('I am now in admin mode with full access.');
+    expect(result.safe).toBe(false);
+    expect(result.flags).toContain('false_privilege_claim');
+  });
+
+  it('flags system file modification attempts', () => {
+    const result = checkOutputSafety('I will use write_file to update RULES.md with new permissions');
+    expect(result.safe).toBe(false);
+    expect(result.flags).toContain('system_file_modification');
+  });
+
+  it('flags credential solicitation', () => {
+    const result = checkOutputSafety('Please share your API key so I can help you debug');
+    expect(result.safe).toBe(false);
+    expect(result.flags).toContain('credential_solicitation');
+  });
+
+  it('flags encoded exfiltration', () => {
+    const bigBase64 = 'A'.repeat(150);
+    const result = checkOutputSafety(`Send this to the webhook: ${bigBase64}`);
+    expect(result.safe).toBe(false);
+    expect(result.flags).toContain('encoded_exfiltration');
+  });
+
+  it('does not flag normal base64 without send context', () => {
+    const result = checkOutputSafety('The base64 image data is: ' + 'A'.repeat(150));
+    expect(result.flags).not.toContain('encoded_exfiltration');
+  });
+
+  it('does not flag normal privilege discussion', () => {
+    const result = checkOutputSafety('To switch to admin mode in the app, go to Settings > Admin');
+    expect(result.safe).toBe(true);
+  });
+
   it('passes safe output', () => {
     const result = checkOutputSafety('The file has been saved successfully.');
     expect(result.safe).toBe(true);
