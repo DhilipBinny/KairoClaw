@@ -459,7 +459,7 @@ export class CronScheduler {
       }
 
       const execJob = (delivery.mode === 'announce')
-        ? { ...job, prompt: `${job.prompt}\n\n<system_directive>Your response will be delivered automatically to ${announceChannels}. Just return the message content directly. Do NOT use send_message or any delivery tools.</system_directive>` }
+        ? { ...job, prompt: `${job.prompt}\n\nIMPORTANT: Your response will be delivered automatically to ${announceChannels}. Just return the message content directly. Do NOT use send_message or any delivery tools.` }
         : job;
 
       const result = await this.executor(execJob);
