@@ -17,7 +17,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     const userRepo = new UserRepository(db);
     const senderLinkRepo = new SenderLinkRepository(db);
     const usageRepo = new UsageRepository(db);
-    const sessionRepo = new SessionRepository(db);
+    const _sessionRepo = new SessionRepository(db);
 
     const users = await userRepo.listByTenant(tenantId);
     const allLinks = await senderLinkRepo.listByTenant(tenantId);
@@ -296,7 +296,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // GET /api/v1/admin/users/:id/sender-links — list linked senders
-  app.get('/api/v1/admin/users/:id/sender-links', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.get('/api/v1/admin/users/:id/sender-links', { preHandler: [requireRole('admin')] }, async (request, _reply) => {
     const db = getDb(request);
     const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };

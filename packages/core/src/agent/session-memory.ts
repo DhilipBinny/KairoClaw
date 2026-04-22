@@ -33,7 +33,6 @@ import {
   SESSION_MEMORY_DIR,
   SESSION_MEMORY_INIT_TOKEN_THRESHOLD,
   SESSION_MEMORY_GROWTH_TOKEN_THRESHOLD,
-  SESSION_MEMORY_MAX_TOTAL_TOKENS,
   SESSION_MEMORY_MAX_AGE_DAYS,
 } from '../constants.js';
 import { createModuleLogger } from '../observability/logger.js';

@@ -194,7 +194,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
   // POST /api/v1/admin/channels/pending-senders/:id/reject
   app.post('/api/v1/admin/channels/pending-senders/:id/reject', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const db = getDb(request);
-    const tenantId = getTenantId(request);
+    const _tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
 
     const repo = new PendingSenderRepository(db);
