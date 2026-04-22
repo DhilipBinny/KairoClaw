@@ -87,6 +87,7 @@
   .page-title { font-size: 24px; font-weight: 700; margin-bottom: 16px; }
   .empty { color: var(--text-muted); }
   .sessions-layout { display: flex; gap: 20px; height: calc(100vh - 120px); }
+  .sessions-layout { display: flex; gap: 20px; height: calc(100dvh - 120px); }
   .session-list { width: 300px; min-width: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
   .session-row {
     text-align: left; width: 100%; padding: 10px 12px; border: 1px solid var(--border-subtle);

@@ -736,7 +736,7 @@
   .env-label .required { color: var(--error, #ef4444); }
   .env-configured { font-size: 10px; color: var(--success, #22c55e); font-weight: 400; margin-left: 4px; }
   .env-actions { display: flex; gap: 8px; }
-  .input-sm { padding: 6px 10px; font-size: 13px; }
+  .input-sm { padding: 6px 10px; font-size: 16px; }
 
   /* Catalog */
   .category-title { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: capitalize; margin-bottom: 10px; margin-top: 4px; }
@@ -770,7 +770,7 @@
   .env-hint { font-size: 11px; color: var(--text-muted); font-weight: 400; display: block; margin-top: 1px; }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .catalog-grid { grid-template-columns: 1fr; }
     .server-header { flex-direction: column; gap: 8px; }
     .server-actions { flex-wrap: wrap; }

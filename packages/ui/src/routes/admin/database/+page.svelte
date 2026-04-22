@@ -209,4 +209,9 @@
   .result.success { background: rgba(34, 197, 94, 0.1); color: var(--success, #22c55e); }
   .result.error { background: rgba(239, 68, 68, 0.1); color: var(--error, #ef4444); }
   .env-example { display: block; font-size: 12px; background: var(--bg-raised); padding: 10px 14px; border-radius: var(--radius-md); margin-top: 8px; word-break: break-all; }
+
+  @media (max-width: 480px) {
+    .info-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .preview-row { flex-direction: column; gap: 2px; }
+  }
 </style>

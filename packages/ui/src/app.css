@@ -200,6 +200,7 @@
 html {
   height: 100%;
   -webkit-text-size-adjust: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 body {
@@ -316,7 +317,7 @@ a:hover {
   background: var(--bg-void);
   color: var(--text-primary);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: 16px;
   outline: none;
   transition: border-color var(--duration) var(--ease), box-shadow var(--duration) var(--ease);
 }
@@ -350,7 +351,7 @@ textarea.input {
   resize: vertical;
   min-height: 120px;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -601,6 +602,13 @@ select.input {
   }
 }
 
+/* ═══════════════ RESPONSIVE: DESKTOP (reduce input font from 16px base) ═══════════════ */
+@media (min-width: 769px) {
+  .input { font-size: 14px; }
+  textarea.input { font-size: 13px; }
+  .input-sm { font-size: 12px; }
+}
+
 /* ═══════════════ RESPONSIVE: MOBILE ═══════════════ */
 @media (max-width: 768px) {
   .admin-layout {
@@ -625,9 +633,6 @@ select.input {
     font-size: 12px;
     padding: 6px 12px;
   }
-  .input {
-    font-size: 13px;
-  }
   .qr-image {
     max-width: 100%;
     height: auto;
@@ -636,6 +641,23 @@ select.input {
     grid-template-columns: 1fr;
   }
 }
+
+/* ═══════════════ PAGE STRUCTURE ═══════════════ */
+.page-header { margin-bottom: 24px; }
+.page-title { font-size: 24px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
+.page-desc { color: var(--text-muted); font-size: 14px; }
+.section-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+
+/* ═══════════════ DATA TABLE ═══════════════ */
+.table-wrapper { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.data-table th, .data-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+.data-table th {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.5px; background: var(--bg-raised);
+}
+.data-table tbody tr { transition: background var(--duration) var(--ease); }
+.data-table tbody tr:hover { background: var(--bg-raised); }
 
 .input.error, .input[aria-invalid="true"] {
   border-color: var(--red);

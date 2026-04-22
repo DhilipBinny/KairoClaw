@@ -1141,13 +1141,13 @@
   .subsettings { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-subtle); }
 
   .inline-form { display: flex; align-items: center; gap: 6px; }
-  .inline-form .input-sm { max-width: 220px; width: 100%; padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
+  .inline-form .input-sm { max-width: 220px; width: 100%; padding: 5px 8px; font-size: 16px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
 
-  .toggle-btn { display: flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 0; color: inherit; }
+  .toggle-btn { display: flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 8px 0; min-height: 44px; color: inherit; }
   .toggle-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .toggle-track { width: 36px; height: 20px; border-radius: 10px; background: var(--bg-void); border: 1px solid var(--border); position: relative; transition: background var(--duration) var(--ease); }
+  .toggle-track { width: 40px; height: 24px; border-radius: 12px; background: var(--bg-void); border: 1px solid var(--border); position: relative; transition: background var(--duration) var(--ease); flex-shrink: 0; }
   .toggle-btn.active .toggle-track { background: var(--accent); border-color: var(--accent); }
-  .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-muted); transition: all var(--duration) var(--ease); }
+  .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--text-muted); transition: all var(--duration) var(--ease); }
   .toggle-btn.active .toggle-thumb { left: 18px; background: #fff; }
   .toggle-label { font-size: 12px; color: var(--text-secondary); min-width: 24px; }
 
@@ -1167,7 +1167,7 @@
   .action-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; }
 
   .input-action { display: flex; align-items: center; gap: 6px; width: 100%; }
-  .input-action .input-sm { flex: 1; min-width: min(180px, 100%); padding: 5px 8px; font-size: 12px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
+  .input-action .input-sm { flex: 1; min-width: min(180px, 100%); padding: 5px 8px; font-size: 16px; font-family: var(--font-mono); background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-primary); }
   .spinner-sm { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -1222,8 +1222,11 @@
 
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
+  @media (min-width: 769px) {
+    .inline-form .input-sm, .input-action .input-sm { font-size: 12px; }
+  }
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .field-row { flex-direction: column; align-items: flex-start; gap: 8px; }
     .field-control { width: 100%; }

@@ -258,6 +258,7 @@
     border-radius: var(--radius);
     padding: 20px;
     max-height: calc(100vh - 140px);
+    max-height: calc(100dvh - 140px);
     overflow-y: auto;
   }
   .detail-header {

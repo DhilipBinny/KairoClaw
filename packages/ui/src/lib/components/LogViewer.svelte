@@ -252,13 +252,14 @@
   .log-detail { margin: 0 0 4px 0; padding: 8px 12px; font-size: 11px; line-height: 1.4; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); color: var(--text-secondary); overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   .log-cat { color: var(--accent); font-size: 10px; font-weight: 500; background: var(--accent-subtle); padding: 0 5px; border-radius: 3px; flex-shrink: 0; }
   .log-msg { color: var(--text-primary); word-break: break-all; }
-  .category-select { width: 140px; font-size: 11px; padding: 3px 6px; }
+  .category-select { width: 140px; font-size: 16px; padding: 3px 6px; }
   .log-empty { padding: 40px; text-align: center; color: var(--text-muted); }
 
   .search-toolbar { padding: 8px 0; }
   .search-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .search-input { flex: 1; min-width: 200px; }
-  .input-sm { padding: 5px 8px; font-size: 12px; }
+  .input-sm { padding: 5px 8px; font-size: 16px; }
+  @media (min-width: 769px) { .category-select { font-size: 11px; } .input-sm { font-size: 12px; } }
 
   .log-files { margin-top: 16px; padding: 12px; background: var(--bg-raised); border-radius: var(--radius); }
   .files-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
