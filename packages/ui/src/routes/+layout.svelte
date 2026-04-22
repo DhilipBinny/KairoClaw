@@ -6,8 +6,13 @@
   import { goto } from '$app/navigation';
   import Toast from '$lib/components/Toast.svelte';
   import { initTheme } from '$lib/stores/theme.svelte';
+  import { initPwa, onUpdateAvailable, applyUpdate } from '$lib/pwa';
 
   initTheme();
+  initPwa();
+
+  let showUpdateToast = $state(false);
+  onUpdateAvailable(() => { showUpdateToast = true; });
 
   let { children } = $props();
 
@@ -44,6 +49,14 @@
 {:else if isAuthenticated || String(page.url?.pathname) === '/login' || String(page.url?.pathname) === '/setup'}
   {@render children()}
   <Toast />
+
+  {#if showUpdateToast}
+    <div class="pwa-toast">
+      <span>New version available</span>
+      <button onclick={() => { applyUpdate(); }}>Update</button>
+      <button class="dismiss" onclick={() => { showUpdateToast = false; }}>Later</button>
+    </div>
+  {/if}
 {:else}
   <div class="loading-screen">
     <div class="loading-text">Redirecting...</div>
@@ -96,5 +109,38 @@
   .loading-text {
     color: var(--text-muted);
     font-size: 14px;
+  }
+
+  .pwa-toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-secondary, #1a1a2e);
+    border: 1px solid var(--border, #333);
+    border-radius: 10px;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--text);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    z-index: 10000;
+  }
+  .pwa-toast button {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--accent, #6366f1);
+    color: white;
+  }
+  .pwa-toast button.dismiss {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border, #333);
   }
 </style>
