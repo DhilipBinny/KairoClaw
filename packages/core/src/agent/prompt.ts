@@ -18,7 +18,6 @@ import {
   MEMORY_PROFILE_MAX_CHARS,
   MEMORY_SESSION_MAX_CHARS,
   MEMORY_RECENT_DAYS,
-  SESSION_MEMORY_DIR,
 } from '../constants.js';
 import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
 import { readSessionMemory } from './session-memory.js';

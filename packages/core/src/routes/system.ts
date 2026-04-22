@@ -270,7 +270,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         (useExisting && provider === 'openai' ? (secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey) : null) ||
         reqApiKey;
 
-      const authToken =
+      const _authToken =
         reqAuthToken ||
         (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || (config.providers.anthropic as any)?.authToken) : null) ||
         reqAuthToken;

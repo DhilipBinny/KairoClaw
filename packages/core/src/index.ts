@@ -308,7 +308,7 @@ async function main(): Promise<void> {
   // 10. Create the agent runner factory — resolves sessions and builds AgentContext
   const sessionRepo = new SessionRepository(db);
   const senderLinkRepo = new SenderLinkRepository(db);
-  const userRepo = new UserRepository(db);
+  const _userRepo = new UserRepository(db);
 
   // Shared services — populated later, referenced by closures
   const sharedServices: {
@@ -334,7 +334,6 @@ async function main(): Promise<void> {
     const chatIdStr = String(inbound.chatId);
 
     // Resolve user: try direct lookup first (webchat/API), then sender_links (Telegram/WhatsApp)
-    let validUserId: string | undefined;
     let resolvedUser: { id: string; role: string; elevated: number; active: number } | undefined;
     if (inbound.userId) {
       resolvedUser = await db.get<{ id: string; role: string; elevated: number; active: number }>(
@@ -355,7 +354,7 @@ async function main(): Promise<void> {
     // Group sessions must never be owned by a single user — multiple people share them.
     // resolvedUser is still used for per-request permission checking (AgentContext.user).
     const isGroupChat = chatIdStr.startsWith('telegram:-') || chatIdStr.includes('@g.us');
-    validUserId = isGroupChat ? undefined : resolvedUser?.id;
+    const validUserId = isGroupChat ? undefined : resolvedUser?.id;
 
     const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
     let sessionRow = existingSessions.find(
