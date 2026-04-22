@@ -202,10 +202,12 @@ export const messagingTools: ToolRegistration[] = [
       description: `Manage scheduled cron jobs. Create, list, update, or delete recurring tasks.
 Jobs run on a cron schedule. When delivery.mode is "announce", the AI generates text and the system delivers it to the configured channels automatically.
 
+IMPORTANT: Always set schedule.tz to the user's IANA timezone from the "Current Date & Time" section (e.g. "Asia/Singapore"). Without it, cron runs in UTC and fires at the wrong local time.
+
 Schedule examples:
-- Daily at 9 AM SGT: schedule.type="cron", schedule.value="0 9 * * *", schedule.tz="Asia/Singapore"
-- Every 3 hours daytime: schedule.value="0 7,10,13,16,19,22 * * *"
-- One-shot: schedule.type="at", schedule.value="<ISO timestamp>"
+- Daily at 9 AM: schedule.type="cron", schedule.value="0 9 * * *", schedule.tz="Asia/Singapore"
+- Every 3 hours daytime: schedule.value="0 7,10,13,16,19,22 * * *", schedule.tz="Asia/Singapore"
+- One-shot: schedule.type="at", schedule.value="2026-04-23T09:00:00+08:00"
 - Every 5 min: schedule.type="every", schedule.value=300000
 
 Delivery: use delivery.targets array for per-channel routing. Each target needs a channel and optionally a "to" address.

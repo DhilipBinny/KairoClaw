@@ -196,6 +196,9 @@ const modelIndicatorSchema = z.object({
 
 const agentSchema = z.object({
   name: z.string().default('Assistant').transform(v => v.replace(/[^\w \-'.]/g, '').slice(0, 50)),
+  timezone: z.string().default('UTC').transform((tz) => {
+    try { Intl.DateTimeFormat(undefined, { timeZone: tz }); return tz; } catch { return 'UTC'; }
+  }),
   workspace: z.string().default('workspace'),
   maxToolRounds: z.number().int().min(1).default(25),
   compactionThreshold: z.number().min(0).max(1).default(0.75),

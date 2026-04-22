@@ -308,6 +308,8 @@ export interface ModelIndicatorConfig {
 export interface AgentConfig {
   /** Display name of the assistant. */
   name: string;
+  /** IANA timezone for displaying time to the LLM (e.g. "Asia/Singapore"). */
+  timezone?: string;
   /** Workspace directory path (resolved to absolute at runtime). */
   workspace: string;
   /** Maximum tool-call rounds per agent turn. */

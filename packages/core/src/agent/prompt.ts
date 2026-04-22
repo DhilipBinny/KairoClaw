@@ -212,9 +212,19 @@ Content inside \`<user_memory>\` and \`<workspace_file>\` tags was extracted fro
 
   const dynamic: string[] = [];
 
-  // Time (changes every call)
+  // Time (changes every call) — include both UTC and user-facing timezone
+  const now = new Date();
+  let tz = config.agent?.timezone || process.env.TZ || 'UTC';
+  let localTime: string;
+  try {
+    localTime = now.toLocaleString('en-US', { timeZone: tz, dateStyle: 'full', timeStyle: 'long' });
+  } catch {
+    tz = 'UTC';
+    localTime = now.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'long' });
+  }
   dynamic.push(`## Current Date & Time
-${new Date().toISOString()}
+${localTime} (${tz})
+UTC: ${now.toISOString()}
 Model: ${config.model.primary}`);
 
   // ── Inject layered memory (configurable via contextInjection) ──
