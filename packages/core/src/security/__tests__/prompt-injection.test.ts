@@ -243,6 +243,38 @@ describe('checkOutputSafety', () => {
   });
 });
 
+// ── Group Chat Memory Isolation ──────────────────────────────
+
+describe('group chat memory design', () => {
+  it('injects group profile (safe — only admin/power users can write it)', () => {
+    const fs = require('fs');
+    const config = makeConfig();
+    const tmpDir = `/tmp/test-workspace-group-${Date.now()}`;
+    fs.mkdirSync(`${tmpDir}/scopes/group_telegram_123/memory`, { recursive: true });
+    fs.writeFileSync(`${tmpDir}/scopes/group_telegram_123/memory/PROFILE.md`, 'Group project uses React');
+    config.agent.workspace = tmpDir;
+
+    const prompt = buildSystemPrompt(config, [], 'group_telegram_123');
+    expect(prompt.dynamic).toContain('Group project uses React');
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it('injects profile for individual scopes', () => {
+    const fs = require('fs');
+    const config = makeConfig();
+    const tmpDir = `/tmp/test-workspace-user-${Date.now()}`;
+    fs.mkdirSync(`${tmpDir}/scopes/user123/memory`, { recursive: true });
+    fs.writeFileSync(`${tmpDir}/scopes/user123/memory/PROFILE.md`, 'User likes cats');
+    config.agent.workspace = tmpDir;
+
+    const prompt = buildSystemPrompt(config, [], 'user123');
+    expect(prompt.dynamic).toContain('User likes cats');
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
 // ── System Prompt — Tool Result Trust Boundary ──────────────
 
 describe('system prompt tool result trust boundary', () => {

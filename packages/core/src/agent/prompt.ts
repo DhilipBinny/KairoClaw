@@ -228,6 +228,8 @@ Model: ${config.model.primary}`);
   const memoryDir = getScopedMemoryDir(workspace, scopeKey ?? null);
 
   // 1. User profile (long-term, permanent)
+  // Design: Group profiles are safe to inject because only admin/power users
+  // can trigger memory extraction that writes to them (see loop.ts).
   const profilePath = path.join(memoryDir, 'PROFILE.md');
   if (fs.existsSync(profilePath)) {
     const profile = fs.readFileSync(profilePath, 'utf8').slice(0, profileMaxChars);
