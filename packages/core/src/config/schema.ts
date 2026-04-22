@@ -53,8 +53,8 @@ const gatewayNetworkSchema = z.object({
 });
 
 const modelSelectionSchema = z.object({
-  primary: z.string().default('anthropic/claude-sonnet-4-6'),
-  fallback: z.string().default(''),
+  primary: z.string().default('anthropic/claude-sonnet-4-6').transform(v => v.replace(/[^\w\-.:/@]/g, '').slice(0, 100)),
+  fallback: z.string().default('').transform(v => v.replace(/[^\w\-.:/@]/g, '').slice(0, 100)),
   fallbackChain: z.array(z.string()).optional(),
 });
 
@@ -195,7 +195,7 @@ const modelIndicatorSchema = z.object({
 });
 
 const agentSchema = z.object({
-  name: z.string().default('Assistant'),
+  name: z.string().default('Assistant').transform(v => v.replace(/[^\w \-'.]/g, '').slice(0, 50)),
   workspace: z.string().default('workspace'),
   maxToolRounds: z.number().int().min(1).default(25),
   compactionThreshold: z.number().min(0).max(1).default(0.75),
