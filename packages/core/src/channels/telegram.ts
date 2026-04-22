@@ -21,7 +21,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
 
 const log = createModuleLogger('channel.telegram');
 
@@ -360,10 +360,15 @@ class TelegramChannel implements Channel {
     }
 
     const rawText = overrideText || ctx.message.text || '';
-    const msgText = sanitizeInput(rawText);
+    let msgText = sanitizeInput(rawText);
     const injection = detectPromptInjection(msgText);
     if (injection.suspicious) {
-      log.warn({ patterns: injection.patterns, senderId }, 'Prompt injection patterns detected (telegram)');
+      log.warn({ patterns: injection.patterns, severity: injection.maxSeverity, senderId }, 'Prompt injection patterns detected (telegram)');
+      if (injection.maxSeverity === 'block') {
+        await ctx.reply('Message rejected: suspicious input pattern detected.');
+        return;
+      }
+      msgText = prefixInjectionWarning(msgText, injection.patterns);
     }
 
     const inbound: InboundMessage = {

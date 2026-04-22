@@ -12,7 +12,7 @@ import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import type { InboundMessage, ChatRequest, ChatResponse } from '@agw/types';
 import type { AgentRunner } from './types.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
 
 const log = createModuleLogger('system');
 
@@ -106,10 +106,15 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       }
 
       // Input sanitization & prompt injection detection
-      const sanitizedText = sanitizeInput(body.message.trim());
+      let sanitizedText = sanitizeInput(body.message.trim());
       const injection = detectPromptInjection(sanitizedText);
       if (injection.suspicious) {
-        log.warn({ patterns: injection.patterns, requestId }, 'Prompt injection patterns detected (api SSE)');
+        log.warn({ patterns: injection.patterns, severity: injection.maxSeverity, requestId }, 'Prompt injection patterns detected (api SSE)');
+        if (injection.maxSeverity === 'block') {
+          reply.code(400).send({ error: 'Message rejected: suspicious input pattern detected' });
+          return;
+        }
+        sanitizedText = prefixInjectionWarning(sanitizedText, injection.patterns);
       }
 
       const inbound: InboundMessage = {
@@ -214,10 +219,14 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       }
 
       // Input sanitization & prompt injection detection
-      const sanitizedTextSync = sanitizeInput(body.message.trim());
+      let sanitizedTextSync = sanitizeInput(body.message.trim());
       const injectionSync = detectPromptInjection(sanitizedTextSync);
       if (injectionSync.suspicious) {
-        log.warn({ patterns: injectionSync.patterns, requestId }, 'Prompt injection patterns detected (api sync)');
+        log.warn({ patterns: injectionSync.patterns, severity: injectionSync.maxSeverity, requestId }, 'Prompt injection patterns detected (api sync)');
+        if (injectionSync.maxSeverity === 'block') {
+          return reply.code(400).send({ error: 'Message rejected: suspicious input pattern detected' });
+        }
+        sanitizedTextSync = prefixInjectionWarning(sanitizedTextSync, injectionSync.patterns);
       }
 
       const inbound: InboundMessage = {
