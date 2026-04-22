@@ -55,7 +55,7 @@ async function doRefresh(
     try {
       const baseUrl = config.providers?.anthropic?.baseUrl || 'https://api.anthropic.com';
       const headers = { 'anthropic-version': '2023-06-01', 'x-api-key': anthropicKey };
-      let allModels: Array<Record<string, unknown>> = [];
+      const allModels: Array<Record<string, unknown>> = [];
       let afterId: string | undefined;
 
       // Paginate through all models
