@@ -20,6 +20,7 @@
     display: flex;
     flex-direction: column;
     height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
   }
   .page-title {
     font-size: 24px;
@@ -37,7 +38,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
   }
 </style>

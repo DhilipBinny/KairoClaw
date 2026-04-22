@@ -266,30 +266,7 @@
   .table-wrapper {
     overflow-x: auto;
   }
-  .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-  }
-  .data-table th, .data-table td {
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-  }
-  .data-table th {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    background: var(--bg-raised);
-  }
-  .data-table tbody tr {
-    transition: background var(--duration) var(--ease);
-  }
-  .data-table tbody tr:hover {
-    background: var(--bg-raised);
-  }
+  /* data-table base styles in app.css */
   .data-table tbody tr:last-child td {
     border-bottom: none;
   }
@@ -340,7 +317,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .usage-header {
       flex-direction: column;
@@ -349,6 +326,6 @@
     .stat-icon-wrap { width: 36px; height: 36px; }
     .chart-card { padding: 12px; }
     .daily-chart { overflow-x: auto; }
-    .section-title { font-size: 14px; }
+    .section-title { font-size: 16px; }
   }
 </style>

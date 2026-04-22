@@ -259,6 +259,7 @@
     display: flex;
     flex-direction: column;
     height: calc(100vh - 120px);
+    height: calc(100dvh - 120px);
   }
   .editor-header {
     display: flex;
@@ -316,7 +317,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .file-grid {
       grid-template-columns: 1fr;

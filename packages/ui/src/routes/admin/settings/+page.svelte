@@ -1451,7 +1451,7 @@
 
   @media (max-width: 768px) {
     .settings-page { max-width: none; }
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .field-row {
       flex-direction: column;
@@ -1467,7 +1467,7 @@
     }
     .theme-selector { flex-wrap: wrap; }
     .raw-editor-textarea { min-height: 200px; }
-    .section-title { font-size: 14px; }
+    .section-title { font-size: 16px; }
   }
 
   /* Tool Permissions */
@@ -1482,5 +1482,6 @@
   .perm-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
   .perm-badge.mcp { background: #dbeafe; color: #2563eb; }
   .perm-toggle { min-width: 160px; text-align: right; }
-  .input-sm { padding: 3px 8px; font-size: 12px; }
+  .input-sm { padding: 3px 8px; font-size: 16px; }
+  @media (min-width: 769px) { .input-sm { font-size: 12px; } }
 </style>

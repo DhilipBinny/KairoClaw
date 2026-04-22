@@ -96,6 +96,7 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
+    height: 100dvh;
     background: var(--bg-void);
     position: relative;
     overflow: hidden;
@@ -213,5 +214,10 @@
     font-size: 12px;
     color: var(--text-ghost);
     letter-spacing: 0.3px;
+  }
+
+  @media (max-width: 480px) {
+    .login-card { padding: 32px 20px 28px; margin: 0 16px; }
+    .login-title { font-size: 22px; }
   }
 </style>

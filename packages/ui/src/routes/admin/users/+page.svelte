@@ -486,15 +486,6 @@
   }
 
   .table-card { padding: 0; overflow: hidden; }
-  .table-wrapper { overflow-x: auto; }
-  .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .data-table th, .data-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
-  .data-table th {
-    font-size: 11px; font-weight: 600; color: var(--text-muted);
-    text-transform: uppercase; letter-spacing: 0.5px; background: var(--bg-raised);
-  }
-  .data-table tbody tr { transition: background var(--duration) var(--ease); }
-  .data-table tbody tr:hover { background: var(--bg-raised); }
   .data-table tbody tr.inactive { opacity: 0.6; }
 
   .user-name { font-weight: 600; }
@@ -567,7 +558,7 @@
 
   .form-group { margin-bottom: 14px; }
   .label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
-  .input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; }
+  .input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-surface); color: var(--text-primary); font-size: 16px; }
   .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 
   .text-muted { color: var(--text-muted); }
@@ -598,7 +589,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-header { flex-direction: column; gap: 12px; }
     .modal { min-width: unset; width: 90vw; }
   }

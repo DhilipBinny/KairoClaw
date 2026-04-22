@@ -184,6 +184,7 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
+    height: 100dvh;
     background: var(--bg-void);
     position: relative;
     overflow: hidden;
@@ -302,4 +303,11 @@
   @keyframes fadeInScale { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
   @keyframes breathe { 0%, 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 50% { opacity: 0.6; transform: translate(-50%, -50%) scale(1.05); } }
   @keyframes gradientShift { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+
+  @media (max-width: 480px) {
+    .setup-card { padding: 28px 18px 24px; margin: 0 12px; }
+    .setup-title { font-size: 22px; }
+    .step-title { font-size: 18px; }
+    .step-actions { flex-direction: column; }
+  }
 </style>
