@@ -1556,7 +1556,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .provider-header {
       flex-direction: column;
@@ -1600,9 +1600,9 @@
   .routing-hint { color: var(--text-muted); font-size: 0.8rem; }
   .routing-field { margin-bottom: 10px; }
   .routing-field label { display: block; margin-bottom: 3px; font-size: 0.85rem; }
-  .routing-field input, .routing-field textarea { width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input, #0d0d1a); color: var(--text); font-size: 0.85rem; }
+  .routing-field input, .routing-field textarea { width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input, #0d0d1a); color: var(--text); font-size: 16px; }
   .routing-field input:disabled { opacity: 0.5; }
-  .routing-field textarea { resize: vertical; font-family: monospace; font-size: 0.8rem; }
+  .routing-field textarea { resize: vertical; font-family: monospace; font-size: 16px; }
   .routing-tip { color: var(--text-muted); font-size: 0.8rem; margin: 8px 0; }
   .routing-tip code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-size: 0.8em; }
   .routing-actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
@@ -1616,7 +1616,7 @@
   .mc-title { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
   .section-desc { font-size: 12px; color: var(--text-muted); }
   .mc-filter { margin-bottom: 12px; }
-  .mc-filter-input { width: 100%; padding: 6px 10px; font-size: 13px; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border, #333); border-radius: 4px; color: var(--text); }
+  .mc-filter-input { width: 100%; padding: 6px 10px; font-size: 16px; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border, #333); border-radius: 4px; color: var(--text); }
   .mc-table { font-size: 12px; overflow-x: auto; }
   .mc-row { display: grid; grid-template-columns: 2fr 1fr 0.8fr 0.5fr 0.5fr 0.5fr 1fr 0.7fr 0.5fr; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle, #222); }
   .mc-header-row { font-weight: 600; color: var(--text-muted); border-bottom: 2px solid var(--border, #333); padding-bottom: 8px; margin-bottom: 4px; }
@@ -1633,7 +1633,7 @@
   .mc-edit-row { padding: 12px 8px; background: var(--bg-secondary, #1a1a2e); border-radius: 6px; margin: 4px 0 8px; }
   .mc-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
   .mc-edit-grid label { font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px; }
-  .mc-edit-grid input { padding: 4px 6px; font-size: 12px; background: var(--bg, #0d0d1a); border: 1px solid var(--border, #333); border-radius: 3px; color: var(--text); }
+  .mc-edit-grid input { padding: 4px 6px; font-size: 16px; background: var(--bg, #0d0d1a); border: 1px solid var(--border, #333); border-radius: 3px; color: var(--text); }
   .mc-edit-checks { display: flex; gap: 12px; margin-bottom: 8px; font-size: 12px; }
   .mc-edit-checks label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .mc-edit-actions { display: flex; align-items: center; gap: 8px; }
@@ -1665,6 +1665,13 @@
     .mc-col-source { text-align: left; }
     .mc-col-actions { justify-content: flex-start; }
     .mc-edit-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (min-width: 769px) {
+    .routing-field input, .routing-field textarea { font-size: 0.85rem; }
+    .routing-field textarea { font-size: 0.8rem; }
+    .mc-filter-input { font-size: 13px; }
+    .mc-edit-grid input { font-size: 12px; }
   }
 
   @media (max-width: 480px) {

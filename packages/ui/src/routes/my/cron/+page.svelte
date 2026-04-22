@@ -289,12 +289,13 @@
   .form-group { display: flex; flex-direction: column; }
   .delivery-targets { display: flex; flex-direction: column; gap: 8px; }
   .delivery-row { display: flex; align-items: center; gap: 12px; }
-  .delivery-row .input-sm { flex: 1; font-size: 12px; padding: 4px 8px; height: 30px; }
+  .delivery-row .input-sm { flex: 1; font-size: 16px; padding: 4px 8px; height: 30px; }
   .delivery-row .btn-danger { color: var(--red, #ef4444); border-color: var(--red, #ef4444); padding: 2px 8px; font-size: 14px; line-height: 1; flex: none; }
   .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); cursor: pointer; }
   .checkbox-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
   .text-muted { color: var(--text-muted); }
 
+  @media (min-width: 769px) { .delivery-row .input-sm { font-size: 12px; } }
   @media (max-width: 768px) {
     .edit-form .form-row-2 { grid-template-columns: 1fr; }
   }

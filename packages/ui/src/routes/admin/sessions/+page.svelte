@@ -342,6 +342,7 @@
 <style>
   .sessions-page {
     height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
     display: flex;
     flex-direction: column;
   }
@@ -551,7 +552,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .sessions-layout { flex-direction: column; }
     .users-panel {

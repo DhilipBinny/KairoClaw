@@ -120,10 +120,11 @@
     background: transparent;
     color: var(--text-primary);
     font-family: var(--font);
-    font-size: 14px;
+    font-size: 16px;
     outline: none;
   }
   .chip-text-input::placeholder {
     color: var(--text-muted);
   }
+  @media (min-width: 769px) { .chip-text-input { font-size: 14px; } }
 </style>

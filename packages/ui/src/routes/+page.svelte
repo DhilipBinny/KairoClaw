@@ -589,7 +589,7 @@
     border: none;
     color: var(--text-primary);
     font-family: var(--font);
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.5;
     resize: none;
     outline: none;

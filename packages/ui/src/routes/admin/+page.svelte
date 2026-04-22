@@ -329,10 +329,10 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .stat-icon-wrap { width: 36px; height: 36px; }
-    .section-title { font-size: 14px; }
+    .section-title { font-size: 16px; }
     .check-row {
       flex-direction: column;
       align-items: flex-start;

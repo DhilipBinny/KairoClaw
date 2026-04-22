@@ -247,7 +247,7 @@
   }
 
   @media (max-width: 768px) {
-    .page-title { font-size: 20px; }
+    .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
     .json-editor {
       font-size: 12px;

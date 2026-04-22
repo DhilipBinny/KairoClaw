@@ -87,6 +87,7 @@
     align-items: center;
     justify-content: center;
     height: 100vh;
+    height: 100dvh;
     gap: 16px;
   }
   .loading-logo {
