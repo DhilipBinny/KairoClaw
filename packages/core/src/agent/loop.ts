@@ -235,6 +235,8 @@ export async function runAgent(
   const rawMessages: Message[] = [...history, { role: 'user', content: userContent }];
   const messages: Message[] = [];
   for (const msg of rawMessages) {
+    // Skip messages with empty text content (Anthropic API rejects empty content blocks)
+    if (typeof msg.content === 'string' && !msg.content.trim() && !msg.tool_calls?.length) continue;
     const last = messages[messages.length - 1];
     if (last && last.role === msg.role && msg.role === 'user' && typeof last.content === 'string' && typeof msg.content === 'string') {
       // Merge consecutive user messages (only when both are plain text)
@@ -686,7 +688,7 @@ export async function runAgent(
   }, 'Agent turn completed');
 
   // ── Persist assistant message (skip for ephemeral) ───────
-  if ((fullText || collectedMedia.length > 0) && messageRepo) {
+  if ((fullText.trim() || collectedMedia.length > 0) && messageRepo) {
     const msgMetadata: Record<string, unknown> = {};
     if (collectedMedia.length > 0) {
       msgMetadata.media = collectedMedia.map(m => ({
