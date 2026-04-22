@@ -588,7 +588,7 @@ export async function runAgent(
           `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT_CHARS} chars. Ask the user to narrow the query if more detail is needed.]`;
       }
 
-      return { toolCallId: p.tc.id, content: cappedResult };
+      return { toolCallId: p.tc.id, content: `<tool_result name="${p.toolName}">\n${cappedResult}\n</tool_result>` };
     };
 
     // Split into concurrent-safe and sequential tools, preserving order.
@@ -718,7 +718,14 @@ export async function runAgent(
   //   2. Then extract long-term facts to profile (Haiku reads session notes → daily file)
   // Profile extraction only runs when session memory was just updated —
   // no point re-reading the same file every turn.
-  if (!ephemeral && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
+  // Design: Group memory extraction — only admin/power users can shape persistent
+  // group memory. Regular users' messages are processed but don't trigger extraction,
+  // preventing a non-privileged member from poisoning the group's PROFILE.md or
+  // session notes that affect all future interactions for every member.
+  const isGroupScope = context.scopeKey?.startsWith('group_') ?? false;
+  const userRole = context.user?.role || 'user';
+  const canExtractGroupMemory = !isGroupScope || userRole === 'admin' || userRole === 'power_user';
+  if (!ephemeral && canExtractGroupMemory && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
     const currentTokens = totalInputTokens;
     const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
     if (check.shouldExtract) {

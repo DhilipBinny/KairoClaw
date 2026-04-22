@@ -447,15 +447,19 @@ export class CronScheduler {
         ? { mode: job.delivery as CronJobDelivery['mode'] }
         : job.delivery;
 
+      const VALID_CHANNELS = new Set(['telegram', 'whatsapp', 'web', 'api', 'internal']);
+      const sanitizeChannel = (ch: string) => VALID_CHANNELS.has(ch) ? ch : 'unknown';
+
       let announceChannels = 'the user';
       if (delivery.targets && delivery.targets.length > 0) {
-        announceChannels = delivery.targets.map(t => t.channel).join(' and ');
+        announceChannels = delivery.targets.map(t => sanitizeChannel(t.channel)).join(' and ');
       } else if (delivery.channel) {
-        announceChannels = Array.isArray(delivery.channel) ? delivery.channel.join(' and ') : delivery.channel;
+        const channels = Array.isArray(delivery.channel) ? delivery.channel : [delivery.channel];
+        announceChannels = channels.map(sanitizeChannel).join(' and ');
       }
 
       const execJob = (delivery.mode === 'announce')
-        ? { ...job, prompt: `${job.prompt}\n\n[SYSTEM: Your response will be delivered automatically to ${announceChannels}. Just return the message content directly. Do NOT use send_message or any delivery tools.]` }
+        ? { ...job, prompt: `${job.prompt}\n\n<system_directive>Your response will be delivered automatically to ${announceChannels}. Just return the message content directly. Do NOT use send_message or any delivery tools.</system_directive>` }
         : job;
 
       const result = await this.executor(execJob);

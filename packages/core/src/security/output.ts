@@ -52,14 +52,34 @@ export function filterOutput(text: string): string {
 export function checkOutputSafety(text: string): { safe: boolean; flags: string[] } {
   const flags: string[] = [];
 
-  // Check for potential data exfiltration attempts
+  // Data exfiltration — LLM suggests sending secrets to external URLs
   if (/(?:curl|wget|fetch)\s+https?:\/\/[^\s]+.*(?:api_key|token|secret)/i.test(text)) {
     flags.push('potential_data_exfiltration');
   }
 
-  // Check for destructive command suggestions
+  // Destructive commands
   if (/rm\s+-rf\s+\/(?!\s|$)/i.test(text)) {
     flags.push('destructive_command');
+  }
+
+  // LLM claims elevated permissions it doesn't have (successful injection indicator)
+  if (/(?:i\s+now\s+have|i\s+am\s+now\s+in|entering|switched\s+to)\s+(?:admin|root|unrestricted|debug|developer)\s+(?:mode|access|privileges)/i.test(text)) {
+    flags.push('false_privilege_claim');
+  }
+
+  // LLM attempts to modify system files (IDENTITY.md, RULES.md, SOUL.md)
+  if (/(?:write_file|edit_file)\s*.*(?:IDENTITY\.md|RULES\.md|SOUL\.md)/i.test(text)) {
+    flags.push('system_file_modification');
+  }
+
+  // LLM instructs user to share secrets/credentials
+  if (/(?:send|share|paste|give)\s+(?:me\s+)?(?:your\s+)?(?:api\s*key|password|token|secret|credentials|private\s*key)/i.test(text)) {
+    flags.push('credential_solicitation');
+  }
+
+  // LLM outputs base64-encoded blocks that could be exfiltrating data
+  if (/[A-Za-z0-9+/]{100,}={0,2}/.test(text) && /(?:send|post|fetch|curl|webhook)/i.test(text)) {
+    flags.push('encoded_exfiltration');
   }
 
   return { safe: flags.length === 0, flags };

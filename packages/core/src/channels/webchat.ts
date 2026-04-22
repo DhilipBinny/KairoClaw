@@ -20,7 +20,7 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { hashApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
 import { getModelShortName, shouldShowModelIndicator } from './utils.js';
 
 const log = createModuleLogger('channel.web');
@@ -265,10 +265,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             }
 
             // Input sanitization & prompt injection detection
-            const text = sanitizeInput(rawText);
+            let text = sanitizeInput(rawText);
             const injection = detectPromptInjection(text);
             if (injection.suspicious) {
-              log.warn({ patterns: injection.patterns, requestId }, 'Prompt injection patterns detected (webchat)');
+              log.warn({ patterns: injection.patterns, severity: injection.maxSeverity, requestId }, 'Prompt injection patterns detected (webchat)');
+              if (injection.maxSeverity === 'block') {
+                socket.send(JSON.stringify({ type: 'error', error: 'Message rejected: suspicious input pattern detected' }));
+                return;
+              }
+              text = prefixInjectionWarning(text, injection.patterns);
             }
 
             // Extract images if provided

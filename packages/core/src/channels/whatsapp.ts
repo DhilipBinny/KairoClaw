@@ -31,7 +31,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, markdownToWhatsApp, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
 
 const log = createModuleLogger('channel.whatsapp');
 
@@ -512,7 +512,12 @@ class WhatsAppChannel implements Channel {
     msgText = sanitizeInput(msgText);
     const injection = detectPromptInjection(msgText);
     if (injection.suspicious) {
-      log.warn({ patterns: injection.patterns, senderPhone }, 'Prompt injection patterns detected (whatsapp)');
+      log.warn({ patterns: injection.patterns, severity: injection.maxSeverity, senderPhone }, 'Prompt injection patterns detected (whatsapp)');
+      if (injection.maxSeverity === 'block') {
+        // Silent drop — WhatsApp has no clean error reply mechanism for blocked messages
+        return;
+      }
+      msgText = prefixInjectionWarning(msgText, injection.patterns);
     }
 
     // Get sender name from push name or phone
