@@ -5,6 +5,23 @@ import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
+import { textEnvelope } from '../envelope.js';
+
+/**
+ * Format an exec result (stdout + stderr + exitCode) as a single
+ * readable text block. Sections are omitted when empty so a clean
+ * `echo hello` doesn't waste tokens on empty `stderr:` lines.
+ */
+function formatExecResult(stdout: string, stderr: string, exitCode: number): string {
+  const lines: string[] = [`exit code: ${exitCode}`];
+  if (stdout) {
+    lines.push('', 'stdout:', stdout);
+  }
+  if (stderr) {
+    lines.push('', 'stderr:', stderr);
+  }
+  return lines.join('\n');
+}
 
 const execFileAsync = promisify(execFileCb);
 
@@ -225,21 +242,31 @@ export const execTools: ToolRegistration[] = [
           maxBuffer: 1024 * 1024,
           env: safeEnv,
         });
-        return {
-          stdout: stdout.slice(0, MAX_STDOUT),
-          stderr: stderr.slice(0, MAX_STDERR),
-          exitCode: 0,
-        };
+        return textEnvelope(formatExecResult(
+          stdout.slice(0, MAX_STDOUT),
+          stderr.slice(0, MAX_STDERR),
+          0,
+        ));
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown; status?: number };
-        return {
-          stdout: (err.stdout || '').slice(0, MAX_STDOUT),
-          stderr: (err.stderr || err.message || '').slice(0, MAX_STDERR),
-          exitCode: err.status || (typeof err.code === 'number' ? err.code : 1),
-        };
+        return textEnvelope(formatExecResult(
+          (err.stdout || '').slice(0, MAX_STDOUT),
+          (err.stderr || err.message || '').slice(0, MAX_STDERR),
+          err.status || (typeof err.code === 'number' ? err.code : 1),
+        ));
       }
     },
     source: 'builtin',
     category: 'execute',
+    isDestructive: true,
+    // Exec output can be huge (build logs, test runs) — give it a
+    // generous 128 KB threshold before persistence kicks in. Over that,
+    // the registry offloads to disk and returns a reference so the
+    // agent can read specific portions via read_file if needed.
+    maxResultSizeChars: 128 * 1024,
+    getActivityDescription: (input) => {
+      const cmd = (input as { command?: string })?.command ?? '';
+      return `Running: ${cmd.slice(0, 80)}${cmd.length > 80 ? '…' : ''}`;
+    },
   },
 ];

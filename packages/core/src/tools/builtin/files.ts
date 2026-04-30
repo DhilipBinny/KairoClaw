@@ -2,17 +2,9 @@ import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHAR
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '../types.js';
-import type { ToolExecutionContext, ToolResultEnvelope } from '@agw/types';
+import type { ToolExecutionContext } from '@agw/types';
 import { getWorkspace } from './utils.js';
-
-/**
- * Build a plain-text tool-result envelope. Used by every file tool's
- * success path so the registry can run persistence / budget accounting
- * uniformly on the content-block array.
- */
-function textEnvelope(text: string): ToolResultEnvelope {
-  return { content: [{ type: 'text', text }] };
-}
+import { textEnvelope } from '../envelope.js';
 
 /**
  * Enforce workspace file organization with per-user scoping.
