@@ -273,4 +273,110 @@ export const execTools: ToolRegistration[] = [
       return `Running: ${cmd.slice(0, 80)}${cmd.length > 80 ? '…' : ''}`;
     },
   },
+  // batch_exec — run multiple commands in parallel
+  {
+    definition: {
+      name: 'batch_exec',
+      searchHint: 'batch parallel multiple commands run execute concurrent',
+      alwaysLoad: false,
+      description:
+        'Run multiple shell commands in parallel and return all results. ' +
+        'Much faster than sequential exec calls when commands are independent. ' +
+        'Each command runs in its own subprocess. Max 10 commands per batch. ' +
+        'Use this when you need to run the same script on multiple inputs, ' +
+        'or gather data from multiple sources at once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          commands: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of shell commands to run in parallel. Max 10.',
+          },
+          workdir: {
+            type: 'string',
+            description: 'Working directory for all commands (optional).',
+          },
+          timeout: {
+            type: 'number',
+            description: 'Timeout in seconds per command (default 30, max 120).',
+          },
+        },
+        required: ['commands'],
+      },
+    },
+    validateInput: (input) => {
+      const args = input as Record<string, unknown>;
+      if (!Array.isArray(args.commands) || args.commands.length === 0) {
+        return { ok: false, error: 'commands must be a non-empty array of strings.' };
+      }
+      if (args.commands.length > 10) {
+        return { ok: false, error: 'Maximum 10 commands per batch.' };
+      }
+      for (const cmd of args.commands) {
+        if (typeof cmd !== 'string' || cmd.trim().length === 0) {
+          return { ok: false, error: 'Each command must be a non-empty string.' };
+        }
+      }
+      return { ok: true };
+    },
+    executor: async (args, context) => {
+      const commands = args.commands as string[];
+      const workdir = (args.workdir as string) || undefined;
+      const timeout = Math.min(Math.max(Number(args.timeout) || 30, 1), 120);
+
+      const ctx = context as Record<string, unknown>;
+      const workspace = getWorkspace(ctx);
+      const cwd = workdir
+        ? (path.isAbsolute(workdir) ? workdir : path.join(workspace, workdir))
+        : workspace;
+
+      const startTime = Date.now();
+      const results = await Promise.allSettled(
+        commands.map(async (cmd) => {
+          try {
+            const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', cmd], {
+              cwd,
+              timeout: timeout * 1000,
+              maxBuffer: MAX_STDOUT * 2,
+              env: { ...process.env, HOME: process.env.HOME },
+            });
+            return { command: cmd, exitCode: 0, stdout: (stdout || '').slice(0, MAX_STDOUT), stderr: (stderr || '').slice(0, 2000) };
+          } catch (e: unknown) {
+            const err = e as { stdout?: string; stderr?: string; code?: number; signal?: string };
+            return {
+              command: cmd,
+              exitCode: err.code ?? 1,
+              stdout: (err.stdout || '').slice(0, MAX_STDOUT),
+              stderr: (err.stderr || '').slice(0, 2000),
+              error: err.signal ? `killed by ${err.signal}` : undefined,
+            };
+          }
+        }),
+      );
+
+      const elapsed = Date.now() - startTime;
+      const output: string[] = [`Batch: ${commands.length} commands in ${elapsed}ms (parallel)\n`];
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        output.push(`--- [${i + 1}] ${commands[i].slice(0, 80)} ---`);
+        if (r.status === 'fulfilled') {
+          output.push(formatExecResult(r.value.stdout, r.value.stderr, r.value.exitCode));
+        } else {
+          output.push(`error: ${r.reason}`);
+        }
+        output.push('');
+      }
+
+      return textEnvelope(output.join('\n'));
+    },
+    source: 'builtin',
+    category: 'execute',
+    isDestructive: true,
+    concurrencySafe: true,
+    getActivityDescription: (input) => {
+      const cmds = (input as { commands?: string[] })?.commands ?? [];
+      return `Batch: ${cmds.length} commands in parallel`;
+    },
+  },
 ];
