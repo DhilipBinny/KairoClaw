@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getSessions, getSession, getSessionToolCalls, deleteSession, type ToolCallInfo } from '$lib/api';
+  import { getSessions, getSession, getSessionToolCalls, deleteSession, getDebugPrompt, getConfig, type ToolCallInfo } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface SessionRow {
@@ -17,6 +17,7 @@
   }
 
   interface SessionMessage {
+    id?: number;
     role: string;
     content: string;
     created_at: string;
@@ -57,6 +58,94 @@
   let timeline: TimelineEntry[] = $state([]);
   let loadingMessages = $state(false);
   let deleteInProgress = $state('');
+
+  // ── Debug-prompt viewer state ───────────────────────────
+  let copyPromptState = $state<Record<number, 'idle' | 'loading' | 'copied' | 'error'>>({});
+  let viewPromptData = $state<{ entries: DebugEntry[]; turnLabel: string } | null>(null);
+  let recordPromptEnabled = $state(false);
+  let activeRound = $state(0);
+  let copiedSection = $state<string | null>(null);
+
+  type DebugEntry = {
+    ts: string; model: string; turn: number; round: number;
+    systemPrompt?: { cached?: string; dynamic?: string };
+    messages?: { role: string; content: unknown }[];
+    response?: { text?: string; toolCalls?: unknown[]; usage?: { inputTokens?: number; outputTokens?: number }; latencyMs?: number };
+  };
+
+  function formatEntriesToText(entries: DebugEntry[]): string {
+    const parts: string[] = [];
+    for (const e of entries) {
+      parts.push('═'.repeat(60));
+      parts.push(`Turn ${e.turn}  Round ${e.round}  Model: ${e.model}  ${e.ts}`);
+      parts.push('═'.repeat(60));
+
+      if (e.systemPrompt?.cached) {
+        parts.push(`\n── SYSTEM PROMPT (cached) ──\n${e.systemPrompt.cached}`);
+      }
+      if (e.systemPrompt?.dynamic) {
+        parts.push(`\n── SYSTEM PROMPT (dynamic) ──\n${e.systemPrompt.dynamic}`);
+      }
+
+      if (e.messages?.length) {
+        parts.push('\n── MESSAGES ──');
+        for (const m of e.messages) {
+          const c = m.content;
+          const content = typeof c === 'string' ? c
+            : Array.isArray(c) ? c.map((p: { text?: string; type?: string }) => p.text || `[${p.type}]`).join('\n')
+            : JSON.stringify(c, null, 2);
+          parts.push(`\n[${m.role.toUpperCase()}]\n${content}`);
+        }
+      }
+
+      if (e.response) {
+        parts.push('\n── RESPONSE ──');
+        if (e.response.text) parts.push(e.response.text);
+        if (e.response.toolCalls?.length) {
+          parts.push(`\nTool calls: ${JSON.stringify(e.response.toolCalls, null, 2)}`);
+        }
+        if (e.response.usage) {
+          const u = e.response.usage;
+          parts.push(`\nTokens: in=${u.inputTokens} out=${u.outputTokens}  Latency: ${e.response.latencyMs}ms`);
+        }
+      }
+    }
+    return parts.join('\n');
+  }
+
+  async function fetchPromptData(messageId: number): Promise<DebugEntry[]> {
+    if (!selectedSession) throw new Error('No session');
+    const data = await getDebugPrompt(selectedSession, messageId);
+    return data.entries as DebugEntry[];
+  }
+
+  async function copyPrompt(messageId: number) {
+    if (!selectedSession) return;
+    copyPromptState = { ...copyPromptState, [messageId]: 'loading' };
+    try {
+      const entries = await fetchPromptData(messageId);
+      await navigator.clipboard.writeText(formatEntriesToText(entries));
+      copyPromptState = { ...copyPromptState, [messageId]: 'copied' };
+      setTimeout(() => { copyPromptState = { ...copyPromptState, [messageId]: 'idle' }; }, 2000);
+    } catch {
+      copyPromptState = { ...copyPromptState, [messageId]: 'error' };
+      setTimeout(() => { copyPromptState = { ...copyPromptState, [messageId]: 'idle' }; }, 3000);
+    }
+  }
+
+  async function viewPrompt(messageId: number, label: string) {
+    try {
+      const entries = await fetchPromptData(messageId);
+      viewPromptData = { entries, turnLabel: label };
+      activeRound = entries.length - 1;
+    } catch { /* not recorded — likely off when this turn ran */ }
+  }
+
+  async function copySection(key: string, text: string) {
+    await navigator.clipboard.writeText(text);
+    copiedSection = key;
+    setTimeout(() => { copiedSection = null; }, 2000);
+  }
 
   let channels = $derived([...new Set(sessions.map(s => s.channel))].sort());
 
@@ -188,7 +277,14 @@
     selectedMessages = [];
   }
 
-  onMount(loadSessions);
+  onMount(async () => {
+    loadSessions();
+    try {
+      const { config } = await getConfig();
+      const cfg = config as { agent?: { debug?: { recordPrompt?: boolean } } };
+      recordPromptEnabled = cfg?.agent?.debug?.recordPrompt === true;
+    } catch { /* ignore */ }
+  });
 </script>
 
 <svelte:head>
@@ -306,6 +402,25 @@
                 <div class="message-row" class:user={entry.message.role === 'user'} class:assistant={entry.message.role === 'assistant'} class:system={entry.message.role === 'system'}>
                   <div class="message-role">
                     <Badge variant={entry.message.role === 'user' ? 'blue' : entry.message.role === 'system' ? 'yellow' : 'green'}>{entry.message.role}</Badge>
+                    {#if recordPromptEnabled && entry.message.role === 'user' && typeof entry.message.id === 'number'}
+                      {@const msgId = entry.message.id}
+                      <button
+                        class="prompt-btn"
+                        title="View the LLM prompt + response for this turn"
+                        onclick={() => viewPrompt(msgId, `Message #${msgId}`)}
+                      >View Prompt</button>
+                      <button
+                        class="prompt-btn"
+                        title="Copy the LLM prompt + response for this turn to clipboard"
+                        onclick={() => copyPrompt(msgId)}
+                        disabled={copyPromptState[msgId] === 'loading'}
+                      >
+                        {#if copyPromptState[msgId] === 'loading'}…
+                        {:else if copyPromptState[msgId] === 'copied'}Copied!
+                        {:else if copyPromptState[msgId] === 'error'}Failed
+                        {:else}Copy{/if}
+                      </button>
+                    {/if}
                   </div>
                   {#if getImageFilenames(entry.message.metadata).length > 0}
                     <div class="message-images">
@@ -360,6 +475,88 @@
     </div>
   </div>
 </div>
+
+{#if viewPromptData}
+  <div class="prompt-modal-backdrop" role="button" tabindex="0" onclick={() => { viewPromptData = null; }} onkeydown={(e) => { if (e.key === 'Escape') viewPromptData = null; }}>
+    <div class="prompt-modal" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
+      <div class="prompt-modal-header">
+        <h3>Debug — {viewPromptData.turnLabel}</h3>
+        <button class="modal-close" aria-label="Close" onclick={() => { viewPromptData = null; }}>×</button>
+      </div>
+
+      {#if viewPromptData.entries.length > 1}
+        <div class="round-tabs">
+          {#each viewPromptData.entries as e, i}
+            <button class="round-tab" class:active={i === activeRound} onclick={() => activeRound = i}>
+              Round {e.round}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if viewPromptData.entries[activeRound]}
+        {@const e = viewPromptData.entries[activeRound]}
+        <div class="prompt-modal-body">
+          <div class="round-meta">
+            <span><strong>Turn</strong> {e.turn} · <strong>Round</strong> {e.round}</span>
+            <span><strong>Model</strong> {e.model}</span>
+            <span><strong>{e.ts}</strong></span>
+            {#if e.response?.usage}<span><strong>Tokens</strong> in={e.response.usage.inputTokens ?? 0} out={e.response.usage.outputTokens ?? 0}</span>{/if}
+            {#if e.response?.latencyMs}<span><strong>Latency</strong> {e.response.latencyMs}ms</span>{/if}
+          </div>
+
+          {#if e.systemPrompt?.cached}
+            <div class="prompt-section">
+              <div class="prompt-section-head">
+                <span>System Prompt (cached)</span>
+                <button class="copy-section-btn" onclick={() => copySection('cached', e.systemPrompt!.cached || '')}>
+                  {copiedSection === 'cached' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre>{e.systemPrompt.cached}</pre>
+            </div>
+          {/if}
+
+          {#if e.systemPrompt?.dynamic}
+            <div class="prompt-section">
+              <div class="prompt-section-head">
+                <span>System Prompt (dynamic)</span>
+                <button class="copy-section-btn" onclick={() => copySection('dynamic', e.systemPrompt!.dynamic || '')}>
+                  {copiedSection === 'dynamic' ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+              <pre>{e.systemPrompt.dynamic}</pre>
+            </div>
+          {/if}
+
+          {#if e.messages?.length}
+            <div class="prompt-section">
+              <div class="prompt-section-head">
+                <span>Messages ({e.messages.length})</span>
+                <button class="copy-section-btn" onclick={() => copySection('messages', JSON.stringify(e.messages, null, 2))}>
+                  {copiedSection === 'messages' ? 'Copied!' : 'Copy JSON'}
+                </button>
+              </div>
+              <pre>{JSON.stringify(e.messages, null, 2)}</pre>
+            </div>
+          {/if}
+
+          {#if e.response}
+            <div class="prompt-section">
+              <div class="prompt-section-head">
+                <span>Response</span>
+                <button class="copy-section-btn" onclick={() => copySection('response', JSON.stringify(e.response, null, 2))}>
+                  {copiedSection === 'response' ? 'Copied!' : 'Copy JSON'}
+                </button>
+              </div>
+              <pre>{JSON.stringify(e.response, null, 2)}</pre>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .sessions-page {
@@ -606,5 +803,132 @@
     .messages-panel { min-height: 300px; }
     .messages-header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
     .session-row { padding: 8px 10px; }
+  }
+
+  /* ── Debug-prompt viewer ───────────────────────────────── */
+  .prompt-btn {
+    margin-left: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-default);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .prompt-btn:hover { background: var(--bg-raised); border-color: var(--accent); }
+  .prompt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .prompt-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .prompt-modal {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-width: 1100px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .prompt-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .prompt-modal-header h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  .modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-default);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+  }
+  .modal-close:hover { color: var(--accent); }
+  .round-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .round-tab {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: var(--bg-raised);
+    color: var(--text-default);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .round-tab.active { background: var(--accent); color: var(--bg-void); border-color: var(--accent); }
+  .prompt-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .round-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 11px;
+    color: var(--text-soft);
+    padding: 8px 10px;
+    background: var(--bg-void);
+    border-radius: var(--radius);
+  }
+  .prompt-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .prompt-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: var(--bg-raised);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .copy-section-btn {
+    padding: 2px 8px;
+    font-size: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-default);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .copy-section-btn:hover { background: var(--bg-void); }
+  .prompt-section pre {
+    margin: 0;
+    padding: 10px 12px;
+    font-family: ui-monospace, "SF Mono", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 360px;
+    overflow-y: auto;
+    background: var(--bg-void);
   }
 </style>
