@@ -167,6 +167,114 @@ async function extractWithOcr(
   }
 }
 
+// ── Shared extractor (TC-7) ──────────────────────────────────
+//
+// Exported so `read_file` in files.ts can handle .pdf paths without
+// the agent needing a separate tool_search round for `read_pdf`.
+// Both tools now call through this same helper.
+
+export interface PdfExtractResult {
+  text: string;
+  totalPages: number;
+  extractedFirst: number;
+  extractedLast: number;
+  method: 'pdftotext' | 'tesseract_ocr';
+  warnings: string[];
+}
+
+export async function extractPdfText(
+  filePath: string,
+  opts: { pages?: string; layout?: boolean } = {},
+): Promise<PdfExtractResult | { error: string }> {
+  // Extension + magic byte check
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext !== '.pdf') {
+    return { error: `Not a PDF file (extension: ${ext})` };
+  }
+  try {
+    const header = new Uint8Array(5);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, header, 0, 5, 0);
+    fs.closeSync(fd);
+    if (Buffer.from(header).toString('ascii') !== '%PDF-') {
+      return { error: 'Not a valid PDF file (invalid header)' };
+    }
+  } catch {
+    return { error: 'Could not read file header' };
+  }
+
+  if (!(await commandExists('pdftotext'))) {
+    return { error: 'PDF extraction requires poppler-utils. Install with: apt-get install poppler-utils' };
+  }
+
+  const totalPages = await getPdfPageCount(filePath);
+  if (totalPages === 0) {
+    return { error: 'Could not determine PDF page count — file may be corrupted' };
+  }
+
+  const pageRange = opts.pages
+    ? parsePageRange(opts.pages, totalPages)
+    : { first: 1, last: Math.min(totalPages, PDF_MAX_PAGES) };
+
+  const layout = opts.layout === true;
+  const extractedPages = pageRange.last - pageRange.first + 1;
+  const warnings: string[] = [];
+
+  if (totalPages > PDF_MAX_PAGES && !opts.pages) {
+    warnings.push(
+      `PDF has ${totalPages} pages — extracting first ${PDF_MAX_PAGES} only. Use the pages parameter for specific ranges.`,
+    );
+  }
+
+  let text: string;
+  let method: 'pdftotext' | 'tesseract_ocr' = 'pdftotext';
+  try {
+    text = await extractWithPdftotext(filePath, pageRange.first, pageRange.last, layout);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.includes('Incorrect password')) {
+      return { error: 'PDF is password-protected' };
+    }
+    return { error: `PDF text extraction failed: ${msg}` };
+  }
+
+  const charsPerPage = text.trim().length / Math.max(1, extractedPages);
+  if (charsPerPage < PDF_OCR_MIN_CHARS_PER_PAGE && text.trim().length < 200) {
+    if (await commandExists('tesseract')) {
+      try {
+        const ocrText = await extractWithOcr(filePath, pageRange.first, pageRange.last);
+        if (ocrText.trim().length > text.trim().length) {
+          text = ocrText;
+          method = 'tesseract_ocr';
+          warnings.push('Used OCR — text quality depends on scan quality.');
+        }
+      } catch {
+        warnings.push('OCR fallback failed — returning sparse text extraction.');
+      }
+    } else {
+      warnings.push('Text extraction yielded very little content. This may be a scanned PDF. Install tesseract-ocr for OCR support.');
+    }
+  }
+
+  text = cleanPdfText(text);
+
+  if (text.length > MAX_TOOL_RESULT_CHARS) {
+    warnings.push(
+      `Text truncated from ${text.length} to ${MAX_TOOL_RESULT_CHARS} chars. Use the pages parameter to extract specific sections.`,
+    );
+    text = text.slice(0, MAX_TOOL_RESULT_CHARS);
+  }
+
+  return {
+    text,
+    totalPages,
+    extractedFirst: pageRange.first,
+    extractedLast: pageRange.last,
+    method,
+    warnings,
+  };
+}
+
 // ── Tool definition ──────────────────────────────────────────
 
 export const pdfTools: ToolRegistration[] = [
@@ -196,10 +304,12 @@ export const pdfTools: ToolRegistration[] = [
       },
     },
     executor: async (args, context) => {
+      // TC-7: read_pdf is now a thin wrapper around the shared
+      // extractPdfText helper, which is also called by read_file when
+      // it encounters a .pdf path. Same code path, same behavior.
       const ctx = context as Record<string, unknown>;
       const workspace = getWorkspace(ctx);
 
-      // Validate path
       let filePath: string;
       try {
         filePath = safePath(args.path as string, workspace);
@@ -211,98 +321,22 @@ export const pdfTools: ToolRegistration[] = [
         return { error: `File not found: ${args.path}` };
       }
 
-      // Check it's a PDF (extension + magic bytes)
-      const ext = path.extname(filePath).toLowerCase();
-      if (ext !== '.pdf') {
-        return { error: `Not a PDF file (extension: ${ext})` };
-      }
-      try {
-        const header = new Uint8Array(5);
-        const fd = fs.openSync(filePath, 'r');
-        fs.readSync(fd, header, 0, 5, 0);
-        fs.closeSync(fd);
-        if (Buffer.from(header).toString('ascii') !== '%PDF-') {
-          return { error: 'Not a valid PDF file (invalid header)' };
-        }
-      } catch {
-        return { error: 'Could not read file header' };
-      }
+      const result = await extractPdfText(filePath, {
+        pages: args.pages as string | undefined,
+        layout: args.layout as boolean | undefined,
+      });
+      if ('error' in result) return result;
 
-      // Check pdftotext is available
-      if (!(await commandExists('pdftotext'))) {
-        return { error: 'PDF extraction requires poppler-utils. Install with: apt-get install poppler-utils' };
-      }
-
-      // Get page count
-      const totalPages = await getPdfPageCount(filePath);
-      if (totalPages === 0) {
-        return { error: 'Could not determine PDF page count — file may be corrupted' };
-      }
-
-      // Parse page range
-      const pageRange = args.pages
-        ? parsePageRange(args.pages as string, totalPages)
-        : { first: 1, last: Math.min(totalPages, PDF_MAX_PAGES) };
-
-      const layout = (args.layout as boolean) || false;
-      const extractedPages = pageRange.last - pageRange.first + 1;
-      const warnings: string[] = [];
-
-      if (totalPages > PDF_MAX_PAGES && !args.pages) {
-        warnings.push(`PDF has ${totalPages} pages — extracting first ${PDF_MAX_PAGES} only. Use the pages parameter for specific ranges.`);
-      }
-
-      // Tier 1: pdftotext
-      let text: string;
-      let method = 'pdftotext';
-      try {
-        text = await extractWithPdftotext(filePath, pageRange.first, pageRange.last, layout);
-      } catch (e) {
-        const msg = (e as Error).message;
-        if (msg.includes('Incorrect password')) {
-          return { error: 'PDF is password-protected' };
-        }
-        return { error: `PDF text extraction failed: ${msg}` };
-      }
-
-      // Tier 2: OCR fallback if text is sparse
-      const charsPerPage = text.trim().length / Math.max(1, extractedPages);
-      if (charsPerPage < PDF_OCR_MIN_CHARS_PER_PAGE && text.trim().length < 200) {
-        if (await commandExists('tesseract')) {
-          try {
-            const ocrText = await extractWithOcr(filePath, pageRange.first, pageRange.last);
-            if (ocrText.trim().length > text.trim().length) {
-              text = ocrText;
-              method = 'tesseract_ocr';
-              warnings.push('Used OCR — text quality depends on scan quality.');
-            }
-          } catch {
-            warnings.push('OCR fallback failed — returning sparse text extraction.');
-          }
-        } else {
-          warnings.push('Text extraction yielded very little content. This may be a scanned PDF. Install tesseract-ocr for OCR support.');
-        }
-      }
-
-      // Clean text
-      text = cleanPdfText(text);
-
-      if (!text) {
-        const header = `PDF: ${args.path} (${totalPages} pages, extracted ${pageRange.first}-${pageRange.last} via ${method}, 0 chars)`;
+      if (!result.text) {
+        const header = `PDF: ${args.path} (${result.totalPages} pages, extracted ${result.extractedFirst}-${result.extractedLast} via ${result.method}, 0 chars)`;
         return textEnvelope(`${header}\nWarning: No text extracted — this may be a scanned or image-only PDF.`);
       }
 
-      // Truncate if too large
-      if (text.length > MAX_TOOL_RESULT_CHARS) {
-        warnings.push(`Text truncated from ${text.length} to ${MAX_TOOL_RESULT_CHARS} chars. Use the pages parameter to extract specific sections.`);
-        text = text.slice(0, MAX_TOOL_RESULT_CHARS);
-      }
-
-      const header = `PDF: ${args.path} (${totalPages} pages, extracted ${pageRange.first}-${pageRange.last} via ${method}, ${text.length} chars)`;
-      const warnBlock = warnings.length > 0
-        ? `\n\nWarnings:\n${warnings.map(w => `- ${w}`).join('\n')}`
+      const header = `PDF: ${args.path} (${result.totalPages} pages, extracted ${result.extractedFirst}-${result.extractedLast} via ${result.method}, ${result.text.length} chars)`;
+      const warnBlock = result.warnings.length > 0
+        ? `\n\nWarnings:\n${result.warnings.map((w) => `- ${w}`).join('\n')}`
         : '';
-      return textEnvelope(`${header}${warnBlock}\n\n${text}`);
+      return textEnvelope(`${header}${warnBlock}\n\n${result.text}`);
     },
     source: 'builtin',
     category: 'read',
