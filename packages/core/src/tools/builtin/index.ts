@@ -8,6 +8,7 @@ import { pluginTools } from './plugins.js';
 import { pdfTools } from './pdf.js';
 import { subagentTools } from './subagent.js';
 import { browseTools } from './browse.js';
+import { toolSearchTools } from './tool-search.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -21,6 +22,7 @@ export const builtinTools: ToolRegistration[] = [
   ...pdfTools,
   ...subagentTools,
   ...browseTools,
+  ...toolSearchTools,
 ];
 
 export { fileTools } from './files.js';
@@ -32,4 +34,5 @@ export { emailTools } from './email.js';
 export { pluginTools } from './plugins.js';
 export { pdfTools } from './pdf.js';
 export { subagentTools } from './subagent.js';
+export { toolSearchTools } from './tool-search.js';
 export { safePath } from './files.js';

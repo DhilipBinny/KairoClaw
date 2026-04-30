@@ -132,6 +132,8 @@ export const fileTools: ToolRegistration[] = [
     definition: {
       name: 'read_file',
       description: 'Read the contents of a file. Returns the text content. The file is recorded in the session file-state tracker so you can safely edit it afterwards.',
+      searchHint: 'read file contents text source code',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -189,6 +191,8 @@ export const fileTools: ToolRegistration[] = [
     definition: {
       name: 'write_file',
       description: 'Write content to a file. Creates parent directories automatically. Overwrites existing files. The file is recorded in the session file-state tracker.',
+      searchHint: 'write save create file',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -246,6 +250,8 @@ export const fileTools: ToolRegistration[] = [
     definition: {
       name: 'edit_file',
       description: 'Edit a file by replacing exact text. The old_string must match exactly (including whitespace). You must call read_file on this path first in the current session — edit_file refuses to run on files you haven\'t read.',
+      searchHint: 'edit modify replace text file',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -331,6 +337,8 @@ export const fileTools: ToolRegistration[] = [
     definition: {
       name: 'list_directory',
       description: 'List files and directories at a given path.',
+      searchHint: 'list directory folder ls dir',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {

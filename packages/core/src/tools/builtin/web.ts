@@ -147,6 +147,8 @@ export const webTools: ToolRegistration[] = [
     definition: {
       name: 'web_fetch',
       description: 'Fetch a URL and extract readable content as markdown/text.',
+      searchHint: 'fetch web url http page content',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {

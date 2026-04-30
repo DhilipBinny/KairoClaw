@@ -231,6 +231,17 @@ const agentSchema = z.object({
   compactionThreshold: z.number().min(0).max(1).default(0.75),
   softCompactionThreshold: z.number().min(0).max(1).default(0.50),
   keepRecentMessages: z.number().int().min(0).default(10),
+  /**
+   * Phase 8: deferred tool loading. When true (the default), the
+   * initial tool surface shown to the LLM is just the `alwaysLoad`
+   * core set; every other tool is hidden until the agent calls
+   * `tool_search` to load it for the current session. This cuts
+   * per-turn prompt-token cost substantially once the tool surface
+   * grows past a dozen or so tools. Set to false to always send
+   * every tool's full definition (pre-Phase-8 behaviour). Also
+   * overridable via `AGW_DEFER_TOOLS=false` env var.
+   */
+  deferToolLoading: z.boolean().default(true),
   thinking: withObjectDefault(thinkingSchema),
   sessionMemory: withObjectDefault(sessionMemorySchema),
   memory: withObjectDefault(memorySchema),

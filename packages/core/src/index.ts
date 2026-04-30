@@ -433,6 +433,37 @@ async function main(): Promise<void> {
       sessionId: sessionRow.id,
     });
 
+    // ── Phase 8: deferred tool loading ─────────────────────
+    // When enabled (default), the initial prompt only shows tools
+    // marked `alwaysLoad: true`. Everything else is discoverable via
+    // `tool_search`, which loads tools into this session's loaded
+    // set. The agent loop's `refreshTools` callback picks up
+    // newly-loaded tools between rounds. Set `agent.deferToolLoading
+    // = false` in config or `AGW_DEFER_TOOLS=false` in env to
+    // disable and send every tool on every turn (pre-Phase-8 shape).
+    const deferEnvDisabled = process.env.AGW_DEFER_TOOLS === 'false';
+    const deferToolLoading =
+      !deferEnvDisabled &&
+      ((config.agent as unknown as { deferToolLoading?: boolean })?.deferToolLoading !== false);
+
+    const effectiveUserRole = resolvedUser?.role
+      || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user');
+    const effectiveElevated = !!resolvedUser?.elevated;
+    const toolOpts = {
+      userRole: effectiveUserRole,
+      db,
+      tenantId,
+      elevated: effectiveElevated,
+    };
+
+    const initialTools = deferToolLoading
+      ? await toolRegistry.getAlwaysLoadDefinitions(toolOpts)
+      : await toolRegistry.getDefinitions(toolOpts);
+
+    const refreshTools = deferToolLoading
+      ? () => toolRegistry.getDefinitionsForSession(sessionRow.id, toolOpts)
+      : undefined;
+
     return runAgent(inbound, callbacks || {}, {
       db,
       config,
@@ -451,13 +482,8 @@ async function main(): Promise<void> {
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       isProviderAvailable: (prefix) => providerRegistry.hasProvider(prefix),
-      tools: await toolRegistry.getDefinitions({
-        userRole: resolvedUser?.role
-          || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),
-        db,
-        tenantId,
-        elevated: !!resolvedUser?.elevated,
-      }),
+      tools: initialTools,
+      refreshTools,
       executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
@@ -475,6 +501,10 @@ async function main(): Promise<void> {
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
+          // Phase 8: tool_search needs direct registry access to query
+          // the full tool surface (including deferred tools) and mutate
+          // the session's loaded set via loadForSession().
+          toolRegistry,
           subagentDepth: 0,
           scopeKey,
           secretsStore,
