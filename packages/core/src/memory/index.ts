@@ -16,6 +16,45 @@ const CHUNK_SIZE = 400; // tokens (~1600 chars)
 const CHUNK_OVERLAP = 80; // tokens (~320 chars)
 const CHARS_PER_TOKEN = 4;
 
+// ── Composite scoring constants ──────────────────
+// Memory tiering: file-path-based tier multipliers
+const TIER_HOT = 3.0;    // PINNED.md — always-loaded, highest priority
+const TIER_WARM = 1.5;   // PROFILE.md — long-term notes
+const TIER_COLD = 1.0;   // session notes, other .md files
+
+// Recency: exponential half-life in days
+const RECENCY_HALF_LIFE_DAYS = 14;
+
+// Decay by memory type (tags in content: [fact], [belief], [experience])
+const TYPE_WEIGHTS: Record<string, number> = {
+  fact: 1.0,        // facts don't decay
+  belief: 0.6,      // beliefs decay faster
+  experience: 0.85, // experiences decay moderately
+};
+
+/** Determine tier multiplier from file path. */
+function getTierMultiplier(filePath: string): number {
+  if (filePath.endsWith('PINNED.md')) return TIER_HOT;
+  if (filePath.endsWith('PROFILE.md')) return TIER_WARM;
+  return TIER_COLD;
+}
+
+/** Compute recency score: 1.0 for now, decays by half every RECENCY_HALF_LIFE_DAYS. */
+function getRecencyScore(updatedAt: string): number {
+  const ageMs = Date.now() - new Date(updatedAt).getTime();
+  const ageDays = ageMs / (24 * 60 * 60 * 1000);
+  return Math.pow(0.5, ageDays / RECENCY_HALF_LIFE_DAYS);
+}
+
+/** Detect memory type tag in content and return weight multiplier. */
+function getTypeWeight(content: string): number {
+  const firstLines = content.slice(0, 200).toLowerCase();
+  if (firstLines.includes('[belief]')) return TYPE_WEIGHTS.belief;
+  if (firstLines.includes('[experience]')) return TYPE_WEIGHTS.experience;
+  if (firstLines.includes('[fact]')) return TYPE_WEIGHTS.fact;
+  return 1.0; // untagged entries treated as facts
+}
+
 export interface MemoryChunk {
   id: number;
   filePath: string;
@@ -107,7 +146,7 @@ export class MemorySystem {
 
       const scored = allChunks.map((chunk) => {
         const contentLower = chunk.content.toLowerCase();
-        let score = 0;
+        let keywordScore = 0;
 
         for (const term of queryTerms) {
           // Count occurrences
@@ -117,17 +156,23 @@ export class MemorySystem {
             count++;
             idx += term.length;
           }
-          score += count;
+          keywordScore += count;
 
           // Bonus for term in first line (likely a heading)
           const firstLine = contentLower.split('\n')[0];
-          if (firstLine.includes(term)) score += 2;
+          if (firstLine.includes(term)) keywordScore += 2;
         }
 
         // Bonus for exact phrase match
         if (contentLower.includes(queryLower)) {
-          score += 5;
+          keywordScore += 5;
         }
+
+        // Composite scoring: keyword * tier * recency * type
+        const tier = getTierMultiplier(chunk.file_path);
+        const recency = getRecencyScore(chunk.updated_at);
+        const typeWeight = getTypeWeight(chunk.content);
+        const score = keywordScore * tier * (0.5 + 0.5 * recency) * typeWeight;
 
         return { chunk, score };
       });
