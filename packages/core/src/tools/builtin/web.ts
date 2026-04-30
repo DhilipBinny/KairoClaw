@@ -56,7 +56,33 @@ function isPrivateIP(ip: string): boolean {
   return false;
 }
 
-export function validateFetchUrl(urlStr: string): URL {
+/**
+ * Normalize an allowPrivate entry ("localhost:3000", "127.0.0.1",
+ * "dev.internal") to a lowercase `host[:port]` form. Used by
+ * isAllowedPrivate() to match the parsed URL's host.
+ */
+function normalizeAllowEntry(entry: string): string {
+  return entry.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+/**
+ * Phase 12: check whether a parsed URL matches any of the user's
+ * `tools.webFetch.allowPrivate` entries. Each entry can be a bare
+ * host or `host:port`. If matched, the URL bypasses the SSRF guard
+ * (so e.g. `localhost:3000` can be fetched when explicitly allowed).
+ */
+function isAllowedPrivate(parsed: URL, allowPrivate: string[] | undefined): boolean {
+  if (!allowPrivate || allowPrivate.length === 0) return false;
+  const host = parsed.hostname.toLowerCase();
+  const hostPort = parsed.port ? `${host}:${parsed.port}` : host;
+  for (const raw of allowPrivate) {
+    const entry = normalizeAllowEntry(raw);
+    if (entry === host || entry === hostPort) return true;
+  }
+  return false;
+}
+
+export function validateFetchUrl(urlStr: string, allowPrivate?: string[]): URL {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
@@ -66,6 +92,13 @@ export function validateFetchUrl(urlStr: string): URL {
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error(`Blocked URL scheme: ${parsed.protocol} — only http/https allowed`);
+  }
+
+  // Phase 12: explicit allowPrivate override lets specific dev hosts
+  // through the SSRF guard. Applied BEFORE the block checks so
+  // allowPrivate: ["localhost:3000"] actually works.
+  if (isAllowedPrivate(parsed, allowPrivate)) {
+    return parsed;
   }
 
   const hostname = parsed.hostname.toLowerCase();
@@ -129,9 +162,20 @@ export const webTools: ToolRegistration[] = [
         return { error: 'url is required' };
       }
 
+      const ctxCfg = (context as Record<string, unknown>).config as
+        | { tools?: { webFetch?: { allowPrivate?: string[] } } }
+        | undefined;
+      const allowPrivate = ctxCfg?.tools?.webFetch?.allowPrivate;
+
       try {
-        const parsed = validateFetchUrl(url);
-        await validateResolvedIP(parsed.hostname);
+        const parsed = validateFetchUrl(url, allowPrivate);
+        // Skip DNS-resolved private check when the host is allowlisted
+        if (!allowPrivate || !allowPrivate.some((e) => {
+          const n = e.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+          return n === parsed.hostname.toLowerCase() || n === `${parsed.hostname.toLowerCase()}:${parsed.port}`;
+        })) {
+          await validateResolvedIP(parsed.hostname);
+        }
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `SSRF protection: ${message}` };

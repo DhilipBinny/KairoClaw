@@ -756,7 +756,59 @@ export async function checkAndCompact(
       const firstMsg = await messageRepo.listBySession(sessionId, 1);
       resolvedTenantId = firstMsg[0]?.tenant_id ?? 'default';
     }
-    return compactSession(sessionId, resolvedTenantId, modelId, db, config, callLLM, scopeKey);
+    const result = await compactSession(sessionId, resolvedTenantId, modelId, db, config, callLLM, scopeKey);
+
+    // ── Phase 12 TB-3: PostCompact hooks ───────────────────
+    // Fired right after the hard-compact replaces the history.
+    // Hook stdout is appended to the new `[Context Summary]` system
+    // message so the post-compact agent turn sees it as part of the
+    // compacted state. Non-fatal: a hook failure never undoes the
+    // compaction that already happened.
+    if (result.compacted) {
+      const hooks = (config as unknown as { hooks?: import('../hooks/runner.js').HooksConfig }).hooks;
+      const pcHooks = hooks?.PostCompact;
+      if (pcHooks && pcHooks.length > 0) {
+        try {
+          const { runPostCompactHooks } = await import('../hooks/runner.js');
+          const outputs = await runPostCompactHooks(pcHooks, sessionId, scopeKey ?? null);
+          if (outputs.length > 0) {
+            // Find the most recent [Context Summary] system message
+            // and append the hook outputs. Walk backwards manually
+            // instead of Array.findLastIndex to keep Node-version
+            // compatibility wide.
+            const postMsgs = await messageRepo.listBySession(sessionId);
+            let summaryRow: typeof postMsgs[number] | null = null;
+            for (let i = postMsgs.length - 1; i >= 0; i--) {
+              const m = postMsgs[i];
+              if (m.role === 'system' && typeof m.content === 'string' && m.content.startsWith('[Context Summary]')) {
+                summaryRow = m;
+                break;
+              }
+            }
+            const suffix = outputs
+              .map((o) => `\n\n[post-compact hook output]\n${o}`)
+              .join('');
+            if (summaryRow) {
+              const updated = (summaryRow.content as string) + suffix;
+              await messageRepo.updateContent(summaryRow.id, updated);
+              log.info({ sessionId, hookCount: pcHooks.length, outputCount: outputs.length }, 'PostCompact hooks appended to compaction summary');
+            } else {
+              await messageRepo.create({
+                sessionId,
+                tenantId: resolvedTenantId,
+                role: 'system',
+                content: `[post-compact hook output]${suffix}`,
+              });
+              log.info({ sessionId, hookCount: pcHooks.length, outputCount: outputs.length }, 'PostCompact hooks added as standalone system message');
+            }
+          }
+        } catch (e: unknown) {
+          log.warn({ err: (e as Error).message }, 'PostCompact hook runner crashed (non-fatal)');
+        }
+      }
+    }
+
+    return result;
   }
 
   // Stage 1: Soft compaction at 50% (strip tool results, no LLM call)
