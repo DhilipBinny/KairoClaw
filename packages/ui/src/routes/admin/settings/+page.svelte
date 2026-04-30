@@ -992,6 +992,45 @@
       </div>
     {/if}
 
+    <!-- Debug -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)">
+          <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        Debug
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label">Record LLM Requests</label>
+            <span class="field-hint">Log every LLM call (system prompt + messages + response) to <code>workspace/debug/llm-requests/YYYY-MM-DD.jsonl</code>. Use the Sessions page to copy any turn's prompt for debugging.</span>
+          </div>
+          <div class="field-control">
+            <button
+              class="toggle-btn"
+              class:active={!!getVal('agent.debug.recordPrompt')}
+              role="switch"
+              aria-checked={!!getVal('agent.debug.recordPrompt')}
+              disabled={!!saving['agent.debug.recordPrompt']}
+              onclick={() => saveToggle('agent.debug.recordPrompt', !!getVal('agent.debug.recordPrompt'))}
+              aria-label="Toggle LLM request recording"
+            >
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-label">{getVal('agent.debug.recordPrompt') ? 'Enabled' : 'Disabled'}</span>
+            </button>
+            {#if feedback['agent.debug.recordPrompt']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.debug.recordPrompt'].ok} class:err={!feedback['agent.debug.recordPrompt'].ok}>
+                {feedback['agent.debug.recordPrompt'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Export/Import -->
     <div class="section">
       <h2 class="section-title">

@@ -351,6 +351,11 @@ export interface AgentConfig {
   deferToolLoading?: boolean;
   /** Maximum concurrent background tasks allowed. Default: 10. */
   maxBackgroundTasks?: number;
+  /** Debug settings (admin only). */
+  debug?: {
+    /** Record every LLM call (input + output) to JSONL files in workspace/debug/. */
+    recordPrompt?: boolean;
+  };
 }
 
 /** Model capabilities — auto-fetched from provider APIs + admin overrides. */

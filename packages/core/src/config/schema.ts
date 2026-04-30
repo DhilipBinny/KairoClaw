@@ -224,6 +224,10 @@ const modelIndicatorSchema = z.object({
   web: modelIndicatorVisibility,
 });
 
+const debugSchema = z.object({
+  recordPrompt: z.boolean().default(false),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant').transform(v => v.replace(/[^\w \-'.]/g, '').slice(0, 50)),
   workspace: z.string().default('workspace'),
@@ -249,6 +253,7 @@ const agentSchema = z.object({
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
   maxBackgroundTasks: z.number().int().min(1).default(10),
+  debug: withObjectDefault(debugSchema),
 });
 
 const modelCapabilityEntrySchema = z.object({
@@ -487,6 +492,7 @@ export const configDefaults: GatewayConfig = {
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
     showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
+    debug: { recordPrompt: false },
   },
   models: {
     capabilities: {},

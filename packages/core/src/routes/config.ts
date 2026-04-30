@@ -70,6 +70,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.transcription.enabled', 'tools.transcription.baseUrl', 'tools.transcription.model', 'tools.transcription.language',
       'tools.browse.enabled', 'tools.browse.remoteAccess',
       'providers.kairoPremium.enabled', 'providers.kairoPremium.mode', 'providers.kairoPremium.defaultModel',
+      'agent.debug.recordPrompt',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
