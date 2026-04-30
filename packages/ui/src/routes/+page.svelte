@@ -37,17 +37,17 @@
     const input = e.target as HTMLInputElement;
     if (!input.files?.length) return;
     for (const file of Array.from(input.files)) {
-      const entry = { file, name: file.name, uploading: true, path: undefined as string | undefined, error: undefined as string | undefined };
-      pendingFiles = [...pendingFiles, entry];
+      const idx = pendingFiles.length;
+      pendingFiles = [...pendingFiles, { file, name: file.name, uploading: true }];
       try {
         const result = await uploadFile(file);
-        entry.path = result.filePath;
-        entry.uploading = false;
-        pendingFiles = [...pendingFiles];
+        pendingFiles = pendingFiles.map((f, i) =>
+          i === idx ? { ...f, path: result.filePath, uploading: false } : f,
+        );
       } catch (err) {
-        entry.uploading = false;
-        entry.error = (err as Error).message;
-        pendingFiles = [...pendingFiles];
+        pendingFiles = pendingFiles.map((f, i) =>
+          i === idx ? { ...f, uploading: false, error: (err as Error).message } : f,
+        );
       }
     }
     input.value = '';

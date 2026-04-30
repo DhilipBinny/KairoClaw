@@ -20,6 +20,16 @@
     role: string;
     content: string;
     created_at: string;
+    metadata?: string;
+  }
+
+  function getImageFilenames(metadata?: string): string[] {
+    if (!metadata) return [];
+    try {
+      const parsed = JSON.parse(metadata);
+      if (Array.isArray(parsed.images)) return parsed.images as string[];
+    } catch { /* ignore */ }
+    return [];
   }
 
   interface UserGroup {
@@ -297,6 +307,18 @@
                   <div class="message-role">
                     <Badge variant={entry.message.role === 'user' ? 'blue' : entry.message.role === 'system' ? 'yellow' : 'green'}>{entry.message.role}</Badge>
                   </div>
+                  {#if getImageFilenames(entry.message.metadata).length > 0}
+                    <div class="message-images">
+                      {#each getImageFilenames(entry.message.metadata) as img}
+                        <img
+                          src="/api/v1/media/{encodeURIComponent(img)}?token={localStorage.getItem('agw_api_key') || ''}"
+                          alt="Attached image"
+                          class="message-thumb"
+                          loading="lazy"
+                        />
+                      {/each}
+                    </div>
+                  {/if}
                   <div class="message-content">{entry.message.content?.slice(0, 2000) || ''}{(entry.message.content?.length ?? 0) > 2000 ? '...' : ''}</div>
                 </div>
               {:else if entry.type === 'tool_call' && entry.toolCall}
@@ -501,6 +523,22 @@
   .message-row.user { background: var(--bg-void); }
   .message-row.assistant { background: var(--bg-raised); }
   .message-role { margin-bottom: 6px; }
+  .message-images {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .message-thumb {
+    max-width: 200px;
+    max-height: 150px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    object-fit: contain;
+    cursor: pointer;
+    transition: transform 0.15s;
+  }
+  .message-thumb:hover { transform: scale(1.05); }
   .message-content { font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .message-row.system { background: var(--bg-surface); border-left: 3px solid var(--text-ghost); }
 
