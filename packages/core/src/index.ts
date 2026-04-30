@@ -23,6 +23,10 @@ import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
+import { FileStateTracker } from './agent/file-state.js';
+import { ResultBudget } from './tools/result-budget.js';
+import { LoopDetector } from './tools/loop-detector.js';
+import { ResultStorage } from './tools/result-storage.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
@@ -394,6 +398,19 @@ async function main(): Promise<void> {
       userId: inbound.userId,
     });
 
+    // ── Phase 6 per-turn services ──────────────────────────
+    // One instance per createRunner invocation (= one inbound message =
+    // one user turn). Lifetime: until this function's returned Promise
+    // settles. Threaded into tool context via enrichedCtx below.
+    const fileState = new FileStateTracker();
+    const resultBudget = new ResultBudget();
+    const loopDetector = new LoopDetector();
+    const resultStorage = new ResultStorage({
+      workspaceDir: config.agent.workspace,
+      scopeKey,
+      sessionId: sessionRow.id,
+    });
+
     return runAgent(inbound, callbacks || {}, {
       db,
       config,
@@ -439,6 +456,14 @@ async function main(): Promise<void> {
           subagentDepth: 0,
           scopeKey,
           secretsStore,
+          // Phase 6 per-turn services (see FileStateTracker / ResultBudget /
+          // LoopDetector / ResultStorage). Passed through so the registry's
+          // execute() can read them for loop detection + byte accounting;
+          // individual tools opt in via context.fileState / context.resultBudget.
+          fileState,
+          resultBudget,
+          loopDetector,
+          resultStorage,
           cronScheduler: sharedServices.cronScheduler,
           browserManager: sharedServices.browserManager,
           telegramSend: sharedServices.telegramSend,
