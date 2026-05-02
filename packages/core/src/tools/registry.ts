@@ -5,6 +5,18 @@ import type { ToolRegistration } from './types.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { checkToolPermission } from './permissions.js';
 import type { AuditService } from '../security/audit.js';
+import type { LoopDetector } from './loop-detector.js';
+
+/**
+ * Internal view of the tool-execution context with Phase 6 services
+ * attached. `LoopDetector` and `ResultStorage` are registry-internal —
+ * they're passed via the context as non-type-facing extensions
+ * (consistent with how `cronScheduler`, `browserManager`, etc. are
+ * already passed through `enrichedCtx` in `createRunner`).
+ */
+interface Phase6ContextExtensions {
+  loopDetector?: LoopDetector;
+}
 
 // ─── Lightweight argument validation ────────────────────────
 
@@ -171,6 +183,15 @@ export class ToolRegistry {
       return { error: `Invalid arguments for tool "${name}": ${validationErrors.join('; ')}` };
     }
 
+    // Phase 6 registration-level input validation hook — semantic checks
+    // that JSON Schema can't express (e.g. "old_string !== new_string").
+    if (registration.validateInput) {
+      const check = registration.validateInput(args);
+      if (!check.ok) {
+        return { error: `Invalid input for tool "${name}": ${check.error}` };
+      }
+    }
+
     // Confirmation check — must happen BEFORE execution
     const callId = crypto.randomUUID();
     if (permission === 'confirm') {
@@ -184,6 +205,27 @@ export class ToolRegistry {
         });
       } catch { /* audit should not break execution */ }
       return { _requiresConfirmation: true, _callId: callId, tool: name, args } as unknown as ToolResult;
+    }
+
+    // ── Phase 6: tool-call loop detection ───────────────────
+    // Runs AFTER RBAC + validation but BEFORE execution so denied /
+    // malformed calls don't poison the detector's ring buffer.
+    const ctxExt = context as Phase6ContextExtensions & ToolExecutionContext;
+    const loopDetector = ctxExt.loopDetector;
+    if (loopDetector) {
+      const loopError = loopDetector.record(name, args);
+      if (loopError) {
+        try {
+          await this.auditService?.log({
+            tenantId,
+            userId: context.user?.id,
+            action: 'tool.loop_detected',
+            resource: name,
+            details: { tool: name, callId },
+          });
+        } catch { /* non-critical */ }
+        return { error: loopError };
+      }
     }
 
     // Execute with timing
@@ -205,6 +247,22 @@ export class ToolRegistry {
     }
 
     const durationMs = Math.round(performance.now() - start);
+
+    // ── Phase 6: result-budget tracking (non-blocking) ──────
+    // Best-effort byte accounting so the agent loop can trigger early
+    // compaction when the per-turn cap is exceeded. Never fails execution.
+    const budget = context.resultBudget;
+    if (budget) {
+      let bytes = 0;
+      try {
+        if (typeof result === 'string') {
+          bytes = Buffer.byteLength(result, 'utf8');
+        } else if (result && typeof result === 'object') {
+          bytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
+        }
+      } catch { /* ignore */ }
+      budget.add(bytes);
+    }
 
     // Record in audit log
     if (db) {
