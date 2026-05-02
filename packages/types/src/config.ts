@@ -254,6 +254,21 @@ export interface SessionMemoryConfig {
   growthTokenThreshold?: number;
 }
 
+/** Memory search composite-scoring tuning knobs. */
+export interface MemoryConfig {
+  /**
+   * Multiplier applied to PROFILE.md chunks during search.
+   * Defaults to 1.5 inside `MemorySystem`. Must be > 0 when set.
+   */
+  profileBoost?: number;
+  /**
+   * Recency half-life in days — chunks decay to half their keyword
+   * score after this many days. Defaults to 14 inside
+   * `MemorySystem`. Must be > 0 when set.
+   */
+  recencyHalfLifeDays?: number;
+}
+
 /** Controls what memory is injected into the system prompt. */
 export interface ContextInjectionConfig {
   /** Max chars of PROFILE.md to inject. Default: 3000. */
@@ -322,6 +337,8 @@ export interface AgentConfig {
   thinking?: AgentThinkingConfig;
   /** Session memory (structured per-session notes) configuration. */
   sessionMemory?: SessionMemoryConfig;
+  /** Memory search composite-scoring tuning knobs. */
+  memory?: MemoryConfig;
   /** Controls what memory is injected into the system prompt. */
   contextInjection?: ContextInjectionConfig;
   /** Model routing configuration. */
