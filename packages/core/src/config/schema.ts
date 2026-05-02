@@ -168,6 +168,21 @@ const sessionMemorySchema = z.object({
   growthTokenThreshold: z.number().int().min(0).optional(),
 });
 
+/**
+ * Tuning knobs for the memory_search composite scorer.
+ * - `profileBoost`: PROFILE.md chunks are multiplied by this score.
+ *   Default 1.5 (50% boost over session notes). Must be > 0.
+ * - `recencyHalfLifeDays`: chunks decay to half their keyword score
+ *   after this many days. Default 14 days. Must be > 0.
+ *
+ * Both are optional — omit to use the defaults baked into
+ * `MemorySystem`.
+ */
+const memorySchema = z.object({
+  profileBoost: z.number().positive().optional(),
+  recencyHalfLifeDays: z.number().positive().optional(),
+});
+
 const contextInjectionSchema = z.object({
   profileMaxChars: z.number().int().min(0).optional(),
   sessionMemoryMaxChars: z.number().int().min(0).optional(),
@@ -203,6 +218,7 @@ const agentSchema = z.object({
   keepRecentMessages: z.number().int().min(0).default(10),
   thinking: withObjectDefault(thinkingSchema),
   sessionMemory: withObjectDefault(sessionMemorySchema),
+  memory: withObjectDefault(memorySchema),
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),

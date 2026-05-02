@@ -288,7 +288,7 @@ async function main(): Promise<void> {
   }
 
   // 7c. Initialize memory system
-  const memorySystem = new MemorySystem(db, config.agent.workspace);
+  const memorySystem = new MemorySystem(db, config.agent.workspace, config);
   await memorySystem.init();
   setMemorySystem(memorySystem);
 
