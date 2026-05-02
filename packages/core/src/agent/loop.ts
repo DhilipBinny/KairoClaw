@@ -68,7 +68,7 @@ const log = createModuleLogger('llm');
  * - Any other object → `JSON.stringify` (legacy fallback — works for
  *    `{error: "..."}`, `{stdout, stderr}`, structured tool outputs)
  */
-function renderToolResultForLLM(result: unknown): string {
+export function renderToolResultForLLM(result: unknown): string {
   if (typeof result === 'string') return result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
     return JSON.stringify(result);

@@ -90,6 +90,12 @@ export function buildSystemPrompt(
       cached.push(toolHints.join('\n'));
     }
 
+    // Read-before-edit enforcement (Phase 6.3)
+    if (toolNames.has('edit_file') && toolNames.has('read_file')) {
+      cached.push(`### File editing
+Always call **read_file** on a path before calling **edit_file** or **write_file** on it — the system enforces this. If you skip the read, edit_file returns "File not read yet in this session" and you'll have to read and retry. write_file counts as a read for follow-up edits in the same turn.`);
+    }
+
     // Parallel tool execution guidance
     cached.push(`### Parallel Tool Calls
 You can call multiple tools in a single response. When tools are independent (e.g. reading several files), call them ALL at once — they execute in parallel.

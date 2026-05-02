@@ -41,10 +41,12 @@ export const PREVIEW_CHARS = 1024;
 
 export class ResultStorage {
   private readonly dir: string;
+  private readonly workspaceDir: string;
   private readonly defaultThreshold: number;
 
   constructor(opts: ResultStorageOptions) {
     const scopeSeg = opts.scopeKey ?? 'global';
+    this.workspaceDir = opts.workspaceDir;
     this.dir = path.join(opts.workspaceDir, 'scopes', scopeSeg, 'tool-results', opts.sessionId);
     this.defaultThreshold = opts.defaultThresholdBytes ?? DEFAULT_PERSIST_THRESHOLD_BYTES;
     // Lazy-create the directory on first persist — no point making empty dirs
@@ -102,10 +104,15 @@ export class ResultStorage {
 
     const preview = this.extractPreview(content, PREVIEW_CHARS);
 
+    // Return a workspace-relative path so the LLM never sees the
+    // server's absolute filesystem layout. The agent loop and any
+    // re-read tool can resolve this against the same workspaceDir.
+    const relativePath = path.relative(this.workspaceDir, filePath);
+
     return [
       {
         type: 'persisted_reference',
-        path: filePath,
+        path: relativePath,
         preview,
         sizeBytes: totalBytes,
       },
