@@ -11,8 +11,10 @@ import { textEnvelope } from '../envelope.js';
  * Format an exec result (stdout + stderr + exitCode) as a single
  * readable text block. Sections are omitted when empty so a clean
  * `echo hello` doesn't waste tokens on empty `stderr:` lines.
+ *
+ * Exported for unit testing.
  */
-function formatExecResult(stdout: string, stderr: string, exitCode: number): string {
+export function formatExecResult(stdout: string, stderr: string, exitCode: number): string {
   const lines: string[] = [`exit code: ${exitCode}`];
   if (stdout) {
     lines.push('', 'stdout:', stdout);
