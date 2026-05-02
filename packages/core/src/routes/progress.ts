@@ -21,6 +21,18 @@
  * EventSource doesn't support custom headers, so we accept the API
  * key via `?token=` query param — the same fallback the main auth
  * middleware already honours.
+ *
+ * Security trade-off (admin-only stream, accepted):
+ *   ?token=<api-key> in the URL means the key shows up in:
+ *     - server access logs (nginx, cloudflare, fastify)
+ *     - browser history / referrer headers on cross-origin links
+ *     - any HTTP cache that logs the request line
+ *   The endpoint is gated by `requireRole('admin')` so this only
+ *   exposes admin-tier keys to operators who already have admin
+ *   access to the box. If you ever expose this stream to non-admin
+ *   clients, swap to a short-lived single-use SSE ticket fetched
+ *   over an authenticated POST instead of reusing the long-lived
+ *   API key.
  */
 
 import type { FastifyPluginAsync } from 'fastify';

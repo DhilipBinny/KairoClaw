@@ -221,6 +221,32 @@ export class ProgressBus {
     return this.bySession.get(sessionId)?.size ?? 0;
   }
 
+  /**
+   * Forget a session entirely — removes the per-session subscriber
+   * bucket and drops every history-buffer event tagged with this
+   * session ID. Call this when a session ends, is archived, or is
+   * deleted so the bus doesn't carry stale subscriber slots or
+   * orphaned event history forward.
+   *
+   * Wildcard subscribers and history events for other sessions are
+   * untouched. Returns the number of subscribers that were dropped
+   * (0 if the session had none) for diagnostics.
+   */
+  clearSession(sessionId: string): number {
+    const subs = this.bySession.get(sessionId);
+    const subCount = subs?.size ?? 0;
+    this.bySession.delete(sessionId);
+    // Compact history: keep events from any other session in original
+    // chronological order; reset the head pointer to 0 since we have
+    // a fresh array shorter than the cap.
+    if (this.history.length > 0) {
+      const remaining = this.getHistory().filter(e => e.sessionId !== sessionId);
+      this.history = remaining;
+      this.historyHead = 0;
+    }
+    return subCount;
+  }
+
   /** Number of wildcard subscribers currently attached. */
   get wildcardSubscriberCount(): number {
     return this.wildcardSubs.size;

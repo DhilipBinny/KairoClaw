@@ -500,7 +500,7 @@ async function main(): Promise<void> {
   // 12. Register ALL routes
   await server.register(registerHealthRoutes, { secretsStore });
   await server.register(registerAuthRoutes);
-  await server.register(registerSessionRoutes);
+  await server.register(registerSessionRoutes, { progressBus });
   // Config change handler — hot-reload channels when toggled via Settings UI
   const onConfigChange = async (dotPath: string, value: unknown) => {
     if (dotPath === 'channels.whatsapp.enabled') {
