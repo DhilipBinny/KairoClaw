@@ -1,5 +1,12 @@
 /**
- * Composite scoring tests — verifies tiering, recency decay, and type weights.
+ * Composite scoring tests — verifies path-tier boost, recency decay,
+ * configurable knobs, and the invalid-date guard.
+ *
+ * Type-decay tagging ([fact]/[belief]/[experience]) was specified
+ * but the memory extraction pipeline never produces those tags, so
+ * the multiplier was always 1.0. The corresponding tests were
+ * dropped along with the dead-code path. PINNED.md tier was also
+ * dropped because no feature in this codebase ever writes that file.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
@@ -44,17 +51,6 @@ beforeEach(async () => {
 });
 
 describe('Memory tiering', () => {
-  it('PINNED.md chunks rank higher than PROFILE.md for same keyword match', async () => {
-    await insertChunk(db, 'scopes/user-a/memory/PINNED.md', 'dark mode preference noted');
-    await insertChunk(db, 'scopes/user-a/memory/PROFILE.md', 'dark mode preference noted');
-
-    const results = await memorySystem.search('dark mode');
-    expect(results.length).toBe(2);
-    // PINNED should rank first (3x vs 1.5x tier multiplier)
-    expect(results[0].filePath).toBe('scopes/user-a/memory/PINNED.md');
-    expect(results[0].score).toBeGreaterThan(results[1].score);
-  });
-
   it('PROFILE.md ranks higher than session notes for same keyword match', async () => {
     await insertChunk(db, 'scopes/user-a/memory/PROFILE.md', 'likes coffee every morning');
     await insertChunk(db, 'scopes/user-a/memory/sessions/2026-04-12.md', 'likes coffee every morning');
@@ -62,6 +58,7 @@ describe('Memory tiering', () => {
     const results = await memorySystem.search('coffee');
     expect(results.length).toBe(2);
     expect(results[0].filePath).toBe('scopes/user-a/memory/PROFILE.md');
+    expect(results[0].score).toBeGreaterThan(results[1].score);
   });
 });
 
@@ -75,7 +72,6 @@ describe('Recency decay', () => {
 
     const results = await memorySystem.search('project deadline');
     expect(results.length).toBe(2);
-    // Recent entry should score higher
     expect(results[0].filePath).toBe('scopes/user-a/memory/PROFILE.md');
     expect(results[0].score).toBeGreaterThan(results[1].score);
   });
@@ -97,52 +93,80 @@ describe('Recency decay', () => {
     expect(ratio).toBeGreaterThan(0.7);
     expect(ratio).toBeLessThan(0.85);
   });
-});
 
-describe('Decay by type', () => {
-  it('[belief] tagged entries score lower than untagged (fact) entries', async () => {
-    await insertChunk(db, 'scopes/user-a/memory/PROFILE.md', '[belief] User seems to prefer dark mode');
-    await insertChunk(db, 'scopes/user-b/memory/PROFILE.md', 'User prefers dark mode confirmed');
+  it('returns finite scores when updated_at is malformed (NaN guard)', async () => {
+    await insertChunk(db, 'memory/bad.md', 'content for ranking', 'not-a-real-date');
+    await insertChunk(db, 'memory/good.md', 'content for ranking', new Date().toISOString());
 
-    const results = await memorySystem.search('dark mode');
+    const results = await memorySystem.search('content ranking');
     expect(results.length).toBe(2);
-    // Untagged (fact, weight=1.0) should outrank belief (weight=0.6)
-    const belief = results.find(r => r.content.includes('[belief]'))!;
-    const fact = results.find(r => !r.content.includes('[belief]'))!;
-    expect(fact.score).toBeGreaterThan(belief.score);
+    for (const r of results) {
+      expect(Number.isFinite(r.score)).toBe(true);
+      expect(r.score).toBeGreaterThan(0);
+    }
   });
 
-  it('[experience] tagged entries score between facts and beliefs', async () => {
-    await insertChunk(db, 'memory/a.md', '[fact] The sky is blue');
-    await insertChunk(db, 'memory/b.md', '[experience] The sky looked blue yesterday');
-    await insertChunk(db, 'memory/c.md', '[belief] The sky might be blue');
+  it('treats future updated_at timestamps as "now" instead of going negative', async () => {
+    const future = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+    await insertChunk(db, 'memory/future.md', 'content x', future);
+    await insertChunk(db, 'memory/now.md', 'content x', new Date().toISOString());
 
-    const results = await memorySystem.search('sky blue');
-    expect(results.length).toBe(3);
-    const scores = results.map(r => ({
-      type: r.content.includes('[fact]') ? 'fact' : r.content.includes('[experience]') ? 'experience' : 'belief',
-      score: r.score,
-    }));
-    const fact = scores.find(s => s.type === 'fact')!;
-    const exp = scores.find(s => s.type === 'experience')!;
-    const belief = scores.find(s => s.type === 'belief')!;
-    expect(fact.score).toBeGreaterThan(exp.score);
-    expect(exp.score).toBeGreaterThan(belief.score);
+    const results = await memorySystem.search('content x');
+    expect(results.length).toBe(2);
+    for (const r of results) expect(Number.isFinite(r.score)).toBe(true);
   });
 });
 
-describe('Composite scoring combined', () => {
-  it('a recent pinned fact outranks an old session belief', async () => {
+describe('Configurable scoring knobs', () => {
+  it('honours config.agent.memory.profileBoost when set', async () => {
+    // Set a very large PROFILE boost to verify it actually flows through
+    const cfg: any = { agent: { memory: { profileBoost: 10 } } };
+    const ms = new MemorySystem(db as any, '/tmp/ws', cfg);
+    (ms as any).initialized = true;
+
+    await insertChunk(db, 'scopes/user-a/memory/PROFILE.md', 'topic xyz');
+    await insertChunk(db, 'scopes/user-a/memory/sessions/old.md', 'topic xyz');
+
+    const results = await ms.search('topic xyz');
+    expect(results.length).toBe(2);
+    const profile = results.find(r => r.filePath.endsWith('PROFILE.md'))!;
+    const session = results.find(r => r.filePath.includes('sessions/'))!;
+    // With profileBoost=10, PROFILE should outscore session by ~10x
+    expect(profile.score / session.score).toBeGreaterThan(8);
+  });
+
+  it('honours config.agent.memory.recencyHalfLifeDays when set', async () => {
+    // Very short half-life: 1 day. A 7-day-old entry should be heavily decayed.
+    const cfg: any = { agent: { memory: { recencyHalfLifeDays: 1 } } };
+    const ms = new MemorySystem(db as any, '/tmp/ws', cfg);
+    (ms as any).initialized = true;
+
     const now = new Date().toISOString();
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    await insertChunk(db, 'memory/fresh.md', 'topic', now);
+    await insertChunk(db, 'memory/old.md', 'topic', sevenDaysAgo);
 
-    await insertChunk(db, 'scopes/user-a/memory/PINNED.md', 'API key rotation needed', now);
-    await insertChunk(db, 'scopes/user-a/memory/sessions/old.md', '[belief] API key rotation might be needed', thirtyDaysAgo);
+    const results = await ms.search('topic');
+    const fresh = results.find(r => r.filePath === 'memory/fresh.md')!;
+    const old = results.find(r => r.filePath === 'memory/old.md')!;
+    // After 7 half-lives the recency factor is ~1/128 → score floor is
+    // (0.5 + 0.5*tiny) ≈ 0.5. Old should be ~half of fresh.
+    expect(old.score / fresh.score).toBeLessThan(0.6);
+    expect(old.score / fresh.score).toBeGreaterThan(0.4);
+  });
 
-    const results = await memorySystem.search('API key rotation');
-    expect(results.length).toBe(2);
-    // Pinned (3x) * fresh (1.0) * fact (1.0) >> session (1x) * old (~0.6) * belief (0.6)
-    expect(results[0].filePath).toContain('PINNED.md');
-    expect(results[0].score).toBeGreaterThan(results[1].score * 3);
+  it('rejects non-positive profileBoost and falls back to default', async () => {
+    const cfg: any = { agent: { memory: { profileBoost: 0 } } };
+    const ms = new MemorySystem(db as any, '/tmp/ws', cfg);
+    (ms as any).initialized = true;
+
+    await insertChunk(db, 'scopes/user-a/memory/PROFILE.md', 'matter');
+    await insertChunk(db, 'scopes/user-a/memory/sessions/x.md', 'matter');
+
+    const results = await ms.search('matter');
+    const profile = results.find(r => r.filePath.endsWith('PROFILE.md'))!;
+    const session = results.find(r => r.filePath.includes('sessions/'))!;
+    // Default 1.5x → PROFILE should still outrank session
+    expect(profile.score).toBeGreaterThan(session.score);
   });
 });
