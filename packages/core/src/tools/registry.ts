@@ -360,6 +360,40 @@ export class ToolRegistry {
       }
       if (hookResult.mutatedInput) {
         effectiveArgs = hookResult.mutatedInput;
+        // Re-run JSON Schema + semantic validation on the mutated
+        // input so a buggy hook can't slip args past the gates that
+        // protect the executor (e.g. swap a write_file path for a
+        // system file, or pass a non-string where a string is
+        // required). If the mutation fails validation, treat it as
+        // an abort and surface the error to the LLM.
+        const reValidationErrors = validateArgs(effectiveArgs, registration.definition.parameters);
+        if (reValidationErrors.length > 0) {
+          try {
+            await this.auditService?.log({
+              tenantId,
+              userId: context.user?.id,
+              action: 'tool.hook_mutation_invalid',
+              resource: name,
+              details: { tool: name, callId, errors: reValidationErrors },
+            });
+          } catch { /* non-critical */ }
+          return { error: `PreToolUse hook produced invalid args for "${name}": ${reValidationErrors.join('; ')}` };
+        }
+        if (registration.validateInput) {
+          const semanticCheck = registration.validateInput(effectiveArgs);
+          if (!semanticCheck.ok) {
+            try {
+              await this.auditService?.log({
+                tenantId,
+                userId: context.user?.id,
+                action: 'tool.hook_mutation_invalid',
+                resource: name,
+                details: { tool: name, callId, error: semanticCheck.error },
+              });
+            } catch { /* non-critical */ }
+            return { error: `PreToolUse hook produced invalid args for "${name}": ${semanticCheck.error}` };
+          }
+        }
       }
     }
 

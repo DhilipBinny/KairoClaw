@@ -84,6 +84,12 @@ const webFetchToolSchema = z.object({
    * so the agent can fetch its own running dev server without being
    * blocked by the private-IP guard. Leave empty (the default) for
    * the full SSRF lockdown.
+   *
+   * ⚠️ This allowlist is GLOBAL — it applies to every user, not just
+   * admins. Once `localhost:3000` is in the list, any non-admin user
+   * (telegram, whatsapp, web) can also fetch it via web_fetch. Only
+   * add hosts you are willing to expose to every channel and every
+   * user that has access to web_fetch on this server.
    */
   allowPrivate: z.array(z.string()).default([]),
 });

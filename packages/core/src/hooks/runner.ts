@@ -1,21 +1,26 @@
 /**
- * Hook runner — PreToolUse / PostToolUse shell hooks.
+ * Hook runner — PreToolUse / PostToolUse / SessionStart / PostCompact
+ * shell hooks.
  *
  * Phase 12. Lets the user hang arbitrary shell commands off every
- * tool call via config. Examples:
+ * tool call via config. Hooks read the JSON payload from **stdin**
+ * (never from an env var) so authors can use `jq` or `cat` without
+ * accidentally invoking shell expansion on user-supplied data.
+ *
+ * Examples:
  *
  *   hooks:
  *     PreToolUse:
  *       - matcher: "write_file"
- *         command: "echo checking write..."
+ *         command: "jq -r '.input.path'"        # safe — reads stdin
  *     PostToolUse:
  *       - matcher: "write_file"
- *         command: "prettier --write $(echo $AGW_HOOK_INPUT | jq -r '.input.path')"
+ *         command: "jq -r '.input.path' | xargs -d '\\n' prettier --write"
  *       - matcher: "exec"
- *         command: "logger 'agent exec: '$(echo $AGW_HOOK_INPUT | jq -r '.input.command')"
+ *         command: "jq -r '.input.command' | logger -t agent-exec"
  *
- * The matched shell command is spawned via `/bin/sh -c` with an
- * `AGW_HOOK_INPUT` environment variable containing a JSON payload:
+ * The matched shell command is spawned via `/bin/sh -c`. The JSON
+ * payload is written to the child's stdin — NOT to an env var:
  *
  *   {
  *     tool: <toolName>,
@@ -25,6 +30,14 @@
  *     scopeKey: <scope key or null>
  *   }
  *
+ * Why stdin and not an env var:
+ *   - Env vars invite shell expansion: `$(echo $AGW_HOOK_INPUT | jq …)`
+ *     means the agent's args end up inside `$(…)`, where shell
+ *     metachars (`; rm -rf /`) execute. Even `"$VAR"` quoting is
+ *     fragile across shells/locales.
+ *   - Stdin is opaque bytes. A hook reading via `jq` or `cat`
+ *     never lets user data reach the shell parser.
+ *
  * PreToolUse semantics:
  *   - If the hook prints JSON on stdout, it replaces the tool's
  *     input for subsequent hooks and for the actual tool execution.
@@ -32,6 +45,9 @@
  *   - If the hook exits non-zero, the tool call is aborted and the
  *     agent receives an error message. Useful for policy gates.
  *   - Hooks run sequentially in config order.
+ *   - Slow hooks slow EVERY tool call — the agent waits on each
+ *     PreToolUse hook before the executor runs. Default timeout
+ *     5 s per hook (override via `timeoutMs`); keep them fast.
  *
  * PostToolUse semantics:
  *   - Stdout is ignored (the result has already been decided).
@@ -47,17 +63,117 @@
  *   - "send_*"         → prefix match
  *   - "*_email"        → suffix match
  *   - "mcp__github__*" → prefix match (for MCP-namespaced tools)
+ *
+ * Scope: hooks are global. A PreToolUse hook on `write_file` fires
+ * for EVERY user, not just admins. There is no per-user / per-role
+ * hook config — admins configure them once in `config.hooks.*` and
+ * they apply to every session.
  */
 
-import { execFile as execFileCb } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { createModuleLogger } from '../observability/logger.js';
 
-const execFile = promisify(execFileCb);
 const log = createModuleLogger('tool');
 
 const DEFAULT_HOOK_TIMEOUT_MS = 5000;
 const MAX_HOOK_STDOUT_BYTES = 64 * 1024;
+
+/**
+ * Spawn a hook command via `/bin/sh -c <command>`, write the JSON
+ * payload to its stdin, capture up to MAX_HOOK_STDOUT_BYTES of
+ * stdout, and resolve with the trimmed stdout once the child exits.
+ *
+ * Throws if:
+ *   - the child exits with a non-zero code (caller decides how to
+ *     handle this — PreToolUse aborts, PostToolUse swallows)
+ *   - the child runs longer than `timeoutMs` (we kill -9 it)
+ *   - stdout exceeds MAX_HOOK_STDOUT_BYTES (we kill it)
+ *
+ * Stderr is captured (truncated) for inclusion in error messages
+ * but is otherwise ignored — hooks should communicate via stdout
+ * for mutations and exit code for policy gates.
+ */
+async function runHookCommand(
+  command: string,
+  payload: string,
+  timeoutMs: number,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn('/bin/sh', ['-c', command], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env, // pass through env unchanged — no AGW_HOOK_INPUT
+    });
+
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdout = '';
+    let stderr = '';
+    let killed = false;
+
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill('SIGKILL');
+      reject(new Error(`hook timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref?.();
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_HOOK_STDOUT_BYTES) {
+        if (!killed) {
+          killed = true;
+          child.kill('SIGKILL');
+          clearTimeout(timer);
+          reject(new Error(`hook stdout exceeded ${MAX_HOOK_STDOUT_BYTES} bytes`));
+        }
+        return;
+      }
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (stderrBytes <= 4096) {
+        stderr += chunk.toString('utf8');
+      }
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      if (!killed) reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) return; // already rejected
+      if (code !== 0) {
+        const detail = stderr.trim() ? ` — ${stderr.trim().slice(0, 500)}` : '';
+        reject(new Error(`hook exited with code ${code}${detail}`));
+      } else {
+        resolve(stdout);
+      }
+    });
+
+    // Write the JSON payload + close stdin so the child sees EOF.
+    // EPIPE is normal — happens when the child exits before reading
+    // (e.g. `echo` hooks that ignore stdin). The 'close' handler
+    // above will resolve/reject based on the child's exit code.
+    child.stdin.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EPIPE') {
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+    try {
+      child.stdin.write(payload);
+      child.stdin.end();
+    } catch (err) {
+      const errno = (err as NodeJS.ErrnoException).code;
+      if (errno !== 'EPIPE') {
+        clearTimeout(timer);
+        reject(err as Error);
+      }
+    }
+  });
+}
 
 export interface HookConfig {
   /** Glob pattern matching tool names. */
@@ -137,11 +253,11 @@ export async function runPreToolUseHooks(
     });
 
     try {
-      const { stdout } = await execFile('/bin/sh', ['-c', hook.command], {
-        timeout: hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
-        env: { ...process.env, AGW_HOOK_INPUT: payload },
-        maxBuffer: MAX_HOOK_STDOUT_BYTES,
-      });
+      const stdout = await runHookCommand(
+        hook.command,
+        payload,
+        hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
+      );
 
       const trimmed = stdout.trim();
       if (trimmed.length > 0) {
@@ -202,11 +318,11 @@ export async function runSessionStartHooks(
 
   for (const hook of hooks) {
     try {
-      const { stdout } = await execFile('/bin/sh', ['-c', hook.command], {
-        timeout: hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
-        env: { ...process.env, AGW_HOOK_INPUT: payload },
-        maxBuffer: MAX_HOOK_STDOUT_BYTES,
-      });
+      const stdout = await runHookCommand(
+        hook.command,
+        payload,
+        hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
+      );
       const trimmed = stdout.trim();
       if (trimmed) {
         outputs.push(trimmed);
@@ -248,11 +364,11 @@ export async function runPostCompactHooks(
 
   for (const hook of hooks) {
     try {
-      const { stdout } = await execFile('/bin/sh', ['-c', hook.command], {
-        timeout: hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
-        env: { ...process.env, AGW_HOOK_INPUT: payload },
-        maxBuffer: MAX_HOOK_STDOUT_BYTES,
-      });
+      const stdout = await runHookCommand(
+        hook.command,
+        payload,
+        hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
+      );
       const trimmed = stdout.trim();
       if (trimmed) {
         outputs.push(trimmed);
@@ -297,11 +413,11 @@ export async function runPostToolUseHooks(
     });
 
     try {
-      await execFile('/bin/sh', ['-c', hook.command], {
-        timeout: hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
-        env: { ...process.env, AGW_HOOK_INPUT: payload },
-        maxBuffer: MAX_HOOK_STDOUT_BYTES,
-      });
+      await runHookCommand(
+        hook.command,
+        payload,
+        hook.timeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS,
+      );
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       log.warn({ tool: toolName, matcher: hook.matcher, err: msg }, 'PostToolUse hook failed (non-fatal)');
