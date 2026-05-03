@@ -296,11 +296,11 @@ export async function runAgent(
   // `context.refreshTools` can expand the set mid-turn via tool_search.
   // Both get rebuilt at the top of each LLM round when the set grows.
   let tools = context.tools ?? [];
-  let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
+  const caps = getModelCapabilities(model, config);
+  let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary, { supportsVision: caps.supportsVision });
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
-  const caps = getModelCapabilities(model, config);
   let userContent: string | MessageContentPart[];
   if (inbound.images && inbound.images.length > 0) {
     if (caps.supportsVision) {
@@ -393,6 +393,7 @@ export async function runAgent(
             inbound.channel,
             session.id,
             hasContextSummary,
+            { supportsVision: caps.supportsVision },
           );
         }
       } catch {
