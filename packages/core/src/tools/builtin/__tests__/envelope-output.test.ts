@@ -17,6 +17,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { textEnvelope, imageEnvelope, envelope } from '../../envelope.js';
 import { formatExecResult } from '../exec.js';
+import { formatSearchResults } from '../web.js';
 import { memoryTools, setMemorySystem } from '../memory.js';
 
 // ── envelope.ts helpers ──────────────────────────────────────
@@ -81,6 +82,39 @@ describe('formatExecResult', () => {
   it('preserves the exit code in the header even on failure', () => {
     expect(formatExecResult('', '', 137)).toBe('exit code: 137');
     expect(formatExecResult('partial', 'oops', 2)).toContain('exit code: 2');
+  });
+});
+
+// ── web_search format ───────────────────────────────────────
+
+describe('formatSearchResults', () => {
+  it('formats multiple results as a numbered list with title, URL, and snippet', () => {
+    const text = formatSearchResults('kairo ai', [
+      { title: 'Kairo AI — Home', url: 'https://kairo.ai', snippet: 'AI agent platform' },
+      { title: 'Kairo GitHub', url: 'https://github.com/kairo', snippet: 'Open source repo' },
+    ]);
+    expect(text).toContain('Query: kairo ai');
+    expect(text).toContain('2 results:');
+    expect(text).toContain('1. Kairo AI — Home');
+    expect(text).toContain('   https://kairo.ai');
+    expect(text).toContain('   AI agent platform');
+    expect(text).toContain('2. Kairo GitHub');
+    expect(text).toContain('   https://github.com/kairo');
+    expect(text).toContain('   Open source repo');
+  });
+
+  it('uses singular "result" for a single match', () => {
+    const text = formatSearchResults('only one', [
+      { title: 'Single', url: 'https://x.com', snippet: 'one result' },
+    ]);
+    expect(text).toContain('1 result:');
+    expect(text).not.toContain('1 results');
+  });
+
+  it('handles zero results gracefully', () => {
+    const text = formatSearchResults('nothing here', []);
+    expect(text).toContain('Query: nothing here');
+    expect(text).toContain('0 results:');
   });
 });
 

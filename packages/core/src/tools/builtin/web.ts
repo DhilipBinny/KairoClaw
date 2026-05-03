@@ -2,6 +2,27 @@ import dns from 'node:dns';
 import type { ToolRegistration } from '../types.js';
 import { textEnvelope } from '../envelope.js';
 
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export function formatSearchResults(query: string, results: SearchResult[]): string {
+  const lines: string[] = [
+    `Query: ${query}`,
+    `${results.length} result${results.length === 1 ? '' : 's'}:`,
+    '',
+  ];
+  for (const [i, r] of results.entries()) {
+    lines.push(`${i + 1}. ${r.title}`);
+    lines.push(`   ${r.url}`);
+    lines.push(`   ${r.snippet}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
 /**
  * Validate a URL for web_fetch to prevent SSRF attacks.
  * Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
@@ -241,19 +262,7 @@ export const webTools: ToolRegistration[] = [
           snippet: r.description,
         }));
 
-        // Format as readable text so the LLM doesn't have to parse JSON.
-        const lines: string[] = [
-          `Query: ${query}`,
-          `${results.length} result${results.length === 1 ? '' : 's'}:`,
-          '',
-        ];
-        for (const [i, r] of results.entries()) {
-          lines.push(`${i + 1}. ${r.title}`);
-          lines.push(`   ${r.url}`);
-          lines.push(`   ${r.snippet}`);
-          lines.push('');
-        }
-        return textEnvelope(lines.join('\n'));
+        return textEnvelope(formatSearchResults(query, results));
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `Search failed: ${message}` };
