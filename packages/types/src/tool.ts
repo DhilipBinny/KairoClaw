@@ -94,7 +94,11 @@ export type ContentBlock =
     }
   | {
       type: 'persisted_reference';
-      /** Absolute path to the persisted file. */
+      /**
+       * Workspace-relative path to the persisted file (e.g.
+       * `scopes/<scopeKey>/tool-results/<sessionId>/<callId>.json`).
+       * Server's absolute filesystem layout is never exposed.
+       */
       path: string;
       /** First ~1 KB of text content so the LLM sees a preview. */
       preview: string;

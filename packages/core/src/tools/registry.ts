@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
 import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel, JSONSchemaObject, JSONSchemaProperty } from '@agw/types';
+import { isToolResultEnvelope } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { ToolRegistration } from './types.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { checkToolPermission } from './permissions.js';
 import type { AuditService } from '../security/audit.js';
 import type { LoopDetector } from './loop-detector.js';
+import type { ResultStorage } from './result-storage.js';
 
 /**
  * Internal view of the tool-execution context with Phase 6 services
@@ -16,6 +18,7 @@ import type { LoopDetector } from './loop-detector.js';
  */
 interface Phase6ContextExtensions {
   loopDetector?: LoopDetector;
+  resultStorage?: ResultStorage;
 }
 
 // ─── Lightweight argument validation ────────────────────────
@@ -248,9 +251,31 @@ export class ToolRegistry {
 
     const durationMs = Math.round(performance.now() - start);
 
+    // ── Phase 6: result persistence ─────────────────────────
+    // If the tool returned an envelope and its content is over the
+    // per-tool threshold (or the default 16 KB), offload the full
+    // content to disk via result-storage and replace it with a single
+    // `persisted_reference` block containing a preview + path +
+    // sizeBytes. The LLM still sees enough to decide whether to
+    // retrieve the full content later.
+    //
+    // Legacy string / object returns are not auto-persisted — that
+    // would change the caller-visible shape. Tools that want
+    // persistence must return an envelope.
+    const storage = ctxExt.resultStorage;
+    if (storage && isToolResultEnvelope(result)) {
+      const threshold = registration.maxResultSizeChars;
+      const persisted = storage.maybePersist(result.content, callId, threshold);
+      if (persisted) {
+        result = { ...result, content: persisted, persisted: true };
+      }
+    }
+
     // ── Phase 6: result-budget tracking (non-blocking) ──────
     // Best-effort byte accounting so the agent loop can trigger early
-    // compaction when the per-turn cap is exceeded. Never fails execution.
+    // compaction when the per-turn cap is exceeded. Runs AFTER
+    // persistence so the budget reflects post-persist sizes.
+    // Never fails execution.
     const budget = context.resultBudget;
     if (budget) {
       let bytes = 0;

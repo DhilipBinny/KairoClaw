@@ -54,6 +54,61 @@ const _activeExtractions = new Set<string>();
 
 const log = createModuleLogger('llm');
 
+// ─── Phase 6: tool-result rendering ──────────────────────────
+
+/**
+ * Render a tool result (legacy string, legacy object, or Phase 6
+ * content-block envelope) into a single string suitable for the LLM's
+ * tool-result message content.
+ *
+ * - `string`          → as-is
+ * - `{content: [...]}` envelope → joined text blocks, with non-text
+ *    blocks (image / resource_link / persisted_reference) rendered as
+ *    compact summaries so the LLM still sees what was produced
+ * - Any other object → `JSON.stringify` (legacy fallback — works for
+ *    `{error: "..."}`, `{stdout, stderr}`, structured tool outputs)
+ */
+export function renderToolResultForLLM(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return JSON.stringify(result);
+  }
+
+  const obj = result as Record<string, unknown>;
+  const content = obj.content;
+  // Envelope detection: content is an array of blocks with a `type` tag
+  if (!Array.isArray(content)) {
+    return JSON.stringify(result);
+  }
+
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as Record<string, unknown>;
+    const type = b.type;
+    if (type === 'text' && typeof b.text === 'string') {
+      parts.push(b.text);
+    } else if (type === 'image' && b.source && typeof b.source === 'object') {
+      const src = b.source as { media_type?: string };
+      parts.push(`[${src.media_type || 'image'} image]`);
+    } else if (type === 'resource_link') {
+      parts.push(`[link: ${b.title || b.uri || 'resource'}]`);
+    } else if (type === 'persisted_reference') {
+      const p = b.preview ?? '';
+      const size = b.sizeBytes ?? 0;
+      const pth = b.path ?? '';
+      parts.push(`[persisted ${size} bytes at ${pth}]\n${p}`);
+    } else {
+      // Unknown block type — fall back to JSON
+      parts.push(JSON.stringify(block));
+    }
+  }
+
+  // Fallback: if every block was unparseable, return the raw JSON
+  if (parts.length === 0) return JSON.stringify(result);
+  return parts.join('\n');
+}
+
 // ─── Types ──────────────────────────────────────────────────
 
 /** Runtime context passed to the agent loop. */
@@ -568,7 +623,7 @@ export async function runAgent(
         }
       }
 
-      const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+      const resultStr = renderToolResultForLLM(result);
       reqLog.info({
         tool: p.toolName,
         resultPreview: resultStr.slice(0, 200),
