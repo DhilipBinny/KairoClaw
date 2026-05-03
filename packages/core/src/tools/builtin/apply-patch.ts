@@ -85,7 +85,7 @@ function gitApply(cwd: string, patch: string, extraArgs: string[]): Promise<GitA
  * Handles the common cases: normal edits, additions (--- /dev/null),
  * deletions (+++ /dev/null), and renames.
  */
-function extractPatchPaths(patch: string): string[] {
+export function extractPatchPaths(patch: string): string[] {
   const paths = new Set<string>();
   const lines = patch.split('\n');
   for (const line of lines) {
