@@ -13,6 +13,8 @@ import { grepTools } from './grep.js';
 import { globTools } from './glob.js';
 import { todoTools } from './todo.js';
 import { sleepTools } from './sleep.js';
+import { applyPatchTools } from './apply-patch.js';
+import { planModeTools } from './plan-mode.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -31,6 +33,8 @@ export const builtinTools: ToolRegistration[] = [
   ...globTools,
   ...todoTools,
   ...sleepTools,
+  ...applyPatchTools,
+  ...planModeTools,
 ];
 
 export { fileTools } from './files.js';
@@ -47,4 +51,6 @@ export { grepTools } from './grep.js';
 export { globTools } from './glob.js';
 export { todoTools } from './todo.js';
 export { sleepTools } from './sleep.js';
+export { applyPatchTools } from './apply-patch.js';
+export { planModeTools } from './plan-mode.js';
 export { safePath } from './files.js';

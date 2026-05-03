@@ -166,6 +166,47 @@ export class ToolRegistry {
    * restarts would be surprising.
    */
   private loadedBySession = new Map<string, Set<string>>();
+  /**
+   * Phase 9: sessions currently in plan mode. Write-category tools
+   * are short-circuited by the registry when this flag is set for
+   * the session. In-memory only — lost on process restart.
+   */
+  private planModeBySession = new Set<string>();
+
+  /** Phase 9: toggle plan mode for a session. */
+  setPlanMode(sessionId: string, active: boolean): void {
+    if (active) this.planModeBySession.add(sessionId);
+    else this.planModeBySession.delete(sessionId);
+  }
+
+  /** Phase 9: is this session currently in plan mode? */
+  isInPlanMode(sessionId: string): boolean {
+    return this.planModeBySession.has(sessionId);
+  }
+
+  /**
+   * Phase 9: whitelist of tools that run normally even in plan mode.
+   * Anything read-only + the planning primitives themselves + tool
+   * search (needed to discover deferred tools while planning).
+   */
+  private static readonly PLAN_MODE_ALLOWED = new Set<string>([
+    'enter_plan_mode',
+    'exit_plan_mode',
+    'todo_write',
+    'tool_search',
+    'read_file',
+    'list_directory',
+    'grep',
+    'glob',
+    'memory_search',
+    'memory_read',
+    'web_fetch',
+    'web_search',
+    'read_pdf',
+    'inspect_image',
+    'load_skill',
+    'list_skills',
+  ]);
 
   /** Attach an AuditService for recording tool execution audit events. */
   setAuditService(audit: AuditService): void {
@@ -427,6 +468,35 @@ export class ToolRegistry {
         argsPreview: truncatePreview(argsJson, PREVIEW_MAX_CHARS),
         argsLen: argsJson.length,
       });
+    }
+
+    // ── Phase 9: plan mode gate ─────────────────────────────
+    // If the session is in plan mode, short-circuit any write /
+    // execute / destructive tool with a clean message. Read-only
+    // tools and the planning primitives (enter/exit_plan_mode,
+    // todo_write, tool_search) run through unchanged. This is
+    // behavioural shaping, not a permission gate — the agent can
+    // exit plan mode at any time and retry.
+    if (progressSessionId && this.planModeBySession.has(progressSessionId)) {
+      const allowed =
+        registration.isReadOnly === true ||
+        ToolRegistry.PLAN_MODE_ALLOWED.has(name);
+      if (!allowed) {
+        try {
+          await this.auditService?.log({
+            tenantId,
+            userId: context.user?.id,
+            action: 'tool.plan_mode_blocked',
+            resource: name,
+            details: { tool: name, callId },
+          });
+        } catch { /* non-critical */ }
+        return {
+          error:
+            `Plan mode active — "${name}" is blocked until you exit plan mode. ` +
+            `Finish your plan (use todo_write to draft steps if helpful), then call exit_plan_mode.`,
+        };
+      }
     }
 
     // ── Phase 12: PreToolUse hooks ──────────────────────────
