@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel, JSONSchemaObject, JSONSchemaProperty } from '@agw/types';
+import type { ToolDefinition, ToolResult, ToolExecutionContext, ToolPermissionLevel, JSONSchemaObject, JSONSchemaProperty, ToolProgress } from '@agw/types';
 import { isToolResultEnvelope } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { ToolRegistration } from './types.js';
@@ -8,17 +8,75 @@ import { checkToolPermission } from './permissions.js';
 import type { AuditService } from '../security/audit.js';
 import type { LoopDetector } from './loop-detector.js';
 import type { ResultStorage } from './result-storage.js';
+import type { ProgressBus } from '../agent/progress-bus.js';
 
 /**
  * Internal view of the tool-execution context with Phase 6 services
- * attached. `LoopDetector` and `ResultStorage` are registry-internal —
- * they're passed via the context as non-type-facing extensions
- * (consistent with how `cronScheduler`, `browserManager`, etc. are
- * already passed through `enrichedCtx` in `createRunner`).
+ * attached. `LoopDetector`, `ResultStorage`, and `ProgressBus` are
+ * registry-internal — they're passed via the context as
+ * non-type-facing extensions (consistent with how `cronScheduler`,
+ * `browserManager`, etc. are already passed through `enrichedCtx`
+ * in `createRunner`).
  */
 interface Phase6ContextExtensions {
   loopDetector?: LoopDetector;
   resultStorage?: ResultStorage;
+  progressBus?: ProgressBus;
+}
+
+/** Maximum preview length for args / result in progress events. */
+const PREVIEW_MAX_CHARS = 500;
+
+/** Serialize any value to JSON without throwing on circular refs etc. */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '[unserialisable]';
+    }
+  }
+}
+
+/** Truncate a string to `max` chars with a trailing ellipsis if longer. */
+function truncatePreview(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max) + '…';
+}
+
+/**
+ * Render a tool result into a readable preview string. Handles all
+ * three return shapes:
+ *   - `string` → as-is
+ *   - Phase 6 content-block envelope → text blocks joined, non-text
+ *     blocks summarised as `[image/jpeg]` / `[persisted 84KB]` / `[link: …]`
+ *   - Legacy object → JSON.stringify
+ * Mirrors `agent/loop.ts:renderToolResultForLLM` but stays local to
+ * avoid a cross-layer import.
+ */
+function renderPreview(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object') return safeStringify(result);
+  if (isToolResultEnvelope(result)) {
+    const parts: string[] = [];
+    for (const block of result.content) {
+      if (block.type === 'text') {
+        parts.push(block.text);
+      } else if (block.type === 'image') {
+        parts.push(`[${block.source.media_type || 'image'}]`);
+      } else if (block.type === 'resource_link') {
+        parts.push(`[link: ${block.title || block.uri}]`);
+      } else if (block.type === 'persisted_reference') {
+        parts.push(
+          `[persisted ${block.sizeBytes}B at ${block.path}]\n${block.preview}`,
+        );
+      }
+    }
+    return parts.join('\n');
+  }
+  return safeStringify(result);
 }
 
 // ─── Lightweight argument validation ────────────────────────
@@ -231,13 +289,66 @@ export class ToolRegistry {
       }
     }
 
+    // ── Phase 6.5: emit tool.start progress event ───────────
+    // Published to the ProgressBus so SSE subscribers for this
+    // session see a live "running <tool>" notification before the
+    // executor blocks. No-op when no one is subscribed.
+    const progressBus = ctxExt.progressBus;
+    // The runtime `session` object is the DB SessionRow (has `id`),
+    // not the `Session` type from `@agw/types` (which declares
+    // `sessionId`). The codebase reads `session.id` everywhere at
+    // runtime; the type mismatch is a pre-existing issue. Prefer the
+    // runtime field and fall back to the typed name for safety.
+    const progressSessionId =
+      (context.session as unknown as { id?: string })?.id
+      ?? context.session?.sessionId;
+    if (progressBus && progressSessionId) {
+      const argsJson = safeStringify(args);
+      progressBus.emit({
+        sessionId: progressSessionId,
+        timestamp: Date.now(),
+        kind: 'tool.start',
+        toolName: name,
+        toolCallId: callId,
+        message: registration.getActivityDescription
+          ? registration.getActivityDescription(args)
+          : `Running ${name}`,
+        argsPreview: truncatePreview(argsJson, PREVIEW_MAX_CHARS),
+        argsLen: argsJson.length,
+      });
+    }
+
+    // ── Phase 6.5: wrap context.progress for this call ──────
+    // Tool authors call `context.progress({ message, fraction, ... })`
+    // without knowing their own name or callId. Wrap their callback
+    // so the registry injects those fields automatically and forwards
+    // to the bus as tool.progress events.
+    let wrappedContext: ToolExecutionContext = context;
+    if (progressBus && progressSessionId) {
+      wrappedContext = {
+        ...context,
+        progress: (event: ToolProgress) => {
+          progressBus.emit({
+            sessionId: progressSessionId,
+            timestamp: Date.now(),
+            kind: 'tool.progress',
+            toolName: name,
+            toolCallId: callId,
+            message: event.message,
+            fraction: event.fraction,
+            data: event.data,
+          });
+        },
+      };
+    }
+
     // Execute with timing
     const start = performance.now();
     let result: ToolResult;
     let status = 'success';
 
     try {
-      result = await registration.executor(args, context);
+      result = await registration.executor(args, wrappedContext);
 
       // Check if the result itself indicates an error
       if (typeof result === 'object' && result !== null && 'error' in result) {
@@ -250,6 +361,25 @@ export class ToolRegistry {
     }
 
     const durationMs = Math.round(performance.now() - start);
+
+    // ── Phase 6.5: emit tool.complete / tool.error ──────────
+    // Includes a rendered preview of the result so the admin UI can
+    // show what the tool actually returned without a separate fetch.
+    if (progressBus && progressSessionId) {
+      const rendered = renderPreview(result);
+      const isEnvelope = isToolResultEnvelope(result);
+      progressBus.emit({
+        sessionId: progressSessionId,
+        timestamp: Date.now(),
+        kind: status === 'error' ? 'tool.error' : 'tool.complete',
+        toolName: name,
+        toolCallId: callId,
+        durationMs,
+        resultPreview: truncatePreview(rendered, PREVIEW_MAX_CHARS),
+        resultLen: rendered.length,
+        resultPersisted: isEnvelope ? !!(result as { persisted?: boolean }).persisted : false,
+      });
+    }
 
     // ── Phase 6: result persistence ─────────────────────────
     // If the tool returned an envelope and its content is over the

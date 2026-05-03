@@ -24,6 +24,7 @@ import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
 import { FileStateTracker } from './agent/file-state.js';
+import { ProgressBus } from './agent/progress-bus.js';
 import { ResultBudget } from './tools/result-budget.js';
 import { LoopDetector } from './tools/loop-detector.js';
 import { ResultStorage } from './tools/result-storage.js';
@@ -49,6 +50,7 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { registerLogRoutes } from './routes/logs.js';
+import { registerProgressRoutes } from './routes/progress.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
@@ -267,6 +269,12 @@ async function main(): Promise<void> {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
 
+  // Phase 6.5: process-wide progress bus for live SSE streaming.
+  // Tools publish tool.start / tool.progress / tool.complete / tool.error
+  // events here; the SSE endpoint at GET /api/v1/sessions/:id/progress
+  // subscribes per-session and streams to the admin UI.
+  const progressBus = new ProgressBus();
+
   // 7b. Migrate old channel-based scopes to user UUID scopes (one-time)
   try {
     const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
@@ -464,6 +472,11 @@ async function main(): Promise<void> {
           resultBudget,
           loopDetector,
           resultStorage,
+          // Phase 6.5: live progress bus (process-wide singleton). The
+          // registry wraps context.progress per-call so tool authors can
+          // emit custom in-flight events without knowing their own callId,
+          // and publishes tool.start / tool.complete automatically.
+          progressBus,
           cronScheduler: sharedServices.cronScheduler,
           browserManager: sharedServices.browserManager,
           telegramSend: sharedServices.telegramSend,
@@ -487,7 +500,7 @@ async function main(): Promise<void> {
   // 12. Register ALL routes
   await server.register(registerHealthRoutes, { secretsStore });
   await server.register(registerAuthRoutes);
-  await server.register(registerSessionRoutes);
+  await server.register(registerSessionRoutes, { progressBus });
   // Config change handler — hot-reload channels when toggled via Settings UI
   const onConfigChange = async (dotPath: string, value: unknown) => {
     if (dotPath === 'channels.whatsapp.enabled') {
@@ -569,6 +582,7 @@ async function main(): Promise<void> {
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
+  await server.register(registerProgressRoutes, { progressBus });
   await server.register(registerAuditRoutes);
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
   await server.register(chatRoutes, { runner: createRunner });

@@ -3,8 +3,19 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { getDb, getTenantId, assertSessionAccess } from './utils.js';
+import type { ProgressBus } from '../agent/progress-bus.js';
 
-export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
+interface SessionRoutesOptions {
+  /**
+   * Optional progress bus — when provided, deleting a session also
+   * clears its bucket from the bus so per-session subscriber slots
+   * and history events don't outlive the session itself.
+   */
+  progressBus?: ProgressBus;
+}
+
+export const registerSessionRoutes: FastifyPluginAsync<SessionRoutesOptions> = async (app, opts) => {
+  const progressBus = opts?.progressBus;
   // GET /api/v1/sessions — list sessions for current tenant
   app.get('/api/v1/sessions', async (request) => {
     const db = getDb(request);
@@ -179,6 +190,9 @@ export const registerSessionRoutes: FastifyPluginAsync = async (app) => {
 
     // Delete session and all child records
     await sessionRepo.deleteWithCascade(id);
+    // Drop the per-session subscriber bucket + history events so the
+    // progress bus doesn't carry stale entries forward.
+    progressBus?.clearSession(id);
     return { success: true };
   });
 };
