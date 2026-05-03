@@ -348,7 +348,7 @@ export async function runAgent(
     const fsMod = await import('node:fs');
     const pathMod = await import('node:path');
     const workspace = config.agent.workspace;
-    const userId = context.user?.id || 'anonymous';
+    const userId = (context.user?.id || 'anonymous').replace(/[^a-zA-Z0-9_\-]/g, '_');
     const mediaDir = pathMod.default.join(workspace, 'scopes', userId, 'media');
     fsMod.default.mkdirSync(mediaDir, { recursive: true });
     for (const img of inbound.images) {
