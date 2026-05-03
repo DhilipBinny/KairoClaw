@@ -152,6 +152,11 @@ export async function getSessionToolCalls(sessionId: string): Promise<{ toolCall
   return request(`/sessions/${sessionId}/tool-calls`);
 }
 
+export async function getDebugPrompt(sessionId: string, messageId: number): Promise<{ entries: unknown[] }> {
+  const params = new URLSearchParams({ messageId: String(messageId) });
+  return request(`/sessions/${sessionId}/debug-prompt?${params}`);
+}
+
 export async function deleteSession(id: string): Promise<{ success: boolean }> {
   return request(`/sessions/${id}`, { method: 'DELETE' });
 }
