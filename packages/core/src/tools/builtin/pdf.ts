@@ -16,6 +16,7 @@ import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { safePath } from './files.js';
 import { getWorkspace } from './utils.js';
+import { textEnvelope } from '../envelope.js';
 import {
   MAX_TOOL_RESULT_CHARS,
   PDF_MAX_PAGES,
@@ -287,14 +288,8 @@ export const pdfTools: ToolRegistration[] = [
       text = cleanPdfText(text);
 
       if (!text) {
-        return {
-          text: '',
-          pageCount: totalPages,
-          pagesExtracted: `${pageRange.first}-${pageRange.last}`,
-          method,
-          charCount: 0,
-          warning: 'No text extracted — this may be a scanned or image-only PDF.',
-        };
+        const header = `PDF: ${args.path} (${totalPages} pages, extracted ${pageRange.first}-${pageRange.last} via ${method}, 0 chars)`;
+        return textEnvelope(`${header}\nWarning: No text extracted — this may be a scanned or image-only PDF.`);
       }
 
       // Truncate if too large
@@ -303,17 +298,21 @@ export const pdfTools: ToolRegistration[] = [
         text = text.slice(0, MAX_TOOL_RESULT_CHARS);
       }
 
-      return {
-        text,
-        pageCount: totalPages,
-        pagesExtracted: `${pageRange.first}-${pageRange.last}`,
-        method,
-        charCount: text.length,
-        ...(warnings.length > 0 ? { warnings } : {}),
-      };
+      const header = `PDF: ${args.path} (${totalPages} pages, extracted ${pageRange.first}-${pageRange.last} via ${method}, ${text.length} chars)`;
+      const warnBlock = warnings.length > 0
+        ? `\n\nWarnings:\n${warnings.map(w => `- ${w}`).join('\n')}`
+        : '';
+      return textEnvelope(`${header}${warnBlock}\n\n${text}`);
     },
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    // PDFs can be large — 96 KB threshold before persistence.
+    maxResultSizeChars: 96 * 1024,
+    getActivityDescription: (input) => {
+      const p = (input as { path?: string })?.path ?? '<unknown>';
+      return `Reading PDF: ${p}`;
+    },
   },
 ];

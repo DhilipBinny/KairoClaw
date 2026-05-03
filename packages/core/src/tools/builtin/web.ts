@@ -1,5 +1,27 @@
 import dns from 'node:dns';
 import type { ToolRegistration } from '../types.js';
+import { textEnvelope } from '../envelope.js';
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export function formatSearchResults(query: string, results: SearchResult[]): string {
+  const lines: string[] = [
+    `Query: ${query}`,
+    `${results.length} result${results.length === 1 ? '' : 's'}:`,
+    '',
+  ];
+  for (const [i, r] of results.entries()) {
+    lines.push(`${i + 1}. ${r.title}`);
+    lines.push(`   ${r.url}`);
+    lines.push(`   ${r.snippet}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
 
 /**
  * Validate a URL for web_fetch to prevent SSRF attacks.
@@ -176,10 +198,10 @@ export const webTools: ToolRegistration[] = [
           .slice(0, maxChars);
 
         // Hint: if content is mostly empty, the site likely needs JS rendering
-        if (text.length < 200) {
-          return { content: text, url, chars: text.length, hint: 'Content appears very short — this site may require JavaScript rendering. Try the browse tool instead.' };
-        }
-        return { content: text, url, chars: text.length };
+        const hint = text.length < 200
+          ? '\nHint: Content appears very short — this site may require JavaScript rendering. Try the browse tool instead.'
+          : '';
+        return textEnvelope(`URL: ${url}\nChars: ${text.length}${hint}\n\n${text}`);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `Fetch failed: ${message}` };
@@ -188,6 +210,14 @@ export const webTools: ToolRegistration[] = [
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    // Web pages can be large — 96 KB threshold before persistence kicks in.
+    // Lower than exec (build logs) but higher than files.ts (64 KB).
+    maxResultSizeChars: 96 * 1024,
+    getActivityDescription: (input) => {
+      const u = (input as { url?: string })?.url ?? '<url>';
+      return `Fetching ${u}`;
+    },
   },
   {
     definition: {
@@ -232,7 +262,7 @@ export const webTools: ToolRegistration[] = [
           snippet: r.description,
         }));
 
-        return { results, query };
+        return textEnvelope(formatSearchResults(query, results));
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `Search failed: ${message}` };
@@ -241,5 +271,10 @@ export const webTools: ToolRegistration[] = [
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    getActivityDescription: (input) => {
+      const q = (input as { query?: string })?.query ?? '';
+      return `Searching: ${q.slice(0, 60)}`;
+    },
   },
 ];
