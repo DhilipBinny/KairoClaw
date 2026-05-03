@@ -207,6 +207,8 @@ export const applyPatchTools: ToolRegistration[] = [
       if (context.fileState) {
         for (const rel of paths) {
           const abs = path.isAbsolute(rel) ? rel : path.resolve(cwd, rel);
+          // Only track files that resolve within cwd (prevent path traversal)
+          if (!abs.startsWith(cwd + '/') && abs !== cwd) continue;
           try {
             if (fs.existsSync(abs)) {
               const content = fs.readFileSync(abs);
