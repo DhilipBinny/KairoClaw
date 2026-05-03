@@ -322,14 +322,55 @@ export const execTools: ToolRegistration[] = [
     },
     executor: async (args, context) => {
       const commands = args.commands as string[];
-      const workdir = (args.workdir as string) || undefined;
-      const timeout = Math.min(Math.max(Number(args.timeout) || 30, 1), 120);
+      const timeout = Math.min(Math.max(Number(args.timeout) || 30, 1), 120) * 1000;
 
-      const ctx = context as Record<string, unknown>;
-      const workspace = getWorkspace(ctx);
-      const cwd = workdir
-        ? (path.isAbsolute(workdir) ? workdir : path.join(workspace, workdir))
-        : workspace;
+      const workspace = getWorkspace(context as Record<string, unknown>);
+      const isAdmin = context.user?.role === 'admin';
+      const scopeKey = context.scopeKey;
+      const execMode = isAdmin ? 'unrestricted' : 'sandboxed';
+
+      // Pre-validate all commands BEFORE executing any
+      for (const cmd of commands) {
+        if (cmd.length > 10000) {
+          return { error: `Command too long (max 10000 chars): "${cmd.slice(0, 60)}..."` };
+        }
+        const safety = checkCommandSafety(cmd, execMode);
+        if (safety.action === 'block') {
+          return { error: `Blocked command in batch: "${cmd.slice(0, 100)}". Reason: ${safety.reason}` };
+        }
+        if (safety.action === 'confirm') {
+          return { error: `Command requires confirmation (not supported in batch): "${cmd.slice(0, 100)}". Reason: ${safety.reason}. Use single exec instead.` };
+        }
+        // Non-admin: block cross-scope access
+        if (!isAdmin && scopeKey) {
+          const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
+          if (scopesRef.test(cmd)) {
+            return { error: 'Access denied: cannot access other users\' directories via batch_exec' };
+          }
+        }
+        // Non-admin: block source code access
+        if (!isAdmin) {
+          const appRoot = path.resolve(workspace, '..');
+          if (cmd.includes(path.join(appRoot, 'node_modules')) || cmd.includes(path.join(appRoot, 'packages'))) {
+            return { error: 'Blocked: access to application source code.' };
+          }
+        }
+      }
+
+      // Resolve working directory with scope isolation
+      let defaultCwd = workspace;
+      if (!isAdmin && scopeKey) {
+        defaultCwd = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
+      }
+      const cwd = args.workdir
+        ? scopedSafePath(args.workdir as string, workspace, context)
+        : defaultCwd;
+
+      // Build safe environment (allowlist, not full process.env)
+      const safeEnv: Record<string, string> = {};
+      for (const key of SAFE_ENV_KEYS) {
+        if (process.env[key]) safeEnv[key] = process.env[key]!;
+      }
 
       const startTime = Date.now();
       const results = await Promise.allSettled(
@@ -337,18 +378,18 @@ export const execTools: ToolRegistration[] = [
           try {
             const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', cmd], {
               cwd,
-              timeout: timeout * 1000,
-              maxBuffer: MAX_STDOUT * 2,
-              env: { ...process.env, HOME: process.env.HOME },
+              timeout,
+              maxBuffer: 1024 * 1024,
+              env: safeEnv,
             });
-            return { command: cmd, exitCode: 0, stdout: (stdout || '').slice(0, MAX_STDOUT), stderr: (stderr || '').slice(0, 2000) };
+            return { command: cmd, exitCode: 0, stdout: (stdout || '').slice(0, MAX_STDOUT), stderr: (stderr || '').slice(0, MAX_STDERR) };
           } catch (e: unknown) {
-            const err = e as { stdout?: string; stderr?: string; code?: number; signal?: string };
+            const err = e as { stdout?: string; stderr?: string; code?: number; signal?: string; status?: number };
             return {
               command: cmd,
-              exitCode: err.code ?? 1,
+              exitCode: err.status ?? (typeof err.code === 'number' ? err.code : 1),
               stdout: (err.stdout || '').slice(0, MAX_STDOUT),
-              stderr: (err.stderr || '').slice(0, 2000),
+              stderr: (err.stderr || '').slice(0, MAX_STDERR),
               error: err.signal ? `killed by ${err.signal}` : undefined,
             };
           }
