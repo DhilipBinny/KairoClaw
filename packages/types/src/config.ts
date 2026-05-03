@@ -172,6 +172,8 @@ export interface WebFetchToolConfig {
   enabled: boolean;
   /** Maximum characters to return from a fetched page. */
   maxChars: number;
+  /** Hosts (or host:port) that bypass SSRF private-IP protection. */
+  allowPrivate?: string[];
 }
 
 /** Email/SMTP tool settings. */
@@ -345,6 +347,10 @@ export interface AgentConfig {
   routing?: RoutingConfig;
   /** Show which model responded (per channel). Off by default. */
   showModelIndicator?: ModelIndicatorConfig;
+  /** Whether to defer tool loading (only send core set initially; use tool_search for rest). */
+  deferToolLoading?: boolean;
+  /** Maximum concurrent background tasks allowed. Default: 10. */
+  maxBackgroundTasks?: number;
 }
 
 /** Model capabilities — auto-fetched from provider APIs + admin overrides. */
@@ -473,6 +479,40 @@ export interface PluginsConfig {
 }
 
 // ──────────────────────────────────────────────
+// Hooks config
+// ──────────────────────────────────────────────
+
+/** A tool hook fires before/after tool execution when the matcher matches. */
+export interface ToolHookConfig {
+  /** Glob pattern to match tool names (e.g. "exec", "write_*"). */
+  matcher: string;
+  /** Shell command to execute. Receives tool args on stdin. */
+  command: string;
+  /** Timeout in ms. */
+  timeoutMs?: number;
+}
+
+/** A session hook fires on session lifecycle events. */
+export interface SessionHookConfig {
+  /** Shell command to execute. */
+  command: string;
+  /** Timeout in ms. */
+  timeoutMs?: number;
+}
+
+/** Hook configuration — shell commands triggered by agent events. */
+export interface HooksConfig {
+  /** Hooks that run before tool execution. */
+  PreToolUse: ToolHookConfig[];
+  /** Hooks that run after tool execution. */
+  PostToolUse: ToolHookConfig[];
+  /** Hooks that run when a new session starts. */
+  SessionStart: SessionHookConfig[];
+  /** Hooks that run after context compaction. */
+  PostCompact: SessionHookConfig[];
+}
+
+// ──────────────────────────────────────────────
 // Top-level config
 // ──────────────────────────────────────────────
 
@@ -497,6 +537,9 @@ export interface GatewayConfig {
 
   /** Plugin configuration (CLI + HTTP). Loaded from plugins.json. */
   plugins?: PluginsConfig;
+
+  /** Hook configuration — shell commands triggered by agent events. */
+  hooks?: HooksConfig;
 
   /** Internal: resolved path to the state directory (~/.agw). Set at runtime. */
   _stateDir?: string;
