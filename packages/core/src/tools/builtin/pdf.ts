@@ -14,7 +14,7 @@ import path from 'node:path';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
-import { safePath } from './files.js';
+import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 import { textEnvelope } from '../envelope.js';
 import {
@@ -281,6 +281,8 @@ export const pdfTools: ToolRegistration[] = [
   {
     definition: {
       name: 'read_pdf',
+      searchHint: 'pdf extract text ocr document pages',
+      alwaysLoad: false,
       description:
         'Extract text from a PDF file. Supports page ranges and layout preservation. ' +
         'Falls back to OCR for scanned/image PDFs if tesseract is available.',
@@ -312,7 +314,7 @@ export const pdfTools: ToolRegistration[] = [
 
       let filePath: string;
       try {
-        filePath = safePath(args.path as string, workspace);
+        filePath = scopedSafePath(args.path as string, workspace, context);
       } catch (e) {
         return { error: (e as Error).message };
       }
