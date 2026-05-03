@@ -252,6 +252,15 @@ Model: ${config.model.primary}`);
     }
   }
 
+  // 1a. Pinned notes — hot-loaded, always visible on every turn
+  const pinnedPath = path.join(memoryDir, 'PINNED.md');
+  if (fs.existsSync(pinnedPath)) {
+    const pinned = fs.readFileSync(pinnedPath, 'utf8');
+    if (pinned.trim()) {
+      dynamic.push(`### Pinned Notes (always load)\n${pinned}`);
+    }
+  }
+
   // 2. Current session memory (structured notes for this session)
   // Skip when a [Context Summary] compaction message exists in history — the summary
   // already contains session memory content, injecting it again wastes tokens.
