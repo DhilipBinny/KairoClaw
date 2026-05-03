@@ -56,7 +56,7 @@ const _activeExtractions = new Set<string>();
 // ─── Debug prompt logger ─────────────────────────────────────
 
 /** Strip base64 image data from messages to keep log files small. */
-function sanitizeMessagesForLog(messages: Message[]): unknown[] {
+export function sanitizeMessagesForLog(messages: Message[]): unknown[] {
   return messages.map(m => {
     if (!Array.isArray(m.content)) return m;
     return {
@@ -71,7 +71,7 @@ function sanitizeMessagesForLog(messages: Message[]): unknown[] {
 }
 
 /** Append one LLM round entry to the daily JSONL debug log. */
-function appendDebugLog(workspace: string, entry: Record<string, unknown>): void {
+export function appendDebugLog(workspace: string, entry: Record<string, unknown>): void {
   try {
     const dir = path.resolve(workspace, 'debug', 'llm-requests');
     fs.mkdirSync(dir, { recursive: true });
