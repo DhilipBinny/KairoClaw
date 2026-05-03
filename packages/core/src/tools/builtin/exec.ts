@@ -158,6 +158,8 @@ export const execTools: ToolRegistration[] = [
     definition: {
       name: 'exec',
       description: 'Execute a shell command. Returns stdout, stderr, and exit code.',
+      searchHint: 'run shell command bash execute',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {

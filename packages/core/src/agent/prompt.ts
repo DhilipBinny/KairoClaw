@@ -96,6 +96,15 @@ export function buildSystemPrompt(
 Always call **read_file** on a path before calling **edit_file** or **write_file** on it — the system enforces this. If you skip the read, edit_file returns "File not read yet in this session" and you'll have to read and retry. write_file counts as a read for follow-up edits in the same turn.`);
     }
 
+    // Deferred tool loading guidance (Phase 8)
+    if (toolNames.has('tool_search')) {
+      cached.push(`### Discovering More Tools
+The tools listed above are your core set. Additional tools (email, PDF, browsing, etc.) are available but not listed to save context. Use **tool_search** to find and load them:
+- \`tool_search({ query: "send email" })\` — keyword search
+- \`tool_search({ query: "select:send_email,read_pdf" })\` — load specific tools by name
+Once loaded, tools stay available for the rest of this session.`);
+    }
+
     // Parallel tool execution guidance
     cached.push(`### Parallel Tool Calls
 You can call multiple tools in a single response. When tools are independent (e.g. reading several files), call them ALL at once — they execute in parallel.

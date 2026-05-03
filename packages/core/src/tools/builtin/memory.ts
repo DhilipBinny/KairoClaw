@@ -20,6 +20,8 @@ export const memoryTools: ToolRegistration[] = [
     definition: {
       name: 'memory_search',
       description: 'Search through memory files (memory/PROFILE.md and memory/sessions/*.md) using semantic keyword search. Returns top-N matching snippets with file path, line range, and relevance score.',
+      searchHint: 'memory recall history profile search',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {

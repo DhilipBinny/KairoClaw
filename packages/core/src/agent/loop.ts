@@ -124,6 +124,17 @@ export interface AgentContext {
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   /** Tool definitions available for this turn. */
   tools?: ToolDefinition[];
+  /**
+   * Phase 8: optional callback to re-fetch the session's current tool
+   * surface. When deferred tool loading is enabled, `tool_search` can
+   * add more tools to the session's loaded set mid-turn; the agent
+   * loop calls this at the start of each LLM round so newly loaded
+   * tools are visible on the next provider call.
+   *
+   * When omitted (deferred loading disabled or ephemeral sub-agent),
+   * the loop uses the initial `tools` list for all rounds.
+   */
+  refreshTools?: () => Promise<ToolDefinition[]>;
   /** Tool executor function. */
   executeTool?: (
     name: string,
@@ -281,8 +292,11 @@ export async function runAgent(
   const hasContextSummary = historyRows.some(
     r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
   );
-  const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
+  // Phase 8: `tools` and `systemPrompt` are mutable because
+  // `context.refreshTools` can expand the set mid-turn via tool_search.
+  // Both get rebuilt at the top of each LLM round when the set grows.
+  let tools = context.tools ?? [];
+  let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -361,6 +375,30 @@ export async function runAgent(
   while (round < maxToolRounds) {
     round++;
     if (onRoundStart) onRoundStart(round, maxToolRounds);
+
+    // ── Phase 8: refresh tools mid-turn ─────────────────────
+    // If the session has loaded new tools via tool_search since the
+    // last round (or since createRunner built the initial set), pick
+    // them up before the next provider call. A size change is enough
+    // to detect — tools can only be added, never removed mid-turn.
+    if (context.refreshTools) {
+      try {
+        const fresh = await context.refreshTools();
+        if (fresh.length !== tools.length) {
+          tools = fresh;
+          systemPrompt = buildSystemPrompt(
+            config,
+            tools,
+            context.scopeKey,
+            inbound.channel,
+            session.id,
+            hasContextSummary,
+          );
+        }
+      } catch {
+        /* ignore — keep existing tools if refresh fails */
+      }
+    }
 
     // Log detailed request info for debugging
     const contentLen = (c: string | MessageContentPart[]) =>

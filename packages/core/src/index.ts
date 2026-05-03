@@ -25,6 +25,7 @@ import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
 import { FileStateTracker } from './agent/file-state.js';
 import { ProgressBus } from './agent/progress-bus.js';
+import { backgroundTaskRegistry } from './agent/background-task-registry.js';
 import { ResultBudget } from './tools/result-budget.js';
 import { LoopDetector } from './tools/loop-detector.js';
 import { ResultStorage } from './tools/result-storage.js';
@@ -51,6 +52,7 @@ import { registerConfigRoutes } from './routes/config.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { registerLogRoutes } from './routes/logs.js';
 import { registerProgressRoutes } from './routes/progress.js';
+import { registerBackgroundTaskRoutes } from './routes/background-tasks.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
@@ -279,6 +281,14 @@ async function main(): Promise<void> {
   // subscribes per-session and streams to the admin UI.
   const progressBus = new ProgressBus();
 
+  // Phase 10 — wire the in-memory background task registry to its
+  // durable SQLite table. Surviving `running` rows from the previous
+  // process are marked `orphaned` so they stay visible in the admin
+  // UI without trying to resume their (now-dead) promises. Tasks
+  // older than 7 days are auto-purged on startup.
+  await backgroundTaskRegistry.attachDb(db);
+  await backgroundTaskRegistry.purgeOlderThan(7);
+
   // 7b. Migrate old channel-based scopes to user UUID scopes (one-time)
   try {
     const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
@@ -423,6 +433,37 @@ async function main(): Promise<void> {
       sessionId: sessionRow.id,
     });
 
+    // ── Phase 8: deferred tool loading ─────────────────────
+    // When enabled (default), the initial prompt only shows tools
+    // marked `alwaysLoad: true`. Everything else is discoverable via
+    // `tool_search`, which loads tools into this session's loaded
+    // set. The agent loop's `refreshTools` callback picks up
+    // newly-loaded tools between rounds. Set `agent.deferToolLoading
+    // = false` in config or `AGW_DEFER_TOOLS=false` in env to
+    // disable and send every tool on every turn (pre-Phase-8 shape).
+    const deferEnvDisabled = process.env.AGW_DEFER_TOOLS === 'false';
+    const deferToolLoading =
+      !deferEnvDisabled &&
+      ((config.agent as unknown as { deferToolLoading?: boolean })?.deferToolLoading !== false);
+
+    const effectiveUserRole = resolvedUser?.role
+      || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user');
+    const effectiveElevated = !!resolvedUser?.elevated;
+    const toolOpts = {
+      userRole: effectiveUserRole,
+      db,
+      tenantId,
+      elevated: effectiveElevated,
+    };
+
+    const initialTools = deferToolLoading
+      ? await toolRegistry.getAlwaysLoadDefinitions(toolOpts)
+      : await toolRegistry.getDefinitions(toolOpts);
+
+    const refreshTools = deferToolLoading
+      ? () => toolRegistry.getDefinitionsForSession(sessionRow.id, toolOpts)
+      : undefined;
+
     return runAgent(inbound, callbacks || {}, {
       db,
       config,
@@ -441,13 +482,8 @@ async function main(): Promise<void> {
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       isProviderAvailable: (prefix) => providerRegistry.hasProvider(prefix),
-      tools: await toolRegistry.getDefinitions({
-        userRole: resolvedUser?.role
-          || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),
-        db,
-        tenantId,
-        elevated: !!resolvedUser?.elevated,
-      }),
+      tools: initialTools,
+      refreshTools,
       executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
@@ -465,6 +501,10 @@ async function main(): Promise<void> {
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
+          // Phase 8: tool_search needs direct registry access to query
+          // the full tool surface (including deferred tools) and mutate
+          // the session's loaded set via loadForSession().
+          toolRegistry,
           subagentDepth: 0,
           scopeKey,
           secretsStore,
@@ -481,6 +521,11 @@ async function main(): Promise<void> {
           // emit custom in-flight events without knowing their own callId,
           // and publishes tool.start / tool.complete automatically.
           progressBus,
+          // Phase 10: process-lifetime background task registry. Tools
+          // read via ctx.backgroundTasks; the spawn_agent / task_*
+          // builtins fall back to the exported singleton when it's
+          // missing, but threading it through keeps tests swappable.
+          backgroundTasks: backgroundTaskRegistry,
           cronScheduler: sharedServices.cronScheduler,
           browserManager: sharedServices.browserManager,
           telegramSend: sharedServices.telegramSend,
@@ -587,6 +632,7 @@ async function main(): Promise<void> {
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
   await server.register(registerProgressRoutes, { progressBus });
+  await server.register(registerBackgroundTaskRoutes);
   await server.register(registerAuditRoutes);
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
   await server.register(chatRoutes, { runner: createRunner });

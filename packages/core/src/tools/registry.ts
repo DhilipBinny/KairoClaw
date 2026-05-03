@@ -153,6 +153,19 @@ export class ToolRegistry {
    * Set from config at startup + on config change; empty by default.
    */
   private hooks: HooksConfig = {};
+  /**
+   * Phase 8: per-session set of tool names that have been dynamically
+   * loaded into this session's tool surface via `tool_search`. The
+   * initial prompt only carries the `alwaysLoad=true` subset; anything
+   * else has to be discovered and loaded via tool_search on demand.
+   *
+   * This map is pure in-memory state — cleared when the process
+   * restarts. Sessions that relied on a loaded tool will just
+   * re-search for it next turn; this is by design because tool_search
+   * results are cheap and session state getting too sticky across
+   * restarts would be surprising.
+   */
+  private loadedBySession = new Map<string, Set<string>>();
 
   /** Attach an AuditService for recording tool execution audit events. */
   setAuditService(audit: AuditService): void {
@@ -207,6 +220,92 @@ export class ToolRegistry {
     }
 
     return definitions;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Phase 8 — deferred tool loading
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Return only the tools marked with `alwaysLoad: true`. This is the
+   * initial "core" surface shown to the LLM when deferred loading is
+   * enabled — everything else is discoverable on demand via the
+   * `tool_search` tool and loaded per-session via `loadForSession`.
+   *
+   * Still honours RBAC filtering via the same opts.
+   */
+  async getAlwaysLoadDefinitions(opts?: {
+    userRole?: string;
+    db?: DatabaseAdapter;
+    tenantId?: string;
+    elevated?: boolean;
+  }): Promise<ToolDefinition[]> {
+    const all = await this.getDefinitions(opts);
+    return all.filter((d) => d.alwaysLoad === true);
+  }
+
+  /**
+   * Return the effective tool set for a specific session under
+   * deferred loading: the always-loaded core set PLUS any tools that
+   * have been explicitly loaded for this session via `loadForSession`.
+   *
+   * Called by the agent loop each round via its `refreshTools`
+   * callback, so newly loaded tools become callable on the next LLM
+   * turn without restarting the session.
+   */
+  async getDefinitionsForSession(
+    sessionId: string,
+    opts?: {
+      userRole?: string;
+      db?: DatabaseAdapter;
+      tenantId?: string;
+      elevated?: boolean;
+    },
+  ): Promise<ToolDefinition[]> {
+    const all = await this.getDefinitions(opts);
+    const loaded = this.loadedBySession.get(sessionId);
+    return all.filter((d) => d.alwaysLoad === true || loaded?.has(d.name));
+  }
+
+  /**
+   * Mark one or more tool names as "loaded" for this session. Used by
+   * the `tool_search` tool when the agent discovers it needs a
+   * deferred tool. Subsequent `getDefinitionsForSession` calls on
+   * this sessionId will include them.
+   *
+   * Returns the number of tools actually added (ignores unknown
+   * tool names and duplicates).
+   */
+  loadForSession(sessionId: string, toolNames: string[]): number {
+    let set = this.loadedBySession.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.loadedBySession.set(sessionId, set);
+    }
+    let added = 0;
+    for (const name of toolNames) {
+      if (this.tools.has(name) && !set.has(name)) {
+        set.add(name);
+        added++;
+      }
+    }
+    return added;
+  }
+
+  /**
+   * Forget all tools loaded for a session. Called when a session ends
+   * or is cleared. Optional — state will also be released on process
+   * restart.
+   */
+  clearSessionLoaded(sessionId: string): void {
+    this.loadedBySession.delete(sessionId);
+  }
+
+  /**
+   * Diagnostics: get the currently loaded tool names for a session.
+   */
+  getSessionLoaded(sessionId: string): string[] {
+    return Array.from(this.loadedBySession.get(sessionId) ?? []);
   }
 
   /**
