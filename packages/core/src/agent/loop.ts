@@ -342,6 +342,26 @@ export async function runAgent(
     }
   }
 
+  // ── Save images to disk for session viewer thumbnails ──
+  const savedImagePaths: string[] = [];
+  if (inbound.images && inbound.images.length > 0) {
+    const fsMod = await import('node:fs');
+    const pathMod = await import('node:path');
+    const workspace = config.agent.workspace;
+    const userId = (context.user?.id || 'anonymous').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const mediaDir = pathMod.default.join(workspace, 'scopes', userId, 'media');
+    fsMod.default.mkdirSync(mediaDir, { recursive: true });
+    for (const img of inbound.images) {
+      const ext = img.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const filePath = pathMod.default.join(mediaDir, filename);
+      try {
+        fsMod.default.writeFileSync(filePath, Buffer.from(img.data, 'base64'));
+        savedImagePaths.push(filename);
+      } catch { /* non-fatal */ }
+    }
+  }
+
   // ── Persist inbound user message (skip for ephemeral) ──
   const persistText = typeof userContent === 'string' ? userContent : inbound.text;
   const userMsgResult = messageRepo ? await messageRepo.create({
@@ -353,6 +373,7 @@ export async function runAgent(
       channel: inbound.channel,
       sender: inbound.senderName,
       ...(inbound.images && inbound.images.length > 0 ? { imageCount: inbound.images.length } : {}),
+      ...(savedImagePaths.length > 0 ? { images: savedImagePaths } : {}),
     }),
   }) : null;
   // ── Build thinking config if enabled + model supports it ──
