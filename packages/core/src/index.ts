@@ -243,6 +243,10 @@ async function main(): Promise<void> {
   // 7. Initialize tool registry with built-in tools (config-aware filtering)
   const toolRegistry = new ToolRegistry();
   toolRegistry.setAuditService(auditService);
+  // Phase 12: load PreToolUse / PostToolUse / SessionStart / PostCompact
+  // hooks from config. setHooks() can be called again on config reload
+  // for hot-reload support; for now it's a startup-only application.
+  toolRegistry.setHooks((config as { hooks?: unknown }).hooks as Parameters<typeof toolRegistry.setHooks>[0]);
   const toolEnabledMap: Record<string, boolean> = {
     exec: config.tools?.exec?.enabled !== false,
     web_search: config.tools?.webSearch?.enabled !== false,

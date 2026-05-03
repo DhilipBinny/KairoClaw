@@ -77,6 +77,21 @@ const webSearchToolSchema = z.object({
 const webFetchToolSchema = z.object({
   enabled: z.boolean().default(true),
   maxChars: z.number().int().min(0).default(50000),
+  /**
+   * Phase 12: hosts (or host:port) that bypass SSRF protection.
+   * Typically used for local dev servers — e.g.
+   *   allowPrivate: ["localhost:3000", "127.0.0.1:5173"]
+   * so the agent can fetch its own running dev server without being
+   * blocked by the private-IP guard. Leave empty (the default) for
+   * the full SSRF lockdown.
+   *
+   * ⚠️ This allowlist is GLOBAL — it applies to every user, not just
+   * admins. Once `localhost:3000` is in the list, any non-admin user
+   * (telegram, whatsapp, web) can also fetch it via web_fetch. Only
+   * add hosts you are willing to expose to every channel and every
+   * user that has access to web_fetch on this server.
+   */
+  allowPrivate: z.array(z.string()).default([]),
 });
 
 const emailToolSchema = z.object({
@@ -328,6 +343,23 @@ export const pluginsSchema = z.object({
   _seededDefaults: z.array(z.string()).optional(),
 });
 
+// ── Phase 12 hooks ───────────────────────────────────────
+const toolHookSchema = z.object({
+  matcher: z.string(),
+  command: z.string(),
+  timeoutMs: z.number().int().min(1).optional(),
+});
+const sessionHookSchema = z.object({
+  command: z.string(),
+  timeoutMs: z.number().int().min(1).optional(),
+});
+const hooksSchema = z.object({
+  PreToolUse: z.array(toolHookSchema).default([]),
+  PostToolUse: z.array(toolHookSchema).default([]),
+  SessionStart: z.array(sessionHookSchema).default([]),
+  PostCompact: z.array(sessionHookSchema).default([]),
+});
+
 export const configSchema = z.object({
   gateway: withObjectDefault(gatewayNetworkSchema),
   providers: withObjectDefault(providersSchema),
@@ -338,6 +370,7 @@ export const configSchema = z.object({
   agent: withObjectDefault(agentSchema),
   models: withObjectDefault(modelsCatalogSchema),
   mcp: withObjectDefault(mcpSectionSchema),
+  hooks: withObjectDefault(hooksSchema),
 }).passthrough();
 
 // ──────────────────────────────────────────────

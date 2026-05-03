@@ -158,10 +158,13 @@ export interface AgentRoundCallbacks extends AgentCallbacks {
  * @returns AgentResult with the assistant's text, usage, and metadata.
  */
 export async function runAgent(
-  inbound: InboundMessage,
+  inboundParam: InboundMessage,
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
+  // `inbound` is made mutable locally so Phase 12 SessionStart hooks
+  // can prepend synthetic context to the user's first message.
+  let inbound = inboundParam;
   const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
@@ -247,6 +250,30 @@ export async function runAgent(
 
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
+
+  // ── Phase 12 TB-2: SessionStart hooks ─────────────────────
+  // Fire once per session on the first turn (when there's no prior
+  // history). Hook stdout is prepended to the inbound user message
+  // as `[hook output] ...` synthetic context so the agent sees it
+  // without us having to fabricate a separate user turn.
+  // Skips for ephemeral (sub-agent) sessions — hooks are user-facing.
+  if (!ephemeral && historyRows.length === 0) {
+    const hooks = (config as unknown as { hooks?: import('../hooks/runner.js').HooksConfig }).hooks;
+    const ssHooks = hooks?.SessionStart;
+    if (ssHooks && ssHooks.length > 0) {
+      try {
+        const { runSessionStartHooks } = await import('../hooks/runner.js');
+        const outputs = await runSessionStartHooks(ssHooks, session.id, context.scopeKey ?? null);
+        if (outputs.length > 0) {
+          const prefix = outputs.map((o) => `[hook output]\n${o}`).join('\n\n');
+          inbound = { ...inbound, text: `${prefix}\n\n---\n\n${inbound.text}` };
+          reqLog.info({ hookCount: ssHooks.length, outputCount: outputs.length }, 'SessionStart hooks injected');
+        }
+      } catch (e: unknown) {
+        reqLog.warn({ err: (e as Error).message }, 'SessionStart hook runner crashed');
+      }
+    }
+  }
 
   // ── Build system prompt ─────────────────────────────────
   // Skip session memory injection when a [Context Summary] compaction message exists —

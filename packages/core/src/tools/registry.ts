@@ -9,6 +9,8 @@ import type { AuditService } from '../security/audit.js';
 import type { LoopDetector } from './loop-detector.js';
 import type { ResultStorage } from './result-storage.js';
 import type { ProgressBus } from '../agent/progress-bus.js';
+import type { HooksConfig } from '../hooks/runner.js';
+import { runPreToolUseHooks, runPostToolUseHooks } from '../hooks/runner.js';
 
 /**
  * Internal view of the tool-execution context with Phase 6 services
@@ -146,10 +148,20 @@ function validateArgs(
 export class ToolRegistry {
   private tools = new Map<string, ToolRegistration>();
   private auditService?: AuditService;
+  /**
+   * Phase 12: shell hooks to run before / after every tool call.
+   * Set from config at startup + on config change; empty by default.
+   */
+  private hooks: HooksConfig = {};
 
   /** Attach an AuditService for recording tool execution audit events. */
   setAuditService(audit: AuditService): void {
     this.auditService = audit;
+  }
+
+  /** Phase 12: set / replace the global hooks config (from config.hooks). */
+  setHooks(hooks: HooksConfig | undefined): void {
+    this.hooks = hooks ?? {};
   }
 
   /**
@@ -318,6 +330,73 @@ export class ToolRegistry {
       });
     }
 
+    // ── Phase 12: PreToolUse hooks ──────────────────────────
+    // Run shell hooks configured for this tool. Can mutate the
+    // input (hook prints new JSON on stdout) or abort the tool
+    // call entirely (hook exits non-zero). Runs AFTER loop-detector
+    // so aborts from hooks don't poison the detector's ring buffer.
+    let effectiveArgs = args;
+    if (this.hooks.PreToolUse && this.hooks.PreToolUse.length > 0) {
+      const hookSessionId = progressSessionId ?? 'unknown';
+      const hookScopeKey = (context.scopeKey ?? null) as string | null;
+      const hookResult = await runPreToolUseHooks(
+        this.hooks.PreToolUse,
+        name,
+        args,
+        hookSessionId,
+        hookScopeKey,
+      );
+      if (hookResult.abort) {
+        try {
+          await this.auditService?.log({
+            tenantId,
+            userId: context.user?.id,
+            action: 'tool.hook_aborted',
+            resource: name,
+            details: { tool: name, callId, reason: hookResult.abort.error },
+          });
+        } catch { /* non-critical */ }
+        return { error: hookResult.abort.error };
+      }
+      if (hookResult.mutatedInput) {
+        effectiveArgs = hookResult.mutatedInput;
+        // Re-run JSON Schema + semantic validation on the mutated
+        // input so a buggy hook can't slip args past the gates that
+        // protect the executor (e.g. swap a write_file path for a
+        // system file, or pass a non-string where a string is
+        // required). If the mutation fails validation, treat it as
+        // an abort and surface the error to the LLM.
+        const reValidationErrors = validateArgs(effectiveArgs, registration.definition.parameters);
+        if (reValidationErrors.length > 0) {
+          try {
+            await this.auditService?.log({
+              tenantId,
+              userId: context.user?.id,
+              action: 'tool.hook_mutation_invalid',
+              resource: name,
+              details: { tool: name, callId, errors: reValidationErrors },
+            });
+          } catch { /* non-critical */ }
+          return { error: `PreToolUse hook produced invalid args for "${name}": ${reValidationErrors.join('; ')}` };
+        }
+        if (registration.validateInput) {
+          const semanticCheck = registration.validateInput(effectiveArgs);
+          if (!semanticCheck.ok) {
+            try {
+              await this.auditService?.log({
+                tenantId,
+                userId: context.user?.id,
+                action: 'tool.hook_mutation_invalid',
+                resource: name,
+                details: { tool: name, callId, error: semanticCheck.error },
+              });
+            } catch { /* non-critical */ }
+            return { error: `PreToolUse hook produced invalid args for "${name}": ${semanticCheck.error}` };
+          }
+        }
+      }
+    }
+
     // ── Phase 6.5: wrap context.progress for this call ──────
     // Tool authors call `context.progress({ message, fraction, ... })`
     // without knowing their own name or callId. Wrap their callback
@@ -348,7 +427,8 @@ export class ToolRegistry {
     let status = 'success';
 
     try {
-      result = await registration.executor(args, wrappedContext);
+      // Use effectiveArgs (possibly mutated by PreToolUse hooks)
+      result = await registration.executor(effectiveArgs, wrappedContext);
 
       // Check if the result itself indicates an error
       if (typeof result === 'object' && result !== null && 'error' in result) {
@@ -358,6 +438,22 @@ export class ToolRegistry {
       const message = err instanceof Error ? err.message : String(err);
       result = { error: message };
       status = 'error';
+    }
+
+    // ── Phase 12: PostToolUse hooks (fire-and-forget) ──────
+    // Don't block the round on slow post-hooks (auto-format,
+    // notifications, logging). Failures are logged internally.
+    if (this.hooks.PostToolUse && this.hooks.PostToolUse.length > 0) {
+      const hookSessionId = progressSessionId ?? 'unknown';
+      const hookScopeKey = (context.scopeKey ?? null) as string | null;
+      void runPostToolUseHooks(
+        this.hooks.PostToolUse,
+        name,
+        effectiveArgs,
+        result,
+        hookSessionId,
+        hookScopeKey,
+      );
     }
 
     const durationMs = Math.round(performance.now() - start);
