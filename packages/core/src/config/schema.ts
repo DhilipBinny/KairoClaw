@@ -241,7 +241,7 @@ const agentSchema = z.object({
    * every tool's full definition (pre-Phase-8 behaviour). Also
    * overridable via `AGW_DEFER_TOOLS=false` env var.
    */
-  deferToolLoading: z.boolean().default(true),
+  deferToolLoading: z.boolean().default(false),
   thinking: withObjectDefault(thinkingSchema),
   sessionMemory: withObjectDefault(sessionMemorySchema),
   memory: withObjectDefault(memorySchema),

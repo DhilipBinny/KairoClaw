@@ -36,7 +36,7 @@ import { textEnvelope } from '../envelope.js';
  * engine — a tiny scoring function is fine because the tool surface
  * is measured in tens of tools, not thousands.
  */
-function scoreTool(
+export function scoreTool(
   tool: { name: string; description: string; searchHint?: string },
   terms: string[],
   requiredTerms: string[],
