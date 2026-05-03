@@ -174,6 +174,10 @@ export const subagentTools: ToolRegistration[] = [
       // registry hands the freshly-minted task id back to runChild so
       // its live deltas land in the right partialOutput buffer.
       if (runInBackground) {
+        const maxBg = (config as { agent?: { maxBackgroundTasks?: number } }).agent?.maxBackgroundTasks ?? 10;
+        if (backgroundTaskRegistry.runningCount() >= maxBg) {
+          return { error: `Maximum background tasks (${maxBg}) already running. Wait for existing tasks to finish, or stop one with task_stop.` };
+        }
         const scopeKey = (ctx.scopeKey as string | null) ?? null;
         const userId = context.user?.id && context.user.id !== 'anonymous' && context.user.id !== 'system'
           ? context.user.id

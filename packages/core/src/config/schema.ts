@@ -237,6 +237,7 @@ const agentSchema = z.object({
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
+  maxBackgroundTasks: z.number().int().min(1).default(10),
 });
 
 const modelCapabilityEntrySchema = z.object({

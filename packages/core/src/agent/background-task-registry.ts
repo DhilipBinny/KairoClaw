@@ -17,10 +17,10 @@
  * see tasks whose `scopeKey` matches the caller's. Admins see every
  * scope.
  *
- * Persistence: in-memory only. Tasks die with the process. Users of
- * the MVP are expected to ask the agent "what's still running" in a
- * subsequent turn within the same process lifetime. Durable persistence
- * (a `background_tasks` DB table) is a future phase.
+ * Persistence: hybrid. Tasks are tracked in-memory with optional SQLite
+ * durability via `attachDb()`. On restart, running tasks are marked
+ * `orphaned` (their promises are gone) and historical rows are hydrated
+ * back into memory so `list()` / `get()` still work.
  */
 
 import crypto from 'node:crypto';
@@ -184,6 +184,14 @@ export class BackgroundTaskRegistry {
    * abort signal and should return an `AgentResult`. The promise is
    * stored and tracked — callers never need to await it.
    */
+  runningCount(): number {
+    let n = 0;
+    for (const t of this.tasks.values()) {
+      if (t.status === 'running') n++;
+    }
+    return n;
+  }
+
   register(
     scopeKey: string | null,
     task: string,
