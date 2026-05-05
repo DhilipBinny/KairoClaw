@@ -172,6 +172,8 @@ export interface WebFetchToolConfig {
   enabled: boolean;
   /** Maximum characters to return from a fetched page. */
   maxChars: number;
+  /** Hosts (or host:port) that bypass SSRF private-IP protection. */
+  allowPrivate?: string[];
 }
 
 /** Email/SMTP tool settings. */
@@ -254,6 +256,21 @@ export interface SessionMemoryConfig {
   growthTokenThreshold?: number;
 }
 
+/** Memory search composite-scoring tuning knobs. */
+export interface MemoryConfig {
+  /**
+   * Multiplier applied to PROFILE.md chunks during search.
+   * Defaults to 1.5 inside `MemorySystem`. Must be > 0 when set.
+   */
+  profileBoost?: number;
+  /**
+   * Recency half-life in days — chunks decay to half their keyword
+   * score after this many days. Defaults to 14 inside
+   * `MemorySystem`. Must be > 0 when set.
+   */
+  recencyHalfLifeDays?: number;
+}
+
 /** Controls what memory is injected into the system prompt. */
 export interface ContextInjectionConfig {
   /** Max chars of PROFILE.md to inject. Default: 3000. */
@@ -324,12 +341,23 @@ export interface AgentConfig {
   thinking?: AgentThinkingConfig;
   /** Session memory (structured per-session notes) configuration. */
   sessionMemory?: SessionMemoryConfig;
+  /** Memory search composite-scoring tuning knobs. */
+  memory?: MemoryConfig;
   /** Controls what memory is injected into the system prompt. */
   contextInjection?: ContextInjectionConfig;
   /** Model routing configuration. */
   routing?: RoutingConfig;
   /** Show which model responded (per channel). Off by default. */
   showModelIndicator?: ModelIndicatorConfig;
+  /** Whether to defer tool loading (only send core set initially; use tool_search for rest). */
+  deferToolLoading?: boolean;
+  /** Maximum concurrent background tasks allowed. Default: 10. */
+  maxBackgroundTasks?: number;
+  /** Debug settings (admin only). */
+  debug?: {
+    /** Record every LLM call (input + output) to JSONL files in workspace/debug/. */
+    recordPrompt?: boolean;
+  };
 }
 
 /** Model capabilities — auto-fetched from provider APIs + admin overrides. */
@@ -458,6 +486,40 @@ export interface PluginsConfig {
 }
 
 // ──────────────────────────────────────────────
+// Hooks config
+// ──────────────────────────────────────────────
+
+/** A tool hook fires before/after tool execution when the matcher matches. */
+export interface ToolHookConfig {
+  /** Glob pattern to match tool names (e.g. "exec", "write_*"). */
+  matcher: string;
+  /** Shell command to execute. Receives tool args on stdin. */
+  command: string;
+  /** Timeout in ms. */
+  timeoutMs?: number;
+}
+
+/** A session hook fires on session lifecycle events. */
+export interface SessionHookConfig {
+  /** Shell command to execute. */
+  command: string;
+  /** Timeout in ms. */
+  timeoutMs?: number;
+}
+
+/** Hook configuration — shell commands triggered by agent events. */
+export interface HooksConfig {
+  /** Hooks that run before tool execution. */
+  PreToolUse: ToolHookConfig[];
+  /** Hooks that run after tool execution. */
+  PostToolUse: ToolHookConfig[];
+  /** Hooks that run when a new session starts. */
+  SessionStart: SessionHookConfig[];
+  /** Hooks that run after context compaction. */
+  PostCompact: SessionHookConfig[];
+}
+
+// ──────────────────────────────────────────────
 // Top-level config
 // ──────────────────────────────────────────────
 
@@ -482,6 +544,9 @@ export interface GatewayConfig {
 
   /** Plugin configuration (CLI + HTTP). Loaded from plugins.json. */
   plugins?: PluginsConfig;
+
+  /** Hook configuration — shell commands triggered by agent events. */
+  hooks?: HooksConfig;
 
   /** Internal: resolved path to the state directory (~/.agw). Set at runtime. */
   _stateDir?: string;

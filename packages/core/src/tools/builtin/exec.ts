@@ -5,6 +5,25 @@ import { promisify } from 'node:util';
 import type { ToolRegistration } from '../types.js';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
+import { textEnvelope } from '../envelope.js';
+
+/**
+ * Format an exec result (stdout + stderr + exitCode) as a single
+ * readable text block. Sections are omitted when empty so a clean
+ * `echo hello` doesn't waste tokens on empty `stderr:` lines.
+ *
+ * Exported for unit testing.
+ */
+export function formatExecResult(stdout: string, stderr: string, exitCode: number): string {
+  const lines: string[] = [`exit code: ${exitCode}`];
+  if (stdout) {
+    lines.push('', 'stdout:', stdout);
+  }
+  if (stderr) {
+    lines.push('', 'stderr:', stderr);
+  }
+  return lines.join('\n');
+}
 
 const execFileAsync = promisify(execFileCb);
 
@@ -139,6 +158,8 @@ export const execTools: ToolRegistration[] = [
     definition: {
       name: 'exec',
       description: 'Execute a shell command. Returns stdout, stderr, and exit code.',
+      searchHint: 'run shell command bash execute',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -225,21 +246,178 @@ export const execTools: ToolRegistration[] = [
           maxBuffer: 1024 * 1024,
           env: safeEnv,
         });
-        return {
-          stdout: stdout.slice(0, MAX_STDOUT),
-          stderr: stderr.slice(0, MAX_STDERR),
-          exitCode: 0,
-        };
+        return textEnvelope(formatExecResult(
+          stdout.slice(0, MAX_STDOUT),
+          stderr.slice(0, MAX_STDERR),
+          0,
+        ));
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string; message?: string; code?: unknown; status?: number };
-        return {
-          stdout: (err.stdout || '').slice(0, MAX_STDOUT),
-          stderr: (err.stderr || err.message || '').slice(0, MAX_STDERR),
-          exitCode: err.status || (typeof err.code === 'number' ? err.code : 1),
-        };
+        return textEnvelope(formatExecResult(
+          (err.stdout || '').slice(0, MAX_STDOUT),
+          (err.stderr || err.message || '').slice(0, MAX_STDERR),
+          err.status || (typeof err.code === 'number' ? err.code : 1),
+        ));
       }
     },
     source: 'builtin',
     category: 'execute',
+    isDestructive: true,
+    // Exec output can be huge (build logs, test runs) — give it a
+    // generous 128 KB threshold before persistence kicks in. Over that,
+    // the registry offloads to disk and returns a reference so the
+    // agent can read specific portions via read_file if needed.
+    maxResultSizeChars: 128 * 1024,
+    getActivityDescription: (input) => {
+      const cmd = (input as { command?: string })?.command ?? '';
+      return `Running: ${cmd.slice(0, 80)}${cmd.length > 80 ? '…' : ''}`;
+    },
+  },
+  // batch_exec — run multiple commands in parallel
+  {
+    definition: {
+      name: 'batch_exec',
+      searchHint: 'batch parallel multiple commands run execute concurrent',
+      alwaysLoad: false,
+      description:
+        'Run multiple shell commands in parallel and return all results. ' +
+        'Much faster than sequential exec calls when commands are independent. ' +
+        'Each command runs in its own subprocess. Max 10 commands per batch. ' +
+        'Use this when you need to run the same script on multiple inputs, ' +
+        'or gather data from multiple sources at once.',
+      parameters: {
+        type: 'object',
+        properties: {
+          commands: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of shell commands to run in parallel. Max 10.',
+          },
+          workdir: {
+            type: 'string',
+            description: 'Working directory for all commands (optional).',
+          },
+          timeout: {
+            type: 'number',
+            description: 'Timeout in seconds per command (default 30, max 120).',
+          },
+        },
+        required: ['commands'],
+      },
+    },
+    validateInput: (input) => {
+      const args = input as Record<string, unknown>;
+      if (!Array.isArray(args.commands) || args.commands.length === 0) {
+        return { ok: false, error: 'commands must be a non-empty array of strings.' };
+      }
+      if (args.commands.length > 10) {
+        return { ok: false, error: 'Maximum 10 commands per batch.' };
+      }
+      for (const cmd of args.commands) {
+        if (typeof cmd !== 'string' || cmd.trim().length === 0) {
+          return { ok: false, error: 'Each command must be a non-empty string.' };
+        }
+      }
+      return { ok: true };
+    },
+    executor: async (args, context) => {
+      const commands = args.commands as string[];
+      const timeout = Math.min(Math.max(Number(args.timeout) || 30, 1), 120) * 1000;
+
+      const workspace = getWorkspace(context as Record<string, unknown>);
+      const isAdmin = context.user?.role === 'admin';
+      const scopeKey = context.scopeKey;
+      const execMode = isAdmin ? 'unrestricted' : 'sandboxed';
+
+      // Pre-validate all commands BEFORE executing any
+      for (const cmd of commands) {
+        if (cmd.length > 10000) {
+          return { error: `Command too long (max 10000 chars): "${cmd.slice(0, 60)}..."` };
+        }
+        const safety = checkCommandSafety(cmd, execMode);
+        if (safety.action === 'block') {
+          return { error: `Blocked command in batch: "${cmd.slice(0, 100)}". Reason: ${safety.reason}` };
+        }
+        if (safety.action === 'confirm') {
+          return { error: `Command requires confirmation (not supported in batch): "${cmd.slice(0, 100)}". Reason: ${safety.reason}. Use single exec instead.` };
+        }
+        // Non-admin: block cross-scope access
+        if (!isAdmin && scopeKey) {
+          const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
+          if (scopesRef.test(cmd)) {
+            return { error: 'Access denied: cannot access other users\' directories via batch_exec' };
+          }
+        }
+        // Non-admin: block source code access
+        if (!isAdmin) {
+          const appRoot = path.resolve(workspace, '..');
+          if (cmd.includes(path.join(appRoot, 'node_modules')) || cmd.includes(path.join(appRoot, 'packages'))) {
+            return { error: 'Blocked: access to application source code.' };
+          }
+        }
+      }
+
+      // Resolve working directory with scope isolation
+      let defaultCwd = workspace;
+      if (!isAdmin && scopeKey) {
+        defaultCwd = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
+      }
+      const cwd = args.workdir
+        ? scopedSafePath(args.workdir as string, workspace, context)
+        : defaultCwd;
+
+      // Build safe environment (allowlist, not full process.env)
+      const safeEnv: Record<string, string> = {};
+      for (const key of SAFE_ENV_KEYS) {
+        if (process.env[key]) safeEnv[key] = process.env[key]!;
+      }
+
+      const startTime = Date.now();
+      const results = await Promise.allSettled(
+        commands.map(async (cmd) => {
+          try {
+            const { stdout, stderr } = await execFileAsync('/bin/sh', ['-c', cmd], {
+              cwd,
+              timeout,
+              maxBuffer: 1024 * 1024,
+              env: safeEnv,
+            });
+            return { command: cmd, exitCode: 0, stdout: (stdout || '').slice(0, MAX_STDOUT), stderr: (stderr || '').slice(0, MAX_STDERR) };
+          } catch (e: unknown) {
+            const err = e as { stdout?: string; stderr?: string; code?: number; signal?: string; status?: number };
+            return {
+              command: cmd,
+              exitCode: err.status ?? (typeof err.code === 'number' ? err.code : 1),
+              stdout: (err.stdout || '').slice(0, MAX_STDOUT),
+              stderr: (err.stderr || '').slice(0, MAX_STDERR),
+              error: err.signal ? `killed by ${err.signal}` : undefined,
+            };
+          }
+        }),
+      );
+
+      const elapsed = Date.now() - startTime;
+      const output: string[] = [`Batch: ${commands.length} commands in ${elapsed}ms (parallel)\n`];
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        output.push(`--- [${i + 1}] ${commands[i].slice(0, 80)} ---`);
+        if (r.status === 'fulfilled') {
+          output.push(formatExecResult(r.value.stdout, r.value.stderr, r.value.exitCode));
+        } else {
+          output.push(`error: ${r.reason}`);
+        }
+        output.push('');
+      }
+
+      return textEnvelope(output.join('\n'));
+    },
+    source: 'builtin',
+    category: 'execute',
+    isDestructive: true,
+    concurrencySafe: true,
+    getActivityDescription: (input) => {
+      const cmds = (input as { commands?: string[] })?.commands ?? [];
+      return `Batch: ${cmds.length} commands in parallel`;
+    },
   },
 ];

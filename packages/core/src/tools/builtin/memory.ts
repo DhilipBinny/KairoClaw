@@ -4,6 +4,7 @@ import type { ToolRegistration } from '../types.js';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 import type { MemorySystem } from '../../memory/index.js';
+import { textEnvelope } from '../envelope.js';
 
 /**
  * Shared MemorySystem instance — set during bootstrap via setMemorySystem().
@@ -19,6 +20,8 @@ export const memoryTools: ToolRegistration[] = [
     definition: {
       name: 'memory_search',
       description: 'Search through memory files (memory/PROFILE.md and memory/sessions/*.md) using semantic keyword search. Returns top-N matching snippets with file path, line range, and relevance score.',
+      searchHint: 'memory recall history profile search',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -34,7 +37,7 @@ export const memoryTools: ToolRegistration[] = [
       const topN = (args.topN as number) || 5;
 
       if (!memorySystem) {
-        return { results: [], error: 'Memory system not initialized' };
+        return { error: 'Memory system not initialized' };
       }
 
       // Scope isolation: non-admin users only see own scope + global memory
@@ -44,21 +47,31 @@ export const memoryTools: ToolRegistration[] = [
       const results = await memorySystem.search(query, topN, scopeFilter);
       const stats = await memorySystem.getStats();
 
-      return {
-        results: results.map((r) => ({
-          filePath: r.filePath,
-          lineStart: r.lineStart,
-          lineEnd: r.lineEnd,
-          content: r.content,
-          score: r.score,
-        })),
-        query,
-        totalChunks: stats.totalChunks,
-      };
+      if (results.length === 0) {
+        return textEnvelope(`Query: ${query}\nTotal chunks indexed: ${stats.totalChunks}\n\nNo matches.`);
+      }
+
+      const lines: string[] = [
+        `Query: ${query}`,
+        `Total chunks indexed: ${stats.totalChunks}`,
+        `Top ${results.length} match${results.length === 1 ? '' : 'es'}:`,
+        '',
+      ];
+      for (const r of results) {
+        lines.push(`[${r.filePath}:${r.lineStart}-${r.lineEnd}] score=${r.score.toFixed(2)}`);
+        lines.push(r.content);
+        lines.push('');
+      }
+      return textEnvelope(lines.join('\n'));
     },
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    getActivityDescription: (input) => {
+      const q = (input as { query?: string })?.query ?? '';
+      return `Memory search: ${q.slice(0, 60)}`;
+    },
   },
   {
     definition: {
@@ -77,7 +90,9 @@ export const memoryTools: ToolRegistration[] = [
     executor: async (args, context) => {
       const workspace = getWorkspace(context as Record<string, unknown>);
       const filePath = scopedSafePath(args.path as string, workspace, context);
-      if (!fs.existsSync(filePath)) return { text: '', path: args.path, note: 'File does not exist yet' };
+      if (!fs.existsSync(filePath)) {
+        return textEnvelope(`Memory file: ${args.path}\n[File does not exist yet]`);
+      }
       let content = fs.readFileSync(filePath, 'utf8');
       if (args.from || args.lines) {
         const allLines = content.split('\n');
@@ -85,11 +100,16 @@ export const memoryTools: ToolRegistration[] = [
         const count = (args.lines as number) || allLines.length;
         content = allLines.slice(start, start + count).join('\n');
       }
-      return { text: content, path: args.path };
+      return textEnvelope(`Memory file: ${args.path}\n\n${content}`);
     },
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    getActivityDescription: (input) => {
+      const p = (input as { path?: string })?.path ?? '<unknown>';
+      return `Reading memory: ${p}`;
+    },
   },
   {
     definition: {
@@ -114,16 +134,24 @@ export const memoryTools: ToolRegistration[] = [
         return { error: `Unsupported image format: ${ext}. Supported: ${supported.join(', ')}` };
       }
       const stats = fs.statSync(filePath);
-      return {
-        path: args.path,
-        size: stats.size,
-        format: ext,
-        prompt: (args.prompt as string) || 'describe this image',
-        note: 'Image file found. Vision analysis requires a multimodal model. File is available for reference.',
-      };
+      const prompt = (args.prompt as string) || 'describe this image';
+      const lines = [
+        `Image: ${args.path}`,
+        `Size: ${stats.size} bytes`,
+        `Format: ${ext}`,
+        `Prompt: ${prompt}`,
+        '',
+        'Image file found. Vision analysis requires a multimodal model. Attach the image to a user message for actual visual understanding.',
+      ];
+      return textEnvelope(lines.join('\n'));
     },
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    getActivityDescription: (input) => {
+      const p = (input as { path?: string })?.path ?? '<unknown>';
+      return `Inspecting image: ${p}`;
+    },
   },
 ];

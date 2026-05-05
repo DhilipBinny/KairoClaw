@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DatabaseAdapter } from '../db/index.js';
+import type { GatewayConfig } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('memory');
@@ -15,6 +16,47 @@ const log = createModuleLogger('memory');
 const CHUNK_SIZE = 400; // tokens (~1600 chars)
 const CHUNK_OVERLAP = 80; // tokens (~320 chars)
 const CHARS_PER_TOKEN = 4;
+
+// ── Composite scoring defaults ──────────────────
+// Tunable via config.agent.memory.{profileBoost,recencyHalfLifeDays}
+// — defaults are conservative.
+//
+// Tiering is path-based: PROFILE.md (long-term notes) gets a boost
+// over session notes / other .md files. PINNED.md was considered
+// during the design but the feature that creates them doesn't exist
+// in this codebase yet, so we don't ship a hardcoded boost for a
+// path that's never written. If/when explicit pinning lands, the
+// tiering function gets a new branch and a new config knob.
+//
+// Type-decay tags ([fact]/[belief]/[experience]) were also designed
+// but the memory extraction pipeline never produces those tags
+// today, so the multiplier was always 1.0 in practice. The hook for
+// it has been removed; reintroduce alongside the extraction-prompt
+// change that actually emits the tags.
+const DEFAULT_PROFILE_BOOST = 1.5;
+const DEFAULT_RECENCY_HALF_LIFE_DAYS = 14;
+const TIER_BASE = 1.0;
+
+/** Determine tier multiplier from file path. */
+function getTierMultiplier(filePath: string, profileBoost: number): number {
+  if (filePath.endsWith('PROFILE.md')) return profileBoost;
+  return TIER_BASE;
+}
+
+/**
+ * Compute recency score: 1.0 for now, decays by half every
+ * `halfLifeDays`. Returns 1.0 (no decay applied) when `updatedAt` is
+ * missing, malformed, or in the future — never NaN.
+ */
+function getRecencyScore(updatedAt: string | null | undefined, halfLifeDays: number): number {
+  if (!updatedAt) return 1.0;
+  const t = new Date(updatedAt).getTime();
+  if (!Number.isFinite(t)) return 1.0;
+  const ageMs = Date.now() - t;
+  if (ageMs < 0 || !Number.isFinite(ageMs)) return 1.0;
+  const ageDays = ageMs / (24 * 60 * 60 * 1000);
+  return Math.pow(0.5, ageDays / halfLifeDays);
+}
 
 export interface MemoryChunk {
   id: number;
@@ -47,10 +89,21 @@ export class MemorySystem {
   private watchers: fs.FSWatcher[] = [];
   private initialized = false;
   private _debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private profileBoost: number = DEFAULT_PROFILE_BOOST;
+  private recencyHalfLifeDays: number = DEFAULT_RECENCY_HALF_LIFE_DAYS;
 
-  constructor(db: DatabaseAdapter, workspace: string) {
+  constructor(db: DatabaseAdapter, workspace: string, config?: GatewayConfig) {
     this.db = db;
     this.workspace = workspace;
+    // Read scoring tuning knobs from config when supplied. Both knobs
+    // tolerate `undefined` and fall back to the conservative defaults.
+    const memCfg = config?.agent?.memory;
+    if (memCfg?.profileBoost !== undefined && memCfg.profileBoost > 0) {
+      this.profileBoost = memCfg.profileBoost;
+    }
+    if (memCfg?.recencyHalfLifeDays !== undefined && memCfg.recencyHalfLifeDays > 0) {
+      this.recencyHalfLifeDays = memCfg.recencyHalfLifeDays;
+    }
   }
 
   /**
@@ -107,7 +160,7 @@ export class MemorySystem {
 
       const scored = allChunks.map((chunk) => {
         const contentLower = chunk.content.toLowerCase();
-        let score = 0;
+        let keywordScore = 0;
 
         for (const term of queryTerms) {
           // Count occurrences
@@ -117,17 +170,25 @@ export class MemorySystem {
             count++;
             idx += term.length;
           }
-          score += count;
+          keywordScore += count;
 
           // Bonus for term in first line (likely a heading)
           const firstLine = contentLower.split('\n')[0];
-          if (firstLine.includes(term)) score += 2;
+          if (firstLine.includes(term)) keywordScore += 2;
         }
 
         // Bonus for exact phrase match
         if (contentLower.includes(queryLower)) {
-          score += 5;
+          keywordScore += 5;
         }
+
+        // Composite scoring: keyword * tier * (recency floored at 0.5).
+        // Type-decay tags (fact / belief / experience) are not produced by
+        // the current extraction pipeline, so the corresponding multiplier
+        // was always 1.0 — dropped to avoid dead code paths.
+        const tier = getTierMultiplier(chunk.file_path, this.profileBoost);
+        const recency = getRecencyScore(chunk.updated_at, this.recencyHalfLifeDays);
+        const score = keywordScore * tier * (0.5 + 0.5 * recency);
 
         return { chunk, score };
       });

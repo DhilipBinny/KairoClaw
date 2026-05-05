@@ -152,6 +152,11 @@ export async function getSessionToolCalls(sessionId: string): Promise<{ toolCall
   return request(`/sessions/${sessionId}/tool-calls`);
 }
 
+export async function getDebugPrompt(sessionId: string, messageId: number): Promise<{ entries: unknown[] }> {
+  const params = new URLSearchParams({ messageId: String(messageId) });
+  return request(`/sessions/${sessionId}/debug-prompt?${params}`);
+}
+
 export async function deleteSession(id: string): Promise<{ success: boolean }> {
   return request(`/sessions/${id}`, { method: 'DELETE' });
 }
@@ -671,4 +676,29 @@ export async function updateMyCron(id: string, updates: Record<string, unknown>)
 
 export async function deleteMyCron(id: string): Promise<{ success: boolean }> {
   return request(`/my/cron/${id}`, { method: 'DELETE' });
+}
+
+// ── Admin: Background Tasks (Phase 10 TB-4) ──────────────
+export interface BackgroundTaskRow {
+  id: string;
+  scopeKey: string | null;
+  status: 'running' | 'completed' | 'error' | 'killed' | 'orphaned';
+  startedAt: number;
+  completedAt: number | null;
+  elapsedMs: number;
+  task: string;
+  resultPreview: string | null;
+  error: string | null;
+}
+
+export async function getBackgroundTasks(): Promise<{ count: number; tasks: BackgroundTaskRow[] }> {
+  return request('/admin/background-tasks');
+}
+
+export async function stopBackgroundTask(id: string): Promise<{ ok?: boolean; error?: string; reason?: string }> {
+  return request(`/admin/background-tasks/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+}
+
+export async function clearCompletedTasks(): Promise<{ ok: boolean; cleared: number }> {
+  return request('/admin/background-tasks/clear', { method: 'POST', body: {} });
 }

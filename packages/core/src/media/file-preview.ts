@@ -43,6 +43,21 @@ export async function generateFilePreview(
   const isText = TEXT_EXTENSIONS.has(ext);
   const sizeStr = formatSize(size);
 
+  // PDF files — extract text via pdftotext
+  if (ext === '.pdf') {
+    try {
+      const { extractPdfText } = await import('../tools/builtin/pdf.js');
+      const result = await extractPdfText(filePath, {});
+      if ('error' in result) throw new Error(result.error);
+      const preview = result.text.length > 5000
+        ? result.text.slice(0, 5000) + '\n... (truncated)'
+        : result.text;
+      return `[File received: ${fileName}]\nType: PDF | Size: ${sizeStr} | Pages: ${result.totalPages} | Extracted via ${result.method}\n\n${preview}\n\nUse \`read_file\` with pages parameter to examine specific pages.`;
+    } catch {
+      return `[File received: ${fileName}]\nType: PDF | Size: ${sizeStr}\nPDF text extraction failed. Use \`read_file\` with the file path to try reading it.`;
+    }
+  }
+
   // Binary files — always metadata only
   if (!isText) {
     return `[File received: ${fileName}]\nType: ${ext || 'unknown'} | Size: ${sizeStr}\nFile saved to disk. Use \`read_file\` to examine contents if it's a readable format.`;

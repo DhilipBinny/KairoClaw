@@ -8,6 +8,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 import type {
   InboundMessage,
   AgentCallbacks,
@@ -52,7 +53,92 @@ import { classifyError, logClassifiedError } from '../providers/errors.js';
 /** Sessions currently running memory extraction — prevents concurrent extraction races. */
 const _activeExtractions = new Set<string>();
 
+// ─── Debug prompt logger ─────────────────────────────────────
+
+/** Strip base64 image data from messages to keep log files small. */
+export function sanitizeMessagesForLog(messages: Message[]): unknown[] {
+  return messages.map(m => {
+    if (!Array.isArray(m.content)) return m;
+    return {
+      ...m,
+      content: (m.content as MessageContentPart[]).map(p =>
+        p.type === 'image'
+          ? { type: 'image', source: { type: 'base64', media_type: (p.source as { media_type?: string })?.media_type, data: '[omitted]' } }
+          : p,
+      ),
+    };
+  });
+}
+
+/** Append one LLM round entry to the daily JSONL debug log. */
+export function appendDebugLog(workspace: string, entry: Record<string, unknown>): void {
+  try {
+    const dir = path.resolve(workspace, 'debug', 'llm-requests');
+    fs.mkdirSync(dir, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const file = path.join(dir, `${date}.jsonl`);
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n', 'utf8');
+  } catch {
+    // Non-critical — never crash the agent loop for a debug write failure
+  }
+}
+
 const log = createModuleLogger('llm');
+
+// ─── Phase 6: tool-result rendering ──────────────────────────
+
+/**
+ * Render a tool result (legacy string, legacy object, or Phase 6
+ * content-block envelope) into a single string suitable for the LLM's
+ * tool-result message content.
+ *
+ * - `string`          → as-is
+ * - `{content: [...]}` envelope → joined text blocks, with non-text
+ *    blocks (image / resource_link / persisted_reference) rendered as
+ *    compact summaries so the LLM still sees what was produced
+ * - Any other object → `JSON.stringify` (legacy fallback — works for
+ *    `{error: "..."}`, `{stdout, stderr}`, structured tool outputs)
+ */
+export function renderToolResultForLLM(result: unknown): string {
+  if (typeof result === 'string') return result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return JSON.stringify(result);
+  }
+
+  const obj = result as Record<string, unknown>;
+  const content = obj.content;
+  // Envelope detection: content is an array of blocks with a `type` tag
+  if (!Array.isArray(content)) {
+    return JSON.stringify(result);
+  }
+
+  const parts: string[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as Record<string, unknown>;
+    const type = b.type;
+    if (type === 'text' && typeof b.text === 'string') {
+      parts.push(b.text);
+    } else if (type === 'image' && b.source && typeof b.source === 'object') {
+      const src = b.source as { media_type?: string };
+      parts.push(`[${src.media_type || 'image'} image]`);
+    } else if (type === 'resource_link') {
+      parts.push(`[link: ${b.title || b.uri || 'resource'}]`);
+    } else if (type === 'persisted_reference') {
+      const p = b.preview ?? '';
+      const size = b.sizeBytes ?? 0;
+      const pth = b.path ?? '';
+      parts.push(`[persisted ${size} bytes at ${pth}]\n${p}`);
+    } else {
+      // Unknown block type — fall back to JSON
+      parts.push(JSON.stringify(block));
+    }
+  }
+
+  // Fallback: if every block was unparseable, return the raw JSON
+  if (parts.length === 0) return JSON.stringify(result);
+  return parts.join('\n');
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -69,6 +155,17 @@ export interface AgentContext {
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   /** Tool definitions available for this turn. */
   tools?: ToolDefinition[];
+  /**
+   * Phase 8: optional callback to re-fetch the session's current tool
+   * surface. When deferred tool loading is enabled, `tool_search` can
+   * add more tools to the session's loaded set mid-turn; the agent
+   * loop calls this at the start of each LLM round so newly loaded
+   * tools are visible on the next provider call.
+   *
+   * When omitted (deferred loading disabled or ephemeral sub-agent),
+   * the loop uses the initial `tools` list for all rounds.
+   */
+  refreshTools?: () => Promise<ToolDefinition[]>;
   /** Tool executor function. */
   executeTool?: (
     name: string,
@@ -103,10 +200,13 @@ export interface AgentRoundCallbacks extends AgentCallbacks {
  * @returns AgentResult with the assistant's text, usage, and metadata.
  */
 export async function runAgent(
-  inbound: InboundMessage,
+  inboundParam: InboundMessage,
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
+  // `inbound` is made mutable locally so Phase 12 SessionStart hooks
+  // can prepend synthetic context to the user's first message.
+  let inbound = inboundParam;
   const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
@@ -193,14 +293,41 @@ export async function runAgent(
   // ── Load conversation history (empty for ephemeral) ─────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
 
+  // ── Phase 12 TB-2: SessionStart hooks ─────────────────────
+  // Fire once per session on the first turn (when there's no prior
+  // history). Hook stdout is prepended to the inbound user message
+  // as `[hook output] ...` synthetic context so the agent sees it
+  // without us having to fabricate a separate user turn.
+  // Skips for ephemeral (sub-agent) sessions — hooks are user-facing.
+  if (!ephemeral && historyRows.length === 0) {
+    const hooks = (config as unknown as { hooks?: import('../hooks/runner.js').HooksConfig }).hooks;
+    const ssHooks = hooks?.SessionStart;
+    if (ssHooks && ssHooks.length > 0) {
+      try {
+        const { runSessionStartHooks } = await import('../hooks/runner.js');
+        const outputs = await runSessionStartHooks(ssHooks, session.id, context.scopeKey ?? null);
+        if (outputs.length > 0) {
+          const prefix = outputs.map((o) => `[hook output]\n${o}`).join('\n\n');
+          inbound = { ...inbound, text: `${prefix}\n\n---\n\n${inbound.text}` };
+          reqLog.info({ hookCount: ssHooks.length, outputCount: outputs.length }, 'SessionStart hooks injected');
+        }
+      } catch (e: unknown) {
+        reqLog.warn({ err: (e as Error).message }, 'SessionStart hook runner crashed');
+      }
+    }
+  }
+
   // ── Build system prompt ─────────────────────────────────
   // Skip session memory injection when a [Context Summary] compaction message exists —
   // the summary already contains session memory content; injecting both wastes tokens.
   const hasContextSummary = historyRows.some(
     r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
   );
-  const tools = context.tools ?? [];
-  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
+  // Phase 8: `tools` and `systemPrompt` are mutable because
+  // `context.refreshTools` can expand the set mid-turn via tool_search.
+  // Both get rebuilt at the top of each LLM round when the set grows.
+  let tools = context.tools ?? [];
+  let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary);
   const history: Message[] = historyRows.map(rowToMessage);
 
   // ── Build the user message content (text or multimodal) ──
@@ -246,6 +373,26 @@ export async function runAgent(
     }
   }
 
+  // ── Save images to disk for session viewer thumbnails ──
+  const savedImagePaths: string[] = [];
+  if (inbound.images && inbound.images.length > 0) {
+    const fsMod = await import('node:fs');
+    const pathMod = await import('node:path');
+    const workspace = config.agent.workspace;
+    const userId = (context.user?.id || 'anonymous').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const mediaDir = pathMod.default.join(workspace, 'scopes', userId, 'media');
+    fsMod.default.mkdirSync(mediaDir, { recursive: true });
+    for (const img of inbound.images) {
+      const ext = img.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const filePath = pathMod.default.join(mediaDir, filename);
+      try {
+        fsMod.default.writeFileSync(filePath, Buffer.from(img.data, 'base64'));
+        savedImagePaths.push(filename);
+      } catch { /* non-fatal */ }
+    }
+  }
+
   // ── Persist inbound user message (skip for ephemeral) ──
   const persistText = typeof userContent === 'string' ? userContent : inbound.text;
   const userMsgResult = messageRepo ? await messageRepo.create({
@@ -257,6 +404,7 @@ export async function runAgent(
       channel: inbound.channel,
       sender: inbound.senderName,
       ...(inbound.images && inbound.images.length > 0 ? { imageCount: inbound.images.length } : {}),
+      ...(savedImagePaths.length > 0 ? { images: savedImagePaths } : {}),
     }),
   }) : null;
   // ── Build thinking config if enabled + model supports it ──
@@ -280,6 +428,30 @@ export async function runAgent(
     round++;
     if (onRoundStart) onRoundStart(round, maxToolRounds);
 
+    // ── Phase 8: refresh tools mid-turn ─────────────────────
+    // If the session has loaded new tools via tool_search since the
+    // last round (or since createRunner built the initial set), pick
+    // them up before the next provider call. A size change is enough
+    // to detect — tools can only be added, never removed mid-turn.
+    if (context.refreshTools) {
+      try {
+        const fresh = await context.refreshTools();
+        if (fresh.length !== tools.length) {
+          tools = fresh;
+          systemPrompt = buildSystemPrompt(
+            config,
+            tools,
+            context.scopeKey,
+            inbound.channel,
+            session.id,
+            hasContextSummary,
+          );
+        }
+      } catch {
+        /* ignore — keep existing tools if refresh fails */
+      }
+    }
+
     // Log detailed request info for debugging
     const contentLen = (c: string | MessageContentPart[]) =>
       typeof c === 'string' ? c.length : JSON.stringify(c).length;
@@ -291,6 +463,9 @@ export async function runAgent(
     }, 'Agent round started');
 
     // ── Call LLM ──────────────────────────────────────────
+    const debugEnabled = !ephemeral && (config.agent as unknown as { debug?: { recordPrompt?: boolean } })?.debug?.recordPrompt === true;
+    const debugTurnIndex = (session.turns ?? 0) + 1;
+
     let response: ProviderResponse;
     const llmStart = Date.now();
     try {
@@ -387,6 +562,27 @@ export async function runAgent(
     }
 
     const llmLatencyMs = Date.now() - llmStart;
+
+    // ── Debug JSONL logging ───────────────────────────────
+    if (debugEnabled) {
+      appendDebugLog(config.agent.workspace, {
+        ts: new Date().toISOString(),
+        sessionId: session.id,
+        messageId: userMsgResult?.id ?? null,
+        turn: debugTurnIndex,
+        round,
+        model,
+        systemPrompt: { cached: systemPrompt.cached, dynamic: systemPrompt.dynamic },
+        messages: sanitizeMessagesForLog(messages),
+        response: {
+          text: response.text || null,
+          toolCalls: response.toolCalls ?? null,
+          usage: response.usage ?? null,
+          latencyMs: llmLatencyMs,
+        },
+      });
+    }
+
     const inTok = response.usage?.inputTokens ?? 0;
     const outTok = response.usage?.outputTokens ?? 0;
     totalInputTokens += inTok;
@@ -568,7 +764,7 @@ export async function runAgent(
         }
       }
 
-      const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+      const resultStr = renderToolResultForLLM(result);
       reqLog.info({
         tool: p.toolName,
         resultPreview: resultStr.slice(0, 200),

@@ -77,6 +77,21 @@ const webSearchToolSchema = z.object({
 const webFetchToolSchema = z.object({
   enabled: z.boolean().default(true),
   maxChars: z.number().int().min(0).default(50000),
+  /**
+   * Phase 12: hosts (or host:port) that bypass SSRF protection.
+   * Typically used for local dev servers — e.g.
+   *   allowPrivate: ["localhost:3000", "127.0.0.1:5173"]
+   * so the agent can fetch its own running dev server without being
+   * blocked by the private-IP guard. Leave empty (the default) for
+   * the full SSRF lockdown.
+   *
+   * ⚠️ This allowlist is GLOBAL — it applies to every user, not just
+   * admins. Once `localhost:3000` is in the list, any non-admin user
+   * (telegram, whatsapp, web) can also fetch it via web_fetch. Only
+   * add hosts you are willing to expose to every channel and every
+   * user that has access to web_fetch on this server.
+   */
+  allowPrivate: z.array(z.string()).default([]),
 });
 
 const emailToolSchema = z.object({
@@ -168,6 +183,21 @@ const sessionMemorySchema = z.object({
   growthTokenThreshold: z.number().int().min(0).optional(),
 });
 
+/**
+ * Tuning knobs for the memory_search composite scorer.
+ * - `profileBoost`: PROFILE.md chunks are multiplied by this score.
+ *   Default 1.5 (50% boost over session notes). Must be > 0.
+ * - `recencyHalfLifeDays`: chunks decay to half their keyword score
+ *   after this many days. Default 14 days. Must be > 0.
+ *
+ * Both are optional — omit to use the defaults baked into
+ * `MemorySystem`.
+ */
+const memorySchema = z.object({
+  profileBoost: z.number().positive().optional(),
+  recencyHalfLifeDays: z.number().positive().optional(),
+});
+
 const contextInjectionSchema = z.object({
   profileMaxChars: z.number().int().min(0).optional(),
   sessionMemoryMaxChars: z.number().int().min(0).optional(),
@@ -194,6 +224,10 @@ const modelIndicatorSchema = z.object({
   web: modelIndicatorVisibility,
 });
 
+const debugSchema = z.object({
+  recordPrompt: z.boolean().default(false),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant').transform(v => v.replace(/[^\w \-'.]/g, '').slice(0, 50)),
   timezone: z.string().default('UTC').transform((tz) => {
@@ -204,11 +238,25 @@ const agentSchema = z.object({
   compactionThreshold: z.number().min(0).max(1).default(0.75),
   softCompactionThreshold: z.number().min(0).max(1).default(0.50),
   keepRecentMessages: z.number().int().min(0).default(10),
+  /**
+   * Phase 8: deferred tool loading. When true (the default), the
+   * initial tool surface shown to the LLM is just the `alwaysLoad`
+   * core set; every other tool is hidden until the agent calls
+   * `tool_search` to load it for the current session. This cuts
+   * per-turn prompt-token cost substantially once the tool surface
+   * grows past a dozen or so tools. Set to false to always send
+   * every tool's full definition (pre-Phase-8 behaviour). Also
+   * overridable via `AGW_DEFER_TOOLS=false` env var.
+   */
+  deferToolLoading: z.boolean().default(false),
   thinking: withObjectDefault(thinkingSchema),
   sessionMemory: withObjectDefault(sessionMemorySchema),
+  memory: withObjectDefault(memorySchema),
   contextInjection: withObjectDefault(contextInjectionSchema),
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
+  maxBackgroundTasks: z.number().int().min(1).default(10),
+  debug: withObjectDefault(debugSchema),
 });
 
 const modelCapabilityEntrySchema = z.object({
@@ -315,6 +363,23 @@ export const pluginsSchema = z.object({
   _seededDefaults: z.array(z.string()).optional(),
 });
 
+// ── Phase 12 hooks ───────────────────────────────────────
+const toolHookSchema = z.object({
+  matcher: z.string(),
+  command: z.string(),
+  timeoutMs: z.number().int().min(1).optional(),
+});
+const sessionHookSchema = z.object({
+  command: z.string(),
+  timeoutMs: z.number().int().min(1).optional(),
+});
+const hooksSchema = z.object({
+  PreToolUse: z.array(toolHookSchema).default([]),
+  PostToolUse: z.array(toolHookSchema).default([]),
+  SessionStart: z.array(sessionHookSchema).default([]),
+  PostCompact: z.array(sessionHookSchema).default([]),
+});
+
 export const configSchema = z.object({
   gateway: withObjectDefault(gatewayNetworkSchema),
   providers: withObjectDefault(providersSchema),
@@ -325,6 +390,7 @@ export const configSchema = z.object({
   agent: withObjectDefault(agentSchema),
   models: withObjectDefault(modelsCatalogSchema),
   mcp: withObjectDefault(mcpSectionSchema),
+  hooks: withObjectDefault(hooksSchema),
 }).passthrough();
 
 // ──────────────────────────────────────────────
@@ -429,6 +495,7 @@ export const configDefaults: GatewayConfig = {
       showThinking: { web: true, telegram: false, whatsapp: false },
     },
     showModelIndicator: { telegram: 'off', whatsapp: 'off', web: 'off' },
+    debug: { recordPrompt: false },
   },
   models: {
     capabilities: {},

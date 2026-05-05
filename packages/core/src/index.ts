@@ -23,6 +23,12 @@ import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
+import { FileStateTracker } from './agent/file-state.js';
+import { ProgressBus } from './agent/progress-bus.js';
+import { backgroundTaskRegistry } from './agent/background-task-registry.js';
+import { ResultBudget } from './tools/result-budget.js';
+import { LoopDetector } from './tools/loop-detector.js';
+import { ResultStorage } from './tools/result-storage.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
@@ -45,6 +51,8 @@ import { registerSessionRoutes } from './routes/sessions.js';
 import { registerConfigRoutes } from './routes/config.js';
 import { registerUsageRoutes } from './routes/usage.js';
 import { registerLogRoutes } from './routes/logs.js';
+import { registerProgressRoutes } from './routes/progress.js';
+import { registerBackgroundTaskRoutes } from './routes/background-tasks.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
@@ -237,6 +245,10 @@ async function main(): Promise<void> {
   // 7. Initialize tool registry with built-in tools (config-aware filtering)
   const toolRegistry = new ToolRegistry();
   toolRegistry.setAuditService(auditService);
+  // Phase 12: load PreToolUse / PostToolUse / SessionStart / PostCompact
+  // hooks from config. setHooks() can be called again on config reload
+  // for hot-reload support; for now it's a startup-only application.
+  toolRegistry.setHooks((config as { hooks?: unknown }).hooks as Parameters<typeof toolRegistry.setHooks>[0]);
   const toolEnabledMap: Record<string, boolean> = {
     exec: config.tools?.exec?.enabled !== false,
     web_search: config.tools?.webSearch?.enabled !== false,
@@ -263,6 +275,20 @@ async function main(): Promise<void> {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
 
+  // Phase 6.5: process-wide progress bus for live SSE streaming.
+  // Tools publish tool.start / tool.progress / tool.complete / tool.error
+  // events here; the SSE endpoint at GET /api/v1/sessions/:id/progress
+  // subscribes per-session and streams to the admin UI.
+  const progressBus = new ProgressBus();
+
+  // Phase 10 — wire the in-memory background task registry to its
+  // durable SQLite table. Surviving `running` rows from the previous
+  // process are marked `orphaned` so they stay visible in the admin
+  // UI without trying to resume their (now-dead) promises. Tasks
+  // older than 7 days are auto-purged on startup.
+  await backgroundTaskRegistry.attachDb(db);
+  await backgroundTaskRegistry.purgeOlderThan(7);
+
   // 7b. Migrate old channel-based scopes to user UUID scopes (one-time)
   try {
     const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
@@ -284,7 +310,7 @@ async function main(): Promise<void> {
   }
 
   // 7c. Initialize memory system
-  const memorySystem = new MemorySystem(db, config.agent.workspace);
+  const memorySystem = new MemorySystem(db, config.agent.workspace, config);
   await memorySystem.init();
   setMemorySystem(memorySystem);
 
@@ -394,6 +420,50 @@ async function main(): Promise<void> {
       userId: inbound.userId,
     });
 
+    // ── Phase 6 per-turn services ──────────────────────────
+    // One instance per createRunner invocation (= one inbound message =
+    // one user turn). Lifetime: until this function's returned Promise
+    // settles. Threaded into tool context via enrichedCtx below.
+    const fileState = new FileStateTracker();
+    const resultBudget = new ResultBudget();
+    const loopDetector = new LoopDetector();
+    const resultStorage = new ResultStorage({
+      workspaceDir: config.agent.workspace,
+      scopeKey,
+      sessionId: sessionRow.id,
+    });
+
+    // ── Phase 8: deferred tool loading ─────────────────────
+    // When enabled (default), the initial prompt only shows tools
+    // marked `alwaysLoad: true`. Everything else is discoverable via
+    // `tool_search`, which loads tools into this session's loaded
+    // set. The agent loop's `refreshTools` callback picks up
+    // newly-loaded tools between rounds. Set `agent.deferToolLoading
+    // = false` in config or `AGW_DEFER_TOOLS=false` in env to
+    // disable and send every tool on every turn (pre-Phase-8 shape).
+    const deferEnvDisabled = process.env.AGW_DEFER_TOOLS === 'false';
+    const deferToolLoading =
+      !deferEnvDisabled &&
+      ((config.agent as unknown as { deferToolLoading?: boolean })?.deferToolLoading !== false);
+
+    const effectiveUserRole = resolvedUser?.role
+      || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user');
+    const effectiveElevated = !!resolvedUser?.elevated;
+    const toolOpts = {
+      userRole: effectiveUserRole,
+      db,
+      tenantId,
+      elevated: effectiveElevated,
+    };
+
+    const initialTools = deferToolLoading
+      ? await toolRegistry.getAlwaysLoadDefinitions(toolOpts)
+      : await toolRegistry.getDefinitions(toolOpts);
+
+    const refreshTools = deferToolLoading
+      ? () => toolRegistry.getDefinitionsForSession(sessionRow.id, toolOpts)
+      : undefined;
+
     return runAgent(inbound, callbacks || {}, {
       db,
       config,
@@ -412,13 +482,8 @@ async function main(): Promise<void> {
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       isProviderAvailable: (prefix) => providerRegistry.hasProvider(prefix),
-      tools: await toolRegistry.getDefinitions({
-        userRole: resolvedUser?.role
-          || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user'),
-        db,
-        tenantId,
-        elevated: !!resolvedUser?.elevated,
-      }),
+      tools: initialTools,
+      refreshTools,
       executeTool: async (name, args, ctx) => {
         // Inject shared services + sub-agent context into tool executor
         const enrichedCtx = {
@@ -436,9 +501,31 @@ async function main(): Promise<void> {
           executeTool: (toolName: string, toolArgs: Record<string, unknown>, toolCtx: any) => {
             return toolRegistry.execute(toolName, toolArgs, { ...toolCtx, ...enrichedCtx } as any);
           },
+          // Phase 8: tool_search needs direct registry access to query
+          // the full tool surface (including deferred tools) and mutate
+          // the session's loaded set via loadForSession().
+          toolRegistry,
           subagentDepth: 0,
           scopeKey,
           secretsStore,
+          // Phase 6 per-turn services (see FileStateTracker / ResultBudget /
+          // LoopDetector / ResultStorage). Passed through so the registry's
+          // execute() can read them for loop detection + byte accounting;
+          // individual tools opt in via context.fileState / context.resultBudget.
+          fileState,
+          resultBudget,
+          loopDetector,
+          resultStorage,
+          // Phase 6.5: live progress bus (process-wide singleton). The
+          // registry wraps context.progress per-call so tool authors can
+          // emit custom in-flight events without knowing their own callId,
+          // and publishes tool.start / tool.complete automatically.
+          progressBus,
+          // Phase 10: process-lifetime background task registry. Tools
+          // read via ctx.backgroundTasks; the spawn_agent / task_*
+          // builtins fall back to the exported singleton when it's
+          // missing, but threading it through keeps tests swappable.
+          backgroundTasks: backgroundTaskRegistry,
           cronScheduler: sharedServices.cronScheduler,
           browserManager: sharedServices.browserManager,
           telegramSend: sharedServices.telegramSend,
@@ -462,7 +549,7 @@ async function main(): Promise<void> {
   // 12. Register ALL routes
   await server.register(registerHealthRoutes, { secretsStore });
   await server.register(registerAuthRoutes);
-  await server.register(registerSessionRoutes);
+  await server.register(registerSessionRoutes, { progressBus });
   // Config change handler — hot-reload channels when toggled via Settings UI
   const onConfigChange = async (dotPath: string, value: unknown) => {
     if (dotPath === 'channels.whatsapp.enabled') {
@@ -544,6 +631,8 @@ async function main(): Promise<void> {
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
+  await server.register(registerProgressRoutes, { progressBus });
+  await server.register(registerBackgroundTaskRoutes);
   await server.register(registerAuditRoutes);
   await server.register(registerMCPRoutes, { auditService, mcpBridge });
   await server.register(chatRoutes, { runner: createRunner });

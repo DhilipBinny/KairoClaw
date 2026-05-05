@@ -8,6 +8,13 @@ import { pluginTools } from './plugins.js';
 import { pdfTools } from './pdf.js';
 import { subagentTools } from './subagent.js';
 import { browseTools } from './browse.js';
+import { toolSearchTools } from './tool-search.js';
+import { grepTools } from './grep.js';
+import { globTools } from './glob.js';
+import { todoTools } from './todo.js';
+import { sleepTools } from './sleep.js';
+import { applyPatchTools } from './apply-patch.js';
+import { planModeTools } from './plan-mode.js';
 import type { ToolRegistration } from '../types.js';
 
 export const builtinTools: ToolRegistration[] = [
@@ -21,6 +28,13 @@ export const builtinTools: ToolRegistration[] = [
   ...pdfTools,
   ...subagentTools,
   ...browseTools,
+  ...toolSearchTools,
+  ...grepTools,
+  ...globTools,
+  ...todoTools,
+  ...sleepTools,
+  ...applyPatchTools,
+  ...planModeTools,
 ];
 
 export { fileTools } from './files.js';
@@ -32,4 +46,11 @@ export { emailTools } from './email.js';
 export { pluginTools } from './plugins.js';
 export { pdfTools } from './pdf.js';
 export { subagentTools } from './subagent.js';
+export { toolSearchTools } from './tool-search.js';
+export { grepTools } from './grep.js';
+export { globTools } from './glob.js';
+export { todoTools } from './todo.js';
+export { sleepTools } from './sleep.js';
+export { applyPatchTools } from './apply-patch.js';
+export { planModeTools } from './plan-mode.js';
 export { safePath } from './files.js';

@@ -1,5 +1,27 @@
 import dns from 'node:dns';
 import type { ToolRegistration } from '../types.js';
+import { textEnvelope } from '../envelope.js';
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export function formatSearchResults(query: string, results: SearchResult[]): string {
+  const lines: string[] = [
+    `Query: ${query}`,
+    `${results.length} result${results.length === 1 ? '' : 's'}:`,
+    '',
+  ];
+  for (const [i, r] of results.entries()) {
+    lines.push(`${i + 1}. ${r.title}`);
+    lines.push(`   ${r.url}`);
+    lines.push(`   ${r.snippet}`);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
 
 /**
  * Validate a URL for web_fetch to prevent SSRF attacks.
@@ -34,7 +56,33 @@ function isPrivateIP(ip: string): boolean {
   return false;
 }
 
-export function validateFetchUrl(urlStr: string): URL {
+/**
+ * Normalize an allowPrivate entry ("localhost:3000", "127.0.0.1",
+ * "dev.internal") to a lowercase `host[:port]` form. Used by
+ * isAllowedPrivate() to match the parsed URL's host.
+ */
+function normalizeAllowEntry(entry: string): string {
+  return entry.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+/**
+ * Phase 12: check whether a parsed URL matches any of the user's
+ * `tools.webFetch.allowPrivate` entries. Each entry can be a bare
+ * host or `host:port`. If matched, the URL bypasses the SSRF guard
+ * (so e.g. `localhost:3000` can be fetched when explicitly allowed).
+ */
+function isAllowedPrivate(parsed: URL, allowPrivate: string[] | undefined): boolean {
+  if (!allowPrivate || allowPrivate.length === 0) return false;
+  const host = parsed.hostname.toLowerCase();
+  const hostPort = parsed.port ? `${host}:${parsed.port}` : host;
+  for (const raw of allowPrivate) {
+    const entry = normalizeAllowEntry(raw);
+    if (entry === host || entry === hostPort) return true;
+  }
+  return false;
+}
+
+export function validateFetchUrl(urlStr: string, allowPrivate?: string[]): URL {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
@@ -44,6 +92,13 @@ export function validateFetchUrl(urlStr: string): URL {
 
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     throw new Error(`Blocked URL scheme: ${parsed.protocol} — only http/https allowed`);
+  }
+
+  // Phase 12: explicit allowPrivate override lets specific dev hosts
+  // through the SSRF guard. Applied BEFORE the block checks so
+  // allowPrivate: ["localhost:3000"] actually works.
+  if (isAllowedPrivate(parsed, allowPrivate)) {
+    return parsed;
   }
 
   const hostname = parsed.hostname.toLowerCase();
@@ -92,6 +147,8 @@ export const webTools: ToolRegistration[] = [
     definition: {
       name: 'web_fetch',
       description: 'Fetch a URL and extract readable content as markdown/text.',
+      searchHint: 'fetch web url http page content',
+      alwaysLoad: true,
       parameters: {
         type: 'object',
         properties: {
@@ -107,9 +164,20 @@ export const webTools: ToolRegistration[] = [
         return { error: 'url is required' };
       }
 
+      const ctxCfg = (context as Record<string, unknown>).config as
+        | { tools?: { webFetch?: { allowPrivate?: string[] } } }
+        | undefined;
+      const allowPrivate = ctxCfg?.tools?.webFetch?.allowPrivate;
+
       try {
-        const parsed = validateFetchUrl(url);
-        await validateResolvedIP(parsed.hostname);
+        const parsed = validateFetchUrl(url, allowPrivate);
+        // Skip DNS-resolved private check when the host is allowlisted
+        if (!allowPrivate || !allowPrivate.some((e) => {
+          const n = e.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+          return n === parsed.hostname.toLowerCase() || n === `${parsed.hostname.toLowerCase()}:${parsed.port}`;
+        })) {
+          await validateResolvedIP(parsed.hostname);
+        }
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `SSRF protection: ${message}` };
@@ -176,10 +244,10 @@ export const webTools: ToolRegistration[] = [
           .slice(0, maxChars);
 
         // Hint: if content is mostly empty, the site likely needs JS rendering
-        if (text.length < 200) {
-          return { content: text, url, chars: text.length, hint: 'Content appears very short — this site may require JavaScript rendering. Try the browse tool instead.' };
-        }
-        return { content: text, url, chars: text.length };
+        const hint = text.length < 200
+          ? '\nHint: Content appears very short — this site may require JavaScript rendering. Try the browse tool instead.'
+          : '';
+        return textEnvelope(`URL: ${url}\nChars: ${text.length}${hint}\n\n${text}`);
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `Fetch failed: ${message}` };
@@ -188,6 +256,14 @@ export const webTools: ToolRegistration[] = [
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    // Web pages can be large — 96 KB threshold before persistence kicks in.
+    // Lower than exec (build logs) but higher than files.ts (64 KB).
+    maxResultSizeChars: 96 * 1024,
+    getActivityDescription: (input) => {
+      const u = (input as { url?: string })?.url ?? '<url>';
+      return `Fetching ${u}`;
+    },
   },
   {
     definition: {
@@ -232,7 +308,7 @@ export const webTools: ToolRegistration[] = [
           snippet: r.description,
         }));
 
-        return { results, query };
+        return textEnvelope(formatSearchResults(query, results));
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         return { error: `Search failed: ${message}` };
@@ -241,5 +317,10 @@ export const webTools: ToolRegistration[] = [
     source: 'builtin',
     category: 'read',
     concurrencySafe: true,
+    isReadOnly: true,
+    getActivityDescription: (input) => {
+      const q = (input as { query?: string })?.query ?? '';
+      return `Searching: ${q.slice(0, 60)}`;
+    },
   },
 ];
