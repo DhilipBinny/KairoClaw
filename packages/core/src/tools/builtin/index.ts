@@ -2,6 +2,7 @@ import { fileTools } from './files.js';
 import { execTools } from './exec.js';
 import { webTools } from './web.js';
 import { memoryTools } from './memory.js';
+import { memoryWriteTools } from './memory-write.js';
 import { messagingTools } from './messaging.js';
 import { emailTools } from './email.js';
 import { pluginTools } from './plugins.js';
@@ -22,6 +23,7 @@ export const builtinTools: ToolRegistration[] = [
   ...execTools,
   ...webTools,
   ...memoryTools,
+  ...memoryWriteTools,
   ...messagingTools,
   ...emailTools,
   ...pluginTools,
@@ -41,6 +43,7 @@ export { fileTools } from './files.js';
 export { execTools } from './exec.js';
 export { webTools } from './web.js';
 export { memoryTools, setMemorySystem } from './memory.js';
+export { memoryWriteTools } from './memory-write.js';
 export { messagingTools } from './messaging.js';
 export { emailTools } from './email.js';
 export { pluginTools } from './plugins.js';
