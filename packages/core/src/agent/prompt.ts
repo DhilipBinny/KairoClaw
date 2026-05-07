@@ -44,6 +44,7 @@ export function buildSystemPrompt(
   channel?: string | null,
   sessionId?: string | null,
   skipSessionMemory = false,
+  opts?: { supportsVision?: boolean },
 ): StructuredSystemPrompt {
   const workspace = config.agent.workspace;
 
@@ -55,6 +56,16 @@ export function buildSystemPrompt(
   cached.push(
     `You are ${config.agent.name}, a personal AI assistant running on a self-hosted agentic gateway.`,
   );
+
+  // Vision capability
+  if (opts?.supportsVision) {
+    cached.push(
+      '## Vision\n' +
+      'You **can see images**. When users attach images, you receive them as image content blocks and can analyze their visual content directly. ' +
+      'In follow-up turns, images from earlier turns appear as `[User sent image ...]` text references — this means you already saw and analyzed that image. ' +
+      'Do not claim you cannot see images or lack vision capabilities.',
+    );
+  }
 
   // Tooling
   if (tools.length > 0) {
