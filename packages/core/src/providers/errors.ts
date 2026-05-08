@@ -127,7 +127,7 @@ export function classifyError(error: unknown, attempt = 0): ClassifiedError {
   // ── Timeout ───────────────────────────────────────────
   if (
     err?.name === 'AbortError' ||
-    /timed? ?out|timeout|ETIMEDOUT/i.test(message)
+    /timed? ?out|timeout|ETIMEDOUT|aborted/i.test(message)
   ) {
     return {
       type: 'timeout',
