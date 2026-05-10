@@ -4,6 +4,7 @@ import type { ProviderOptions } from './types.js';
 import type { GatewayConfig, ToolCall, ThinkingBlock, StructuredSystemPrompt } from '@agw/types';
 import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { createStreamingTimeout } from './streaming-timeout.js';
 
 const log = createModuleLogger('llm');
 
@@ -195,14 +196,11 @@ export class AnthropicProvider implements ProviderInterface {
       log.debug(`  tools: [${toolNames}]`);
     }
 
-    // Timeout handling
-    const timeoutMs = caps.timeoutMs;
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
-    const effectiveSignal = signal || abortController.signal;
+    // Streaming timeout: TTFT + idle timer (replaces single wall-clock timeout)
+    const streamTimeout = createStreamingTimeout({ signal });
 
     try {
-      const stream = this.client.messages.stream(params, { signal: effectiveSignal });
+      const stream = this.client.messages.stream(params, { signal: streamTimeout.signal });
       let text = '';
       const toolCalls: (ToolCall & { _rawArgs?: string })[] = [];
       let inputTokens = 0;
@@ -214,6 +212,7 @@ export class AnthropicProvider implements ProviderInterface {
       let currentThinkingBlock: { thinking: string; signature: string } | null = null;
 
       for await (const event of stream) {
+        streamTimeout.onActivity();
         if (event.type === 'content_block_start') {
           if (event.content_block.type === 'tool_use') {
             toolCalls.push({
@@ -281,7 +280,7 @@ export class AnthropicProvider implements ProviderInterface {
         delete tc._rawArgs;
       }
 
-      clearTimeout(timeoutId);
+      streamTimeout.clear();
 
       return {
         text: text || null,
@@ -291,7 +290,7 @@ export class AnthropicProvider implements ProviderInterface {
         thinkingBlocks: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
       };
     } catch (e: unknown) {
-      clearTimeout(timeoutId);
+      streamTimeout.clear();
       const err = e as Error & { status?: number };
       if (err.name === 'AbortError') throw new Error('Request timed out');
 
