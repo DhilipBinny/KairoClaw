@@ -40,7 +40,6 @@ export function createStreamingTimeout(opts: StreamingTimeoutOptions = {}): Stre
   }
 
   let timerId: ReturnType<typeof setTimeout> | null = null;
-  let firstEventReceived = false;
 
   // Start with TTFT timer
   timerId = setTimeout(() => abortController.abort(), ttftMs);
@@ -49,8 +48,7 @@ export function createStreamingTimeout(opts: StreamingTimeoutOptions = {}): Stre
     if (timerId !== null) {
       clearTimeout(timerId);
     }
-    firstEventReceived = true;
-    // Switch to idle timer
+    // Switch to idle timer (resets on each call)
     timerId = setTimeout(() => abortController.abort(), idleMs);
   }
 
