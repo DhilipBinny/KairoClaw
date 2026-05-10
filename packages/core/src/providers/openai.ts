@@ -2,8 +2,8 @@ import OpenAI from 'openai';
 import type { ProviderInterface, ProviderResponse, ChatArgs } from './types.js';
 import type { ProviderOptions } from './types.js';
 import type { GatewayConfig, ToolCall } from '@agw/types';
-import { getModelCapabilities } from '../models/registry.js';
 import { createModuleLogger } from '../observability/logger.js';
+import { createStreamingTimeout } from './streaming-timeout.js';
 
 const log = createModuleLogger('llm');
 
@@ -111,15 +111,12 @@ export class OpenAIProvider implements ProviderInterface {
       params.tools = openaiTools;
     }
 
-    const caps = getModelCapabilities(modelId, this.config);
-    const timeoutMs = caps.timeoutMs;
-    const abortController = new AbortController();
-    const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
-    const effectiveSignal = signal || abortController.signal;
+    // Streaming timeout: TTFT + idle timer (replaces single wall-clock timeout)
+    const streamTimeout = createStreamingTimeout({ signal });
 
     try {
       const stream = await this.client.chat.completions.create(params, {
-        signal: effectiveSignal,
+        signal: streamTimeout.signal,
       });
       let text = '';
       const toolCalls: ToolCall[] = [];
@@ -128,6 +125,7 @@ export class OpenAIProvider implements ProviderInterface {
       let thinkingText = '';
 
       for await (const chunk of stream) {
+        streamTimeout.onActivity();
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
 
@@ -163,7 +161,7 @@ export class OpenAIProvider implements ProviderInterface {
         }
       }
 
-      clearTimeout(timeoutId);
+      streamTimeout.clear();
 
       return {
         text: text || null,
@@ -172,7 +170,7 @@ export class OpenAIProvider implements ProviderInterface {
         thinkingText: thinkingText || null,
       };
     } catch (e: unknown) {
-      clearTimeout(timeoutId);
+      streamTimeout.clear();
       const err = e as Error & { status?: number };
       if (err.name === 'AbortError') throw new Error('Request timed out');
       log.error({ err: err.message, model: modelId }, 'OpenAI API error');
