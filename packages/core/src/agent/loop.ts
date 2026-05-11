@@ -28,7 +28,15 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { UsageRepository } from '../db/repositories/usage.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
-import { buildSystemPrompt } from '@agw/agent-core';
+import {
+  buildSystemPrompt,
+  buildUserContent,
+  normalizeMessages,
+  renderToolResultForLLM,
+  sanitizeMessagesForLog,
+  rowToMessage,
+  executeToolCalls as agwExecuteToolCalls,
+} from '@agw/agent-core';
 import { checkAndCompact, compactSession } from './compaction.js';
 import { handleSlashCommand } from './slash-commands.js';
 import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS, TOOL_LOOP_THRESHOLD } from '../constants.js';
@@ -53,22 +61,8 @@ import { classifyError, logClassifiedError } from '@agw/provider-bridge';
 /** Sessions currently running memory extraction — prevents concurrent extraction races. */
 const _activeExtractions = new Set<string>();
 
-// ─── Debug prompt logger ─────────────────────────────────────
-
-/** Strip base64 image data from messages to keep log files small. */
-export function sanitizeMessagesForLog(messages: Message[]): unknown[] {
-  return messages.map(m => {
-    if (!Array.isArray(m.content)) return m;
-    return {
-      ...m,
-      content: (m.content as MessageContentPart[]).map(p =>
-        p.type === 'image'
-          ? { type: 'image', source: { type: 'base64', media_type: (p.source as { media_type?: string })?.media_type, data: '[omitted]' } }
-          : p,
-      ),
-    };
-  });
-}
+// Re-export from @agw/agent-core for backward compatibility
+export { sanitizeMessagesForLog, renderToolResultForLLM } from '@agw/agent-core';
 
 /** Append one LLM round entry to the daily JSONL debug log. */
 export function appendDebugLog(workspace: string, entry: Record<string, unknown>): void {
@@ -85,60 +79,6 @@ export function appendDebugLog(workspace: string, entry: Record<string, unknown>
 
 const log = createModuleLogger('llm');
 
-// ─── Phase 6: tool-result rendering ──────────────────────────
-
-/**
- * Render a tool result (legacy string, legacy object, or Phase 6
- * content-block envelope) into a single string suitable for the LLM's
- * tool-result message content.
- *
- * - `string`          → as-is
- * - `{content: [...]}` envelope → joined text blocks, with non-text
- *    blocks (image / resource_link / persisted_reference) rendered as
- *    compact summaries so the LLM still sees what was produced
- * - Any other object → `JSON.stringify` (legacy fallback — works for
- *    `{error: "..."}`, `{stdout, stderr}`, structured tool outputs)
- */
-export function renderToolResultForLLM(result: unknown): string {
-  if (typeof result === 'string') return result;
-  if (!result || typeof result !== 'object' || Array.isArray(result)) {
-    return JSON.stringify(result);
-  }
-
-  const obj = result as Record<string, unknown>;
-  const content = obj.content;
-  // Envelope detection: content is an array of blocks with a `type` tag
-  if (!Array.isArray(content)) {
-    return JSON.stringify(result);
-  }
-
-  const parts: string[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue;
-    const b = block as Record<string, unknown>;
-    const type = b.type;
-    if (type === 'text' && typeof b.text === 'string') {
-      parts.push(b.text);
-    } else if (type === 'image' && b.source && typeof b.source === 'object') {
-      const src = b.source as { media_type?: string };
-      parts.push(`[${src.media_type || 'image'} image]`);
-    } else if (type === 'resource_link') {
-      parts.push(`[link: ${b.title || b.uri || 'resource'}]`);
-    } else if (type === 'persisted_reference') {
-      const p = b.preview ?? '';
-      const size = b.sizeBytes ?? 0;
-      const pth = b.path ?? '';
-      parts.push(`[persisted ${size} bytes at ${pth}]\n${p}`);
-    } else {
-      // Unknown block type — fall back to JSON
-      parts.push(JSON.stringify(block));
-    }
-  }
-
-  // Fallback: if every block was unparseable, return the raw JSON
-  if (parts.length === 0) return JSON.stringify(result);
-  return parts.join('\n');
-}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -277,45 +217,6 @@ async function runSessionStartHooksStage(
   return inbound;
 }
 
-// ─── Stage: Build user content (text or multimodal) ──────────
-
-function buildUserContent(
-  inbound: InboundMessage,
-  caps: RunState['caps'],
-): string | MessageContentPart[] {
-  if (!inbound.images || inbound.images.length === 0) return inbound.text;
-  if (caps.supportsVision) {
-    const parts: MessageContentPart[] = [];
-    for (const img of inbound.images) {
-      const sniffed = sniffBase64Mime(img.data);
-      parts.push({
-        type: 'image',
-        source: { type: 'base64', media_type: sniffed?.mime || img.mimeType, data: img.data },
-      });
-    }
-    parts.push({ type: 'text', text: inbound.text });
-    return parts;
-  }
-  return inbound.text +
-    '\n\n[Note: Images were sent but the current model does not support vision. Please switch to a vision-capable model like Claude or GPT-4o.]';
-}
-
-// ─── Stage: Normalize messages ───────────────────────────────
-
-function normalizeMessages(history: Message[], userContent: string | MessageContentPart[]): Message[] {
-  const raw: Message[] = [...history, { role: 'user', content: userContent }];
-  const result: Message[] = [];
-  for (const msg of raw) {
-    if (typeof msg.content === 'string' && !msg.content.trim() && !msg.tool_calls?.length) continue;
-    const last = result[result.length - 1];
-    if (last && last.role === msg.role && msg.role === 'user' && typeof last.content === 'string' && typeof msg.content === 'string') {
-      last.content = last.content + '\n' + msg.content;
-    } else {
-      result.push({ ...msg });
-    }
-  }
-  return result;
-}
 
 // ─── Stage: Save images to disk ──────────────────────────────
 
@@ -660,7 +561,7 @@ export async function runAgent(
   const caps = getModelCapabilities(model, config);
   const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary, { supportsVision: caps.supportsVision });
   const history: Message[] = historyRows.map(rowToMessage);
-  const userContent = buildUserContent(inbound, caps);
+  const userContent = buildUserContent(inbound.text, inbound.images, caps.supportsVision, sniffBase64Mime);
   const messages = normalizeMessages(history, userContent);
 
   // ── Save images + persist user message ──────────────────
@@ -885,28 +786,3 @@ export async function runAgent(
   };
 }
 
-// ─── Helpers ────────────────────────────────────────────────
-
-/** Convert a MessageRow to the Message format used by providers. */
-function rowToMessage(row: {
-  role: string;
-  content: string;
-  tool_calls: string | null;
-  tool_call_id: string | null;
-}): Message {
-  const msg: Message = {
-    role: row.role as Message['role'],
-    content: row.content,
-  };
-  if (row.tool_calls) {
-    try {
-      msg.tool_calls = JSON.parse(row.tool_calls) as ToolCall[];
-    } catch {
-      // skip malformed
-    }
-  }
-  if (row.tool_call_id) {
-    msg.tool_call_id = row.tool_call_id;
-  }
-  return msg;
-}
