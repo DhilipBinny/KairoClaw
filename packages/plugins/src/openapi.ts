@@ -15,6 +15,7 @@
 
 import type { HttpPluginConfig, HttpEndpointConfig, ResponseMediaMapping } from '@agw/types';
 import { noopLogger, type AgwLogger } from '@agw/types';
+import { validatePluginUrl } from './http.js';
 
 let log: AgwLogger = noopLogger;
 export function setOpenAPILogger(logger: AgwLogger): void { log = logger; }
@@ -163,6 +164,8 @@ export async function importOpenAPIService(
   } = opts;
 
   const specUrl = `${baseUrl.replace(/\/$/, '')}/openapi.json`;
+
+  validatePluginUrl(specUrl);
 
   log.info({ name, specUrl }, 'Fetching OpenAPI spec');
 
