@@ -63,3 +63,11 @@ export type {
   ParsedToolCall,
   ToolExecContext,
 } from './tool-execution.js';
+
+// ── Injectable Store Interfaces ─────────────────────────────
+export type {
+  AgentMessageStore,
+  AgentSessionUpdater,
+  AgentUsageRecorder,
+  AgentToolCallRecorder,
+} from './stores.js';
