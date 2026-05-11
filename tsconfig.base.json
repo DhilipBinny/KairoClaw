@@ -20,7 +20,7 @@
       "@agw/cron": ["./packages/cron/src"],
       "@agw/memory-engine": ["./packages/memory-engine/src"],
       "@agw/agent-core": ["./packages/agent-core/src"],
-      "@agw/logger": ["./packages/logger/src"]
+      "@agw/logger": ["./packages/logger/src"],
       "@agw/database": ["./packages/database/src"]
     }
   }
