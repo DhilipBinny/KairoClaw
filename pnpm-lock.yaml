@@ -107,6 +107,9 @@ importers:
       '@agw/provider-bridge':
         specifier: workspace:*
         version: link:../provider-bridge
+      '@agw/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       '@agw/security':
         specifier: workspace:*
         version: link:../security
@@ -252,6 +255,22 @@ importers:
         specifier: ^22.0.0
         version: 22.19.18
 
+  packages/plugins:
+    dependencies:
+      '@agw/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      '@agw/tool-platform':
+        specifier: workspace:*
+        version: link:../tool-platform
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+
   packages/provider-bridge:
     dependencies:
       '@agw/types':
@@ -267,6 +286,19 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
+
+  packages/schemas:
+    dependencies:
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
 
   packages/security:
     dependencies:
