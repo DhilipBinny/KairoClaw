@@ -396,7 +396,7 @@ export class MemorySystem {
       const indexed = await this.db.query<{ file_path: string }>(
         'SELECT DISTINCT file_path FROM memory_chunks',
       );
-      const fileSet = new Set(files);
+      const fileSet = new Set(files.map(f => path.relative(this.workspace, f)));
       let removed = 0;
       for (const row of indexed) {
         if (!fileSet.has(row.file_path)) {

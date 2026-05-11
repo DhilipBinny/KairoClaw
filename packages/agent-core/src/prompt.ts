@@ -283,7 +283,7 @@ Model: ${config.model.primary}`);
   // 1a. Pinned notes — hot-loaded, always visible on every turn
   const pinnedPath = path.join(memoryDir, 'PINNED.md');
   if (fs.existsSync(pinnedPath)) {
-    const pinned = fs.readFileSync(pinnedPath, 'utf8');
+    const pinned = fs.readFileSync(pinnedPath, 'utf8').slice(0, profileMaxChars);
     if (pinned.trim()) {
       dynamic.push(`### Pinned Notes (always load)\n<user_memory source="pinned">\n${pinned}\n</user_memory>`);
     }
