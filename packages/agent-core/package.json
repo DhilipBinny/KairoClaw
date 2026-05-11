@@ -14,5 +14,8 @@
     "@agw/tool-platform": "workspace:*",
     "@agw/provider-bridge": "workspace:*",
     "@agw/memory-engine": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0"
   }
 }

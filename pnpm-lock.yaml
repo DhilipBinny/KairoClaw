@@ -85,9 +85,16 @@ importers:
       '@agw/types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.19.18
 
   packages/core:
     dependencies:
+      '@agw/agent-core':
+        specifier: workspace:*
+        version: link:../agent-core
       '@agw/cron':
         specifier: workspace:*
         version: link:../cron
@@ -3828,7 +3835,7 @@ snapshots:
 
   '@types/better-sqlite3@7.6.13':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
 
   '@types/chai@5.2.3':
     dependencies:
@@ -3849,7 +3856,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
       form-data: 4.0.5
 
   '@types/node@10.17.60': {}
@@ -3868,17 +3875,17 @@ snapshots:
 
   '@types/nodemailer@7.0.11':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
 
   '@types/pg@8.20.0':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
       pg-protocol: 1.13.0
       pg-types: 2.2.0
 
   '@types/qrcode@1.5.6':
     dependencies:
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
 
   '@types/trusted-types@2.0.7': {}
 
@@ -5361,7 +5368,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.0
-      '@types/node': 25.5.0
+      '@types/node': 22.19.18
       long: 5.3.2
 
   proxy-addr@2.0.7:

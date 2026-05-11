@@ -1,24 +1,27 @@
 /**
- * Slash command handler.
+ * Re-export shim — delegates to @agw/agent-core.
  *
- * Parses and executes commands like /reset, /status, /help, /model,
- * /sessions, /compact, /cron. Returns null if the text is not a
- * recognised slash command.
+ * Wraps handleSlashCommand to accept `db: DatabaseAdapter` and internally
+ * construct the MessageStore and SessionLister interfaces.
  */
 
-import type { GatewayConfig } from '@agw/types';
-import type { DatabaseAdapter } from '../db/index.js';
+export type { SlashCommandResult } from '@agw/agent-core';
+
+import type { GatewayConfig, DatabaseAdapter } from '@agw/types';
 import type { SessionRow } from '../db/repositories/session.js';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import {
-  estimateMessageTokens,
-  needsCompaction,
-  checkAndCompact,
+  handleSlashCommand as _handleSlashCommand,
+  type SlashCommandResult,
   type CallLLMFn,
-} from './compaction.js';
+  type MessageStore,
+  type SessionLister,
+} from '@agw/agent-core';
 
-/** Context needed by slash command handlers. */
+export type { CallLLMFn } from '@agw/agent-core';
+
+/** Context needed by slash command handlers (backward-compatible). */
 export interface SlashCommandContext {
   db: DatabaseAdapter;
   config: GatewayConfig;
@@ -28,21 +31,26 @@ export interface SlashCommandContext {
   callLLM?: CallLLMFn;
 }
 
-/** Result of a slash command. */
-export interface SlashCommandResult {
-  text: string;
+/** Adapt a MessageRepository to the MessageStore interface. */
+function repoToMessageStore(db: DatabaseAdapter): MessageStore {
+  const repo = new MessageRepository(db);
+  return {
+    listBySession: (sessionId, limit) => repo.listBySession(sessionId, limit),
+    listSinceId: (sessionId, sinceId) => repo.listSinceId(sessionId, sinceId),
+    create: (msg) => repo.create(msg),
+    deleteBySession: (sessionId) => repo.deleteBySession(sessionId),
+    updateContent: (id, content) => repo.updateContent(id, content),
+  };
 }
 
-const SLASH_COMMANDS: Record<string, string> = {
-  '/new': 'reset',
-  '/reset': 'reset',
-  '/status': 'status',
-  '/stop': 'stop',
-  '/compact': 'compact',
-  '/model': 'model',
-  '/help': 'help',
-  '/sessions': 'sessions',
-};
+/** Adapt a SessionRepository to the SessionLister interface. */
+function repoToSessionLister(db: DatabaseAdapter): SessionLister {
+  const repo = new SessionRepository(db);
+  return {
+    listByTenant: (tenantId, limit) => repo.listByTenant(tenantId, limit),
+    update: (id, data) => repo.update(id, data),
+  };
+}
 
 /**
  * Parse and execute a slash command.
@@ -54,119 +62,14 @@ export async function handleSlashCommand(
   text: string,
   context: SlashCommandContext,
 ): Promise<SlashCommandResult | null> {
-  const action = SLASH_COMMANDS[command.toLowerCase()];
-  if (!action) return null;
-
-  const { db, config, session } = context;
-  const sessionRepo = new SessionRepository(db);
-  const messageRepo = new MessageRepository(db);
-
-  if (action === 'reset') {
-    // Delete messages for the session — the caller creates a new session
-    await messageRepo.deleteBySession(session.id);
-    return {
-      text: `Session reset. New session: \`${session.id.slice(0, 8)}\``,
-    };
-  }
-
-  if (action === 'status') {
-    const messages = await messageRepo.listBySession(session.id);
-    const tokenEst = estimateMessageTokens(messages);
-    const modelName = config.model?.primary || 'default';
-    const compaction = await needsCompaction(session.id, modelName, db, config);
-    return {
-      text:
-        `**Session Status**\n` +
-        `- Key: ${session.channel}:${session.chat_id ?? 'main'}\n` +
-        `- Session: ${session.id.slice(0, 8)}\n` +
-        `- Turns: ${session.turns}\n` +
-        `- Messages: ${messages.length}\n` +
-        `- Tokens (est): ${tokenEst.toLocaleString()}\n` +
-        `- Tokens: ${(session.input_tokens || 0).toLocaleString()} in / ${(session.output_tokens || 0).toLocaleString()} out\n` +
-        `- Model: ${modelName}\n` +
-        `- Compaction: ${compaction.needed ? 'needed' : 'ok'}\n` +
-        `- Updated: ${session.updated_at}`,
-    };
-  }
-
-  if (action === 'stop') {
-    return { text: 'Stopped.' };
-  }
-
-  if (action === 'compact') {
-    try {
-      const result = await checkAndCompact(
-        session.id,
-        config.model.primary,
-        db,
-        config,
-        context.callLLM,
-        context.tenantId,
-      );
-      if (result.compacted) {
-        const methodLabel = result.method === 'soft-clean' ? 'Soft clean' : 'Compacted';
-        return {
-          text: `${methodLabel}: ${result.oldMessageCount} -> ${result.newMessageCount} messages (${result.method}), saved ~${(result.tokensSaved ?? 0).toLocaleString()} tokens`,
-        };
-      }
-      return {
-        text: `No compaction needed (${(result.tokens ?? 0).toLocaleString()} tokens, threshold: ${(result.threshold ?? 0).toLocaleString()})`,
-      };
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { text: `Compaction error: ${msg}` };
-    }
-  }
-
-  if (action === 'model') {
-    const newModel = text.trim();
-    if (!newModel) {
-      const metadata = JSON.parse(session.metadata || '{}');
-      const sessionOverride = metadata.model_override || null;
-      return {
-        text: `Current model: \`${sessionOverride || config.model.primary}\`${sessionOverride ? ' (session override)' : ''}\nUsage: \`/model provider/model-name\``,
-      };
-    }
-    // Validate against known models from fallback chain + primary
-    const knownModels = [config.model.primary, ...(config.model.fallbackChain || [])];
-    if (!knownModels.includes(newModel)) {
-      return {
-        text: `Unknown model: \`${newModel}\`\nAvailable: ${knownModels.map(m => `\`${m}\``).join(', ')}`,
-      };
-    }
-    // Store per-session override in metadata instead of mutating global config
-    const meta = JSON.parse(session.metadata || '{}');
-    meta.model_override = newModel;
-    await sessionRepo.update(session.id, { metadata: JSON.stringify(meta) });
-    return {
-      text: `Model switched for this session: \`${newModel}\``,
-    };
-  }
-
-  if (action === 'help') {
-    return {
-      text:
-        `**Available Commands**\n` +
-        `- \`/new\` — Reset session\n` +
-        `- \`/status\` — Show session status\n` +
-        `- \`/model [provider/model]\` — Switch model\n` +
-        `- \`/compact\` — Force context compaction\n` +
-        `- \`/sessions\` — List active sessions\n` +
-        `- \`/stop\` — Stop current generation\n` +
-        `- \`/help\` — Show this help`,
-    };
-  }
-
-  if (action === 'sessions') {
-    const sessions = await sessionRepo.listByTenant(context.tenantId);
-    const lines = sessions.map((s) => {
-      const totalTokens = (s.input_tokens || 0) + (s.output_tokens || 0);
-      return `- \`${s.channel}:${s.chat_id ?? 'main'}\` — ${s.turns || 0} turns, ${totalTokens} tokens`;
-    });
-    return {
-      text: `**Active Sessions** (${sessions.length})\n${lines.join('\n') || 'None'}`,
-    };
-  }
-
-  return null;
+  const { db, config, session, tenantId, userId, callLLM } = context;
+  return _handleSlashCommand(command, text, {
+    messageStore: repoToMessageStore(db),
+    sessionStore: repoToSessionLister(db),
+    config,
+    session,
+    tenantId,
+    userId,
+    callLLM,
+  });
 }
