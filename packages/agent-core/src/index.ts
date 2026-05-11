@@ -36,3 +36,10 @@ export type {
   SlashCommandContext,
   SlashCommandResult,
 } from './slash-commands.js';
+
+// ── Agent Loop Types ────────────────────────────────────────
+export type {
+  AgentSessionRow,
+  AgentContext,
+  AgentRoundCallbacks,
+} from './loop-types.js';
