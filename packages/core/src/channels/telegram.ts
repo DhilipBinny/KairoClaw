@@ -661,20 +661,38 @@ class TelegramChannel implements Channel {
     const targetChatId = chatId || this.lastActiveChatId;
     if (!targetChatId) throw new Error('No chat ID specified and no recent active chat');
 
-    // Split long messages (Telegram limit: 4096 chars)
+    const sendWithBackoff = async (msg: string, opts: Record<string, unknown> = {}, retries = 3): Promise<void> => {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+          await this.bot!.api.sendMessage(targetChatId, msg, opts);
+          return;
+        } catch (e: unknown) {
+          const err = e as { error_code?: number; message?: string; parameters?: { retry_after?: number } };
+          if (err.error_code === 429 || err.message?.includes('Too Many Requests')) {
+            const retryAfter = err.parameters?.retry_after || 2 ** attempt;
+            log.warn({ retryAfter, attempt, chatId: targetChatId }, 'Telegram rate limit in sendToChat, retrying');
+            await new Promise((r) => setTimeout(r, retryAfter * 1000));
+            continue;
+          }
+          if (attempt === 0 && opts.parse_mode && err.message?.includes("can't parse")) {
+            const { parse_mode: _, ...rest } = opts;
+            return sendWithBackoff(msg, rest, retries - 1);
+          }
+          throw e;
+        }
+      }
+    };
+
     const MAX_LEN = 4000;
     if (text.length <= MAX_LEN) {
-      await this.bot.api.sendMessage(targetChatId, text, { parse_mode: 'Markdown' }).catch(() => {
-        // Retry without Markdown if parsing fails
-        return this.bot!.api.sendMessage(targetChatId, text);
-      });
+      await sendWithBackoff(text, { parse_mode: 'Markdown' });
     } else {
       const chunks = [];
       for (let i = 0; i < text.length; i += MAX_LEN) {
         chunks.push(text.slice(i, i + MAX_LEN));
       }
       for (const chunk of chunks) {
-        await this.bot.api.sendMessage(targetChatId, chunk).catch((e: unknown) => {
+        await sendWithBackoff(chunk).catch((e: unknown) => {
           log.warn({ err: e instanceof Error ? e.message : String(e), chatId: targetChatId }, 'Telegram chunk send failed');
         });
       }

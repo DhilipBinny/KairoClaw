@@ -195,16 +195,16 @@ export class MCPBridge {
       // Tool pinning: detect changes and update hash
       if (client.tools.length > 0) {
         const pinResult = detectToolSetChange(id, client.tools, pinnedHash ?? null);
-        if (pinResult.changed) {
+        if (pinResult.changed && pinnedHash) {
           this.log.warn(
-            { server: id, diff: pinResult.diff },
-            'MCP server tool set changed — updating pinned hash',
+            { server: id, diff: pinResult.diff, severity: 'high', previousHash: pinnedHash, newHash: pinResult.currentHash },
+            'SECURITY: MCP server tool set changed since last pin — tools may have been added or modified. Review in admin UI and re-pin to accept.',
           );
-        }
-        // Persist pinned hash to config
-        if (this.config.mcp.servers[id]) {
-          this.config.mcp.servers[id].pinnedHash = pinResult.currentHash;
-          this._persistConfig();
+        } else {
+          if (this.config.mcp.servers[id]) {
+            this.config.mcp.servers[id].pinnedHash = pinResult.currentHash;
+            this._persistConfig();
+          }
         }
       }
 

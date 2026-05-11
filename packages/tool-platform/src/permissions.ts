@@ -4,7 +4,7 @@ export type PermissionChecker = (
   tenantId: string,
   userRole: string,
   toolName: string,
-) => Promise<ToolPermissionLevel>;
+) => Promise<ToolPermissionLevel | 'no_rule'>;
 
 export async function checkToolPermission(
   toolName: string,
@@ -19,6 +19,10 @@ export async function checkToolPermission(
 
   if (permission === 'power_user') {
     return elevated ? 'allow' : 'deny';
+  }
+
+  if (permission === 'no_rule') {
+    return userRole === 'viewer' ? 'deny' : 'allow';
   }
 
   return permission;
