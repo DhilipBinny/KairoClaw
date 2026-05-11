@@ -10,5 +10,8 @@
   },
   "dependencies": {
     "@agw/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
   }
 }
