@@ -88,6 +88,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@agw/mcp-client':
+        specifier: workspace:*
+        version: link:../mcp-client
       '@agw/security':
         specifier: workspace:*
         version: link:../security
@@ -176,6 +179,10 @@ importers:
       '@agw/types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
 
   packages/memory-engine:
     dependencies:
