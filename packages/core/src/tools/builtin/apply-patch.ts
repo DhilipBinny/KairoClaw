@@ -59,11 +59,11 @@ function gitApply(cwd: string, patch: string, extraArgs: string[]): Promise<GitA
 
     child.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
     child.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
-    child.on('error', () => {
+    (child as unknown as NodeJS.EventEmitter).on('error', () => {
       clearTimeout(timer);
       resolve({ stdout, stderr: stderr + '\n[spawn error]', exitCode: 1, killed });
     });
-    child.on('close', (code) => {
+    (child as unknown as NodeJS.EventEmitter).on('close', (code: number | null) => {
       clearTimeout(timer);
       resolve({ stdout, stderr, exitCode: code ?? 1, killed });
     });

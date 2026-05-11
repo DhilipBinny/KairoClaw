@@ -98,14 +98,11 @@ export async function handleSlashCommand(
 
   if (action === 'compact') {
     try {
-      // checkAndCompact needs db (DatabaseAdapter) — we pass undefined and rely
-      // on the caller not hitting the raw-db codepath (extractTouchedFilePaths).
-      // The core shim passes the real db.
       const result = await checkAndCompact(
         session.id,
         config.model.primary,
         messageStore,
-        undefined as any, // db — not needed for soft/hard compact message operations
+        undefined,
         config,
         context.callLLM,
         context.tenantId,
