@@ -16,7 +16,7 @@
 
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 
 // ─── Rate limiter ────────────────────────────────────────
 

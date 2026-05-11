@@ -16,7 +16,7 @@ import { todoTools } from './todo.js';
 import { sleepTools } from './sleep.js';
 import { applyPatchTools } from './apply-patch.js';
 import { planModeTools } from './plan-mode.js';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 
 export const builtinTools: ToolRegistration[] = [
   ...fileTools,

@@ -4,7 +4,7 @@
  * code depend on.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ProgressBus, type ProgressEvent } from '../progress-bus.js';
+import { ProgressBus, type ProgressEvent } from '@agw/tool-platform';
 
 let bus: ProgressBus;
 

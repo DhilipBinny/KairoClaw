@@ -21,10 +21,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { Session } from '@agw/types';
 import { getWorkspace } from './utils.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 

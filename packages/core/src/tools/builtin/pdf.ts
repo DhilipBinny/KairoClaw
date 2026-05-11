@@ -13,10 +13,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 import {
   MAX_TOOL_RESULT_CHARS,
   PDF_MAX_PAGES,

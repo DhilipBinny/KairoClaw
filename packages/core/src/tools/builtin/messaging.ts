@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { ToolExecutionContext, MediaAttachment } from '@agw/types';
 import { scopedSafePath } from './files.js';
 

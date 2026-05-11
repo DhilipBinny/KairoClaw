@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { MCPServerConfig } from '@agw/types';
 import { MCPBridge } from '../mcp/bridge.js';
-import { MCP_CATALOG, searchMCPRegistry } from '../mcp/catalog.js';
+import { MCP_CATALOG, searchMCPRegistry } from '@agw/mcp-client';
 import type { AuditService } from '../security/audit.js';
 import { requireRole } from '../auth/middleware.js';
 import { getTenantId } from './utils.js';

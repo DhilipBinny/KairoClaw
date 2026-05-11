@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { buildSystemPrompt } from '../prompt.js';
+import { buildSystemPrompt } from '@agw/agent-core';
 import type { GatewayConfig } from '@agw/types';
 
 let tmpDir: string;

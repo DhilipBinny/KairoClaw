@@ -6,7 +6,7 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
 import { getDb, getTenantId, assertSessionAccess, getConfig } from './utils.js';
-import type { ProgressBus } from '../agent/progress-bus.js';
+import type { ProgressBus } from '@agw/tool-platform';
 
 interface SessionRoutesOptions {
   /**

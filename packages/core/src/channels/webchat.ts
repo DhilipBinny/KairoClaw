@@ -20,7 +20,7 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { hashApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 import { getModelShortName, shouldShowModelIndicator } from './utils.js';
 
 const log = createModuleLogger('channel.web');

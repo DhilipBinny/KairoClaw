@@ -10,10 +10,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ToolRegistration } from '../types.js';
-import { getScopedMemoryDir } from '../../agent/scope.js';
+import type { ToolRegistration } from '@agw/tool-platform';
+import { getScopedMemoryDir } from '@agw/memory-engine';
 import { getWorkspace } from './utils.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 const PIN_MAX = 5;
 

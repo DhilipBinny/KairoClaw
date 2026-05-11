@@ -28,15 +28,15 @@ import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { UsageRepository } from '../db/repositories/usage.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
-import { buildSystemPrompt } from './prompt.js';
+import { buildSystemPrompt } from '@agw/agent-core';
 import { checkAndCompact, compactSession } from './compaction.js';
 import { handleSlashCommand } from './slash-commands.js';
 import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS, TOOL_LOOP_THRESHOLD } from '../constants.js';
 import { SubAgentRegistry } from './subagent-registry.js';
 import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
-import { getModelCapabilities, estimateCost } from '../models/registry.js';
+import { getModelCapabilities, estimateCost } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
-import { filterOutput, checkOutputSafety } from '../security/output.js';
+import { filterOutput, checkOutputSafety } from '@agw/security';
 import { sniffBase64Mime } from '../media/store.js';
 import { maybeExtractToProfile } from './auto-memory.js';
 import {
@@ -48,7 +48,7 @@ import {
   extractSessionMemory,
 } from './session-memory.js';
 import { routeModel, stripModelOverride } from './router.js';
-import { classifyError, logClassifiedError } from '../providers/errors.js';
+import { classifyError, logClassifiedError } from '@agw/provider-bridge';
 
 /** Sessions currently running memory extraction — prevents concurrent extraction races. */
 const _activeExtractions = new Set<string>();
@@ -300,11 +300,11 @@ export async function runAgent(
   // without us having to fabricate a separate user turn.
   // Skips for ephemeral (sub-agent) sessions — hooks are user-facing.
   if (!ephemeral && historyRows.length === 0) {
-    const hooks = (config as unknown as { hooks?: import('../hooks/runner.js').HooksConfig }).hooks;
+    const hooks = (config as unknown as { hooks?: import('@agw/tool-platform').HooksConfig }).hooks;
     const ssHooks = hooks?.SessionStart;
     if (ssHooks && ssHooks.length > 0) {
       try {
-        const { runSessionStartHooks } = await import('../hooks/runner.js');
+        const { runSessionStartHooks } = await import('@agw/tool-platform');
         const outputs = await runSessionStartHooks(ssHooks, session.id, context.scopeKey ?? null);
         if (outputs.length > 0) {
           const prefix = outputs.map((o) => `[hook output]\n${o}`).join('\n\n');
