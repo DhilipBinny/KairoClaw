@@ -76,12 +76,6 @@ importers:
       '@agw/provider-bridge':
         specifier: workspace:*
         version: link:../provider-bridge
-      '@agw/security':
-        specifier: workspace:*
-        version: link:../security
-      '@agw/tool-platform':
-        specifier: workspace:*
-        version: link:../tool-platform
       '@agw/types':
         specifier: workspace:*
         version: link:../types

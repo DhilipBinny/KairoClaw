@@ -539,7 +539,7 @@ export async function compactSession(
   tenantId: string,
   modelId: string,
   messageStore: MessageStore,
-  db: DatabaseAdapter,
+  db: DatabaseAdapter | undefined,
   config: GatewayConfig,
   callLLM?: CallLLMFn,
   scopeKey?: string | null,
@@ -603,7 +603,7 @@ export async function compactSession(
 
   // Delete all messages and re-insert compacted set WITHIN A TRANSACTION
   // to prevent data loss if re-insert fails partway through
-  await db.transaction(async () => {
+  const doCompact = async () => {
     await messageStore.deleteBySession(sessionId);
 
     // Insert compacted summary as a user message. Both the Anthropic and
@@ -637,13 +637,18 @@ export async function compactSession(
         metadata: msg.metadata ?? undefined,
       });
     }
-  });
+  };
+  if (db) {
+    await db.transaction(doCompact);
+  } else {
+    await doCompact();
+  }
 
   // ── Post-compact file restoration ──────────────────────────
   // Re-inject recently touched files so the agent remembers what it was editing.
   // Scan ALL messages (including compacted ones) for file tool calls.
   let restoredFileCount = 0;
-  if (workspace) {
+  if (workspace && db) {
     const touchedPaths = await extractTouchedFilePaths(sessionId, db);
     if (touchedPaths.length > 0) {
       const restoration = buildFileRestorationMessage(touchedPaths, workspace);
@@ -707,7 +712,7 @@ export async function checkAndCompact(
   sessionId: string,
   modelId: string,
   messageStore: MessageStore,
-  db: DatabaseAdapter,
+  db: DatabaseAdapter | undefined,
   config: GatewayConfig,
   callLLM?: CallLLMFn,
   tenantId?: string,

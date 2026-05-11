@@ -10,8 +10,6 @@
   },
   "dependencies": {
     "@agw/types": "workspace:*",
-    "@agw/security": "workspace:*",
-    "@agw/tool-platform": "workspace:*",
     "@agw/provider-bridge": "workspace:*",
     "@agw/memory-engine": "workspace:*"
   },
