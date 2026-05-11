@@ -43,3 +43,31 @@ export type {
   AgentContext,
   AgentRoundCallbacks,
 } from './loop-types.js';
+
+// ── Message Utilities ───────────────────────────────────────
+export {
+  buildUserContent,
+  normalizeMessages,
+  renderToolResultForLLM,
+  sanitizeMessagesForLog,
+  rowToMessage,
+} from './messages.js';
+
+// ── Tool Execution ──────────────────────────────────────────
+export {
+  executeSingleTool,
+  executeToolCalls,
+} from './tool-execution.js';
+export type {
+  ToolCallRecorder,
+  ParsedToolCall,
+  ToolExecContext,
+} from './tool-execution.js';
+
+// ── Injectable Store Interfaces ─────────────────────────────
+export type {
+  AgentMessageStore,
+  AgentSessionUpdater,
+  AgentUsageRecorder,
+  AgentToolCallRecorder,
+} from './stores.js';

@@ -61,6 +61,7 @@ jobs:
 
       - name: Build extracted packages
         run: |
+          pnpm --filter @agw/logger build
           pnpm --filter @agw/security build
           pnpm --filter @agw/mcp-client build
           pnpm --filter @agw/tool-platform build
@@ -68,6 +69,9 @@ jobs:
           pnpm --filter @agw/cron build
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
+          pnpm --filter @agw/database build
+          pnpm --filter @agw/schemas build
+          pnpm --filter @agw/plugins build
 
       - name: Type-check core
         run: pnpm --filter @agw/core typecheck
@@ -105,6 +109,7 @@ jobs:
 
       - name: Build extracted packages (needed for imports)
         run: |
+          pnpm --filter @agw/logger build
           pnpm --filter @agw/security build
           pnpm --filter @agw/mcp-client build
           pnpm --filter @agw/tool-platform build
@@ -112,6 +117,9 @@ jobs:
           pnpm --filter @agw/cron build
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
+          pnpm --filter @agw/database build
+          pnpm --filter @agw/schemas build
+          pnpm --filter @agw/plugins build
 
       - name: Run tests
         run: pnpm test

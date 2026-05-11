@@ -19,7 +19,12 @@
       "@agw/provider-bridge": ["./packages/provider-bridge/src"],
       "@agw/cron": ["./packages/cron/src"],
       "@agw/memory-engine": ["./packages/memory-engine/src"],
-      "@agw/agent-core": ["./packages/agent-core/src"]
+      "@agw/agent-core": ["./packages/agent-core/src"],
+      "@agw/logger": ["./packages/logger/src"],
+      "@agw/database": ["./packages/database/src"],
+      "@agw/tools-common": ["./packages/tools-common/src"],
+      "@agw/plugins": ["./packages/plugins/src"],
+      "@agw/schemas": ["./packages/schemas/src"]
     }
   }
 }

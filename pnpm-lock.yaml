@@ -92,6 +92,12 @@ importers:
       '@agw/cron':
         specifier: workspace:*
         version: link:../cron
+      '@agw/database':
+        specifier: workspace:*
+        version: link:../database
+      '@agw/logger':
+        specifier: workspace:*
+        version: link:../logger
       '@agw/mcp-client':
         specifier: workspace:*
         version: link:../mcp-client
@@ -101,6 +107,9 @@ importers:
       '@agw/provider-bridge':
         specifier: workspace:*
         version: link:../provider-bridge
+      '@agw/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       '@agw/security':
         specifier: workspace:*
         version: link:../security
@@ -191,6 +200,41 @@ importers:
         specifier: ^22.0.0
         version: 22.19.18
 
+  packages/database:
+    dependencies:
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+      better-sqlite3:
+        specifier: ^11.10.0
+        version: 11.10.0
+      pg:
+        specifier: ^8.16.0
+        version: 8.20.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+      '@types/pg':
+        specifier: ^8.15.2
+        version: 8.20.0
+
+  packages/logger:
+    dependencies:
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
+      pino-pretty:
+        specifier: ^13.0.0
+        version: 13.1.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+
   packages/mcp-client:
     dependencies:
       '@agw/types':
@@ -203,6 +247,22 @@ importers:
 
   packages/memory-engine:
     dependencies:
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+
+  packages/plugins:
+    dependencies:
+      '@agw/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      '@agw/tool-platform':
+        specifier: workspace:*
+        version: link:../tool-platform
       '@agw/types':
         specifier: workspace:*
         version: link:../types
@@ -227,6 +287,19 @@ importers:
         specifier: ^25.5.0
         version: 25.5.0
 
+  packages/schemas:
+    dependencies:
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+
   packages/security:
     dependencies:
       '@agw/types':
@@ -242,6 +315,28 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
+
+  packages/tools-common:
+    dependencies:
+      '@agw/memory-engine':
+        specifier: workspace:*
+        version: link:../memory-engine
+      '@agw/tool-platform':
+        specifier: workspace:*
+        version: link:../tool-platform
+      '@agw/types':
+        specifier: workspace:*
+        version: link:../types
+      nodemailer:
+        specifier: ^7.0.3
+        version: 7.0.13
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
+      '@types/nodemailer':
+        specifier: ^6.4.17
+        version: 6.4.23
 
   packages/types: {}
 
@@ -1240,6 +1335,9 @@ packages:
 
   '@types/node@25.5.0':
     resolution: {integrity: sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==}
+
+  '@types/nodemailer@6.4.23':
+    resolution: {integrity: sha512-aFV3/NsYFLSx9mbb5gtirBSXJnAlrusoKNuPbxsASWc7vrKLmIrTQRpdcxNcSFL3VW2A2XpeLEavwb2qMi6nlQ==}
 
   '@types/nodemailer@7.0.11':
     resolution: {integrity: sha512-E+U4RzR2dKrx+u3N4DlsmLaDC6mMZOM/TPROxA0UAPiTgI0y4CEFBmZE+coGWTjakDriRsXG368lNk1u9Q0a2g==}
@@ -2339,6 +2437,10 @@ packages:
     peerDependenciesMeta:
       encoding:
         optional: true
+
+  nodemailer@7.0.13:
+    resolution: {integrity: sha512-PNDFSJdP+KFgdsG3ZzMXCgquO7I6McjY2vlqILjtJd0hy8wEvtugS9xKRF2NWlPNGxvLCXlTNIae4serI7dinw==}
+    engines: {node: '>=6.0.0'}
 
   nodemailer@8.0.3:
     resolution: {integrity: sha512-JQNBqvK+bj3NMhUFR3wmCl3SYcOeMotDiwDBvIoCuQdF0PvlIY0BH+FJ2CG7u4cXKPChplE78oowlH/Otsc4ZQ==}
@@ -3867,6 +3969,10 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/nodemailer@6.4.23':
+    dependencies:
+      '@types/node': 22.19.18
+
   '@types/nodemailer@7.0.11':
     dependencies:
       '@types/node': 22.19.18
@@ -5112,6 +5218,8 @@ snapshots:
   node-fetch@2.7.0:
     dependencies:
       whatwg-url: 5.0.0
+
+  nodemailer@7.0.13: {}
 
   nodemailer@8.0.3: {}
 
