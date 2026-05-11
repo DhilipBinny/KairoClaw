@@ -13,7 +13,7 @@ import type { ToolRegistration } from '@agw/tool-platform';
 import type { PluginToolRegistry as ToolRegistry } from './interfaces.js';
 import type { PluginSecretsResolver as SecretsStore } from './interfaces.js';
 import type { PluginMediaStore as MediaStore } from './interfaces.js';
-import { detectBase64Image, extFromContentType } from './media-utils.js';
+import { detectBase64Image, extFromContentType, sniffBase64Mime } from './media-utils.js';
 import type { AgwLogger } from '@agw/types';
 type Logger = AgwLogger;
 
@@ -54,7 +54,7 @@ function setJsonPath(obj: unknown, jsonPath: string, value: unknown): void {
  * Admin explicitly configured these URLs, so private IPs are allowed.
  * Only block metadata endpoints and loopback.
  */
-function validatePluginUrl(urlStr: string): void {
+export function validatePluginUrl(urlStr: string): void {
   let parsed: URL;
   try {
     parsed = new URL(urlStr);
@@ -188,8 +188,10 @@ export function registerHttpPlugins(
         },
         executor: async (args) => {
           try {
-            // Build URL
-            const url = new URL(endpoint.path, plugin.baseUrl);
+            // Build URL — string concat preserves baseUrl path prefix
+            const base = plugin.baseUrl.replace(/\/$/, '');
+            const ep = endpoint.path.startsWith('/') ? endpoint.path : `/${endpoint.path}`;
+            const url = new URL(`${base}${ep}`);
 
             // Apply defaults for missing optional params
             const resolvedArgs: Record<string, unknown> = {};
@@ -243,6 +245,9 @@ export function registerHttpPlugins(
 
             // ── Binary image response (e.g. /generate returns PNG) ──
             const imgExt = extFromContentType(contentType);
+            if (imgExt && !mediaStore) {
+              return { error: `Response is a binary image (${contentType}) but no media store is configured — cannot save.` };
+            }
             if (imgExt && mediaStore) {
               const buf = Buffer.from(await res.arrayBuffer());
               const filename = mediaStore.save(buf, imgExt);
@@ -279,22 +284,29 @@ export function registerHttpPlugins(
                     if (typeof value !== 'string' || !value) continue;
 
                     if (mapping.encoding === 'base64') {
-                      const ext = mapping.mimeType.split('/')[1] || 'png';
+                      const sniffed = sniffBase64Mime(value);
+                      const actualMime = sniffed?.mime || mapping.mimeType;
+                      const ext = sniffed?.ext || mapping.mimeType.split('/')[1] || 'png';
                       const filename = mediaStore.saveBase64(value, ext);
                       const mediaUrl = mediaStore.getUrl(filename);
                       const filePath = path.join(mediaStore.dir, filename);
-                      // Replace the base64 in the response with the URL
                       setJsonPath(body, mapping.path, mediaUrl);
                       b64Media.push({
                         type: 'image',
                         filePath,
                         fileName: filename,
-                        mimeType: mapping.mimeType,
+                        mimeType: actualMime,
                         url: mediaUrl,
                       });
                     } else if (mapping.encoding === 'url') {
-                      // URL-based: download and save
+                      // URL-based: download and save (restrict to same host as plugin)
                       try {
+                        validatePluginUrl(value);
+                        const responseHost = new URL(value).hostname;
+                        const pluginHost = new URL(plugin.baseUrl).hostname;
+                        if (responseHost !== pluginHost) {
+                          continue; // skip URLs pointing to a different host
+                        }
                         const imgRes = await fetch(value, { signal: AbortSignal.timeout(30000) });
                         const buf = Buffer.from(await imgRes.arrayBuffer());
                         const ext = mapping.mimeType.split('/')[1] || 'png';
@@ -365,7 +377,7 @@ export function registerHttpPlugins(
 
             return {
               status: res.status,
-              body: typeof body === 'string' ? truncated : body,
+              body: bodyStr.length > MAX_RESPONSE_SIZE ? truncated : body,
               ...(b64Media.length > 0 ? { _media: b64Media } : {}),
             };
           } catch (e: unknown) {

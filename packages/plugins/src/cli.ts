@@ -23,9 +23,10 @@ const execFileAsync = promisify(execFileCb);
  * For commands like "status", returns ["status"].
  */
 function extractSubcommand(args: string): string[] {
-  const tokens = args.trim().split(/\s+/);
-  // Return up to 2 tokens for matching (e.g. "pr list", "issue create")
-  return tokens.slice(0, 2).filter(Boolean);
+  const tokens = args.trim().split(/\s+/).filter(Boolean);
+  // Skip leading flags (e.g. "--repo foo") to find the actual subcommand
+  const nonFlags = tokens.filter(t => !t.startsWith('-'));
+  return nonFlags.slice(0, 2);
 }
 
 /**
