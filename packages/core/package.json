@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agw/mcp-client": "workspace:*",
+    "@agw/provider-bridge": "workspace:*",
     "@agw/security": "workspace:*",
     "@agw/tool-platform": "workspace:*",
     "@agw/types": "workspace:*",
