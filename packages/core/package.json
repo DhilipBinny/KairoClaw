@@ -13,6 +13,7 @@
   "dependencies": {
     "@agw/cron": "workspace:*",
     "@agw/mcp-client": "workspace:*",
+    "@agw/memory-engine": "workspace:*",
     "@agw/provider-bridge": "workspace:*",
     "@agw/security": "workspace:*",
     "@agw/tool-platform": "workspace:*",

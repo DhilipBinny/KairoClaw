@@ -94,6 +94,9 @@ importers:
       '@agw/mcp-client':
         specifier: workspace:*
         version: link:../mcp-client
+      '@agw/memory-engine':
+        specifier: workspace:*
+        version: link:../memory-engine
       '@agw/provider-bridge':
         specifier: workspace:*
         version: link:../provider-bridge
@@ -202,6 +205,10 @@ importers:
       '@agw/types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.18
 
   packages/provider-bridge:
     dependencies:
