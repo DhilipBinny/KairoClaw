@@ -10,7 +10,7 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ToolRegistration } from '@agw/tool-platform';
-import { loadPlugins, savePlugins } from '../../plugins/store.js';
+import { loadPlugins, savePlugins } from '../../plugins/index.js';
 
 const execFileAsync = promisify(execFileCb);
 

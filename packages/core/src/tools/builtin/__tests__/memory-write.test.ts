@@ -8,7 +8,7 @@ import {
   writePinned,
   forgetById,
   memoryWriteTools,
-} from '../memory-write.js';
+} from '@agw/tools-common';
 
 const memoryWrite = memoryWriteTools.find(t => t.definition.name === 'memory_write')!;
 const memoryPin = memoryWriteTools.find(t => t.definition.name === 'memory_pin')!;

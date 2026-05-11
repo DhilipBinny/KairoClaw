@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { execTools } from '../exec.js';
+import { execTools } from '@agw/tools-common';
 
 const batchExec = execTools.find(t => t.definition.name === 'batch_exec')!;
 

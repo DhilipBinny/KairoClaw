@@ -13,9 +13,8 @@ import fs from 'node:fs';
 import type { Page, Locator } from 'playwright-core';
 import type { ToolRegistration } from '@agw/tool-platform';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
-import { validateFetchUrl, validateResolvedIP } from './web.js';
+import { validateFetchUrl, validateResolvedIP, getWorkspace } from '@agw/tools-common';
 import { hasRemoteBrowser, sendBrowserCommand } from '../../browser/bridge.js';
-import { getWorkspace } from './utils.js';
 
 const MAX_SNAPSHOT_CHARS = 60_000;
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5MB

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreTool } from '../tool-search.js';
+import { scoreTool } from '@agw/tools-common';
 
 describe('scoreTool', () => {
   const tool = (name: string, desc: string, hint?: string) => ({

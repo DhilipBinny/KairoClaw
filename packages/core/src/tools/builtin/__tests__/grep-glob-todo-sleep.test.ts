@@ -1,8 +1,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readTodos, writeTodos, type Todo } from '../todo.js';
-import { sleepTools } from '../sleep.js';
+import { readTodos, writeTodos, type Todo } from '@agw/tools-common';
+import { sleepTools } from '@agw/tools-common';
 
 const sleepTool = sleepTools.find(t => t.definition.name === 'sleep')!;
 
