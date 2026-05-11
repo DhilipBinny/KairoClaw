@@ -12,19 +12,19 @@ export * from './constants.js';
 
 // Tool registrations
 export { fileTools, safePath as fileSafePath } from './files.js';
-export { execTools } from './exec.js';
-export { webTools } from './web.js';
+export { execTools, SAFE_ENV_KEYS, formatExecResult } from './exec.js';
+export { webTools, validateFetchUrl, validateResolvedIP, formatSearchResults } from './web.js';
 export { grepTools } from './grep.js';
 export { globTools } from './glob.js';
 export { sleepTools } from './sleep.js';
-export { todoTools } from './todo.js';
-export { pdfTools } from './pdf.js';
+export { todoTools, readTodos, writeTodos, type Todo } from './todo.js';
+export { pdfTools, extractPdfText } from './pdf.js';
 export { emailTools } from './email.js';
-export { applyPatchTools } from './apply-patch.js';
+export { applyPatchTools, extractPatchPaths } from './apply-patch.js';
 export { planModeTools } from './plan-mode.js';
-export { toolSearchTools } from './tool-search.js';
-export { memoryTools } from './memory.js';
-export { memoryWriteTools } from './memory-write.js';
+export { toolSearchTools, scoreTool } from './tool-search.js';
+export { memoryTools, setMemorySystem } from './memory.js';
+export { memoryWriteTools, appendProfileEntry, readPinned, writePinned, forgetById } from './memory-write.js';
 
 // Combined registration array for convenience
 import type { ToolRegistration } from '@agw/tool-platform';

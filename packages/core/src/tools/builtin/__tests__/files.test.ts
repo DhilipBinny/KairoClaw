@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { safePath, scopedSafePath, fileTools } from '../files.js';
+import { safePath, scopedSafePath, fileTools } from '@agw/tools-common';
 import { FileStateTracker } from '../../../agent/file-state.js';
 
 // Create a temp workspace for each test

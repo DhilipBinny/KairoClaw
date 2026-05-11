@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { extractPatchPaths } from '../apply-patch.js';
-import { planModeTools } from '../plan-mode.js';
+import { extractPatchPaths } from '@agw/tools-common';
+import { planModeTools } from '@agw/tools-common';
 
 const enterPlanMode = planModeTools.find(t => t.definition.name === 'enter_plan_mode')!;
 const exitPlanMode = planModeTools.find(t => t.definition.name === 'exit_plan_mode')!;

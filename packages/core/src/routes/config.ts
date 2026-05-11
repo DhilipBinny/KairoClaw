@@ -6,7 +6,7 @@ import { requireRole } from '../auth/middleware.js';
 import type { AuditService } from '../security/audit.js';
 import { setNestedPath, getConfig, getTenantId } from './utils.js';
 import { configSchema, pluginsSchema } from '../config/schema.js';
-import { loadPlugins, savePlugins } from '../plugins/store.js';
+import { loadPlugins, savePlugins } from '../plugins/index.js';
 
 /** Get stateDir from config, throw if not set. */
 function getStateDir(config: GatewayConfig): string {
