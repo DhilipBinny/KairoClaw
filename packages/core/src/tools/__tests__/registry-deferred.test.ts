@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ToolRegistry } from '../registry.js';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 
 function makeTool(name: string, alwaysLoad = false): ToolRegistration {
   return {

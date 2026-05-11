@@ -38,7 +38,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { requireRole } from '../auth/middleware.js';
 import { createModuleLogger } from '../observability/logger.js';
-import type { ProgressBus } from '../agent/progress-bus.js';
+import type { ProgressBus } from '@agw/tool-platform';
 
 interface Options {
   progressBus: ProgressBus;

@@ -8,7 +8,7 @@
  * KairoClaw falls back to standard API key auth.
  */
 
-import type { ProviderInterface, ProviderResponse, ChatArgs } from './types.js';
+import type { ProviderInterface, ProviderResponse, ChatArgs } from '@agw/types';
 import type { GatewayConfig } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { GatewayConfig, ModelCapabilities } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
-import { parseAnthropicModels, parseOllamaModel, mergeCapabilities } from './registry.js';
+import { parseAnthropicModels, parseOllamaModel, mergeCapabilities } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('system');

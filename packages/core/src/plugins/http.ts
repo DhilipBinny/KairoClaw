@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { GatewayConfig, HttpPluginConfig, HttpEndpointConfig, MediaAttachment } from '@agw/types';
 
 type EndpointParamDef = { type: string; description?: string; required?: boolean; default?: unknown };
-import type { ToolRegistration } from '../tools/types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
 import type { MediaStore } from '../media/store.js';

@@ -2,10 +2,10 @@ import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR, EXEC_MAX_TIMEOUT_SECONDS, EXEC_DEFAUL
 import { execFile as execFileCb } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 /**
  * Format an exec result (stdout + stderr + exitCode) as a single

@@ -11,7 +11,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import type { Page, Locator } from 'playwright-core';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { BrowserSessionManager } from '../../browser/session-manager.js';
 import { validateFetchUrl, validateResolvedIP } from './web.js';
 import { hasRemoteBrowser, sendBrowserCommand } from '../../browser/bridge.js';

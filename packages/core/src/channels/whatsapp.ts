@@ -31,7 +31,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, markdownToWhatsApp, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
 const log = createModuleLogger('channel.whatsapp');
 

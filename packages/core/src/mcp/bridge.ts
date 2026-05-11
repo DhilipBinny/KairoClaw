@@ -7,8 +7,8 @@ import type {
   MCPServerStatus,
   JSONSchemaProperty,
 } from '@agw/types';
-import { MCPClient } from './client.js';
-import { detectToolSetChange } from './security.js';
+import { MCPClient } from '@agw/mcp-client';
+import { detectToolSetChange } from '@agw/mcp-client';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
 

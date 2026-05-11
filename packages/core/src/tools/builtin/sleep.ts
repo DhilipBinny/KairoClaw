@@ -19,8 +19,8 @@
  * can reach for it without a `tool_search` round.
  */
 
-import type { ToolRegistration } from '../types.js';
-import { textEnvelope } from '../envelope.js';
+import type { ToolRegistration } from '@agw/tool-platform';
+import { textEnvelope } from '@agw/tool-platform';
 
 const MIN_SLEEP_MS = 100;
 const MAX_SLEEP_MS = 5 * 60 * 1_000; // 5 minutes

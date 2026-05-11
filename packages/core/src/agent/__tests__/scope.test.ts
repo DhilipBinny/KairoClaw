@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveScopeKey, deriveGroupScopeKey } from '../scope.js';
+import { deriveScopeKey, deriveGroupScopeKey } from '@agw/memory-engine';
 
 describe('deriveScopeKey', () => {
   // Resolved user UUID takes priority

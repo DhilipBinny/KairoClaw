@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import { scopedSafePath } from './files.js';
 import { getWorkspace } from './utils.js';
 import type { MemorySystem } from '../../memory/index.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 /**
  * Shared MemorySystem instance — set during bootstrap via setMemorySystem().
