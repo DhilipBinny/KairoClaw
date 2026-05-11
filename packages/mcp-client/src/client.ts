@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { Logger } from 'pino';
+import type { AgwLogger } from '@agw/types';
+import { noopLogger } from '@agw/types';
 import type {
   MCPServerConfig,
   MCPServerStatus,
@@ -8,10 +9,6 @@ import type {
   MCPToolDefinition,
   MCPTransportType,
 } from '@agw/types';
-
-// ══════════════════════════════════════════════
-// JSON-RPC types
-// ══════════════════════════════════════════════
 
 interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -39,10 +36,6 @@ interface MCPToolCallResult {
   isError?: boolean;
 }
 
-// ══════════════════════════════════════════════
-// JSON-RPC helpers
-// ══════════════════════════════════════════════
-
 function jsonrpcRequest(method: string, params: Record<string, unknown> | undefined, id: string): string {
   return JSON.stringify({ jsonrpc: '2.0', method, params, id } satisfies JsonRpcRequest);
 }
@@ -55,10 +48,6 @@ function parseJsonrpcResponse(data: string): JsonRpcResponse | null {
   }
 }
 
-// ══════════════════════════════════════════════
-// Stdio Transport
-// ══════════════════════════════════════════════
-
 class StdioTransport {
   private command: string;
   private args: string[];
@@ -67,10 +56,10 @@ class StdioTransport {
   private buffer = '';
   private pendingRequests = new Map<string, PendingRequest>();
   private notificationHandlers = new Map<string, (params: Record<string, unknown> | undefined) => void>();
-  private log: Logger;
+  private log: AgwLogger;
   _onClose: ((code: number | null) => void) | null = null;
 
-  constructor(command: string, args: string[], env: Record<string, string>, log: Logger) {
+  constructor(command: string, args: string[], env: Record<string, string>, log: AgwLogger) {
     this.command = command;
     this.args = args;
     this.env = env;
@@ -79,7 +68,6 @@ class StdioTransport {
 
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      // Allowlist approach — only pass safe env vars + MCP-specific overrides
       const SAFE_ENV_KEYS = [
         'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
         'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
@@ -100,7 +88,6 @@ class StdioTransport {
       const startTimeout = setTimeout(() => {
         if (!started) {
           started = true;
-          // Process started but no greeting — that's fine for MCP
           resolve();
         }
       }, 5000);
@@ -120,7 +107,6 @@ class StdioTransport {
         if (text) this.log.debug({ transport: 'stdio', stderr: text.slice(0, 500) }, 'MCP server stderr');
       });
 
-      // ChildProcessWithoutNullStreams may lack .on() in some @types/node versions
       (child as unknown as NodeJS.EventEmitter).on('error', (err: Error) => {
         if (!started) {
           started = true;
@@ -139,7 +125,6 @@ class StdioTransport {
   }
 
   private _processBuffer(): void {
-    // MCP uses newline-delimited JSON
     let newlineIdx: number;
     while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
       const line = this.buffer.slice(0, newlineIdx).trim();
@@ -149,7 +134,6 @@ class StdioTransport {
       const msg = parseJsonrpcResponse(line);
       if (!msg) continue;
 
-      // Response to a request
       if (msg.id !== undefined && this.pendingRequests.has(msg.id)) {
         const pending = this.pendingRequests.get(msg.id)!;
         this.pendingRequests.delete(msg.id);
@@ -158,9 +142,7 @@ class StdioTransport {
         } else {
           pending.resolve(msg.result);
         }
-      }
-      // Notification (no id)
-      else if (msg.method) {
+      } else if (msg.method) {
         const handler = this.notificationHandlers.get(msg.method);
         if (handler) handler(msg.params);
       }
@@ -204,7 +186,6 @@ class StdioTransport {
   async close(): Promise<void> {
     if (this.process && !this.process.killed) {
       this.process.kill('SIGTERM');
-      // Force kill after 5s
       const proc = this.process;
       setTimeout(() => {
         if (proc && !proc.killed) {
@@ -219,10 +200,6 @@ class StdioTransport {
   }
 }
 
-// ══════════════════════════════════════════════
-// SSE Transport
-// ══════════════════════════════════════════════
-
 class SSETransport {
   private url: string;
   private headers: Record<string, string>;
@@ -231,9 +208,9 @@ class SSETransport {
   private notificationHandlers = new Map<string, (params: Record<string, unknown> | undefined) => void>();
   private _abortController: AbortController | null = null;
   private _connected = false;
-  private log: Logger;
+  private log: AgwLogger;
 
-  constructor(url: string, headers: Record<string, string>, log: Logger) {
+  constructor(url: string, headers: Record<string, string>, log: AgwLogger) {
     this.url = url;
     this.headers = headers;
     this.log = log;
@@ -252,14 +229,9 @@ class SSETransport {
     }
 
     this._connected = true;
-
-    // Read the SSE stream in the background
     this._readStream(response.body!).catch(() => {});
-
-    // Wait briefly for the endpoint message
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Verify the stream is still alive after the wait
     if (!this._connected) {
       throw new Error('SSE stream disconnected during initial connection');
     }
@@ -288,7 +260,6 @@ class SSETransport {
           } else if (line.startsWith('data: ')) {
             eventData += line.slice(6);
           } else if (line === '') {
-            // End of event
             if (eventType === 'endpoint' && eventData) {
               const baseUrl = new URL(this.url);
               this.sessionUrl = new URL(eventData.trim(), baseUrl).toString();
@@ -370,15 +341,7 @@ class SSETransport {
   }
 }
 
-// ══════════════════════════════════════════════
-// Transport interface (union type)
-// ══════════════════════════════════════════════
-
 type Transport = StdioTransport | SSETransport;
-
-// ══════════════════════════════════════════════
-// MCP Client
-// ══════════════════════════════════════════════
 
 export class MCPClient {
   readonly name: string;
@@ -391,9 +354,9 @@ export class MCPClient {
   _statusMessage: string | null = null;
   _connectedAt: number | null = null;
   private _onTransportCloseHandler: ((code: number | null) => void) | null = null;
-  private log: Logger;
+  private log: AgwLogger;
 
-  constructor(name: string, serverConfig: MCPServerConfig, log: Logger) {
+  constructor(name: string, serverConfig: MCPServerConfig, log: AgwLogger = noopLogger) {
     this.name = name;
     this.config = serverConfig;
     this.log = log;
@@ -405,7 +368,6 @@ export class MCPClient {
       this._error = null;
       this._statusMessage = 'Starting process...';
 
-      // Create transport
       if (this.config.transport === 'sse') {
         this.transport = new SSETransport(
           this.config.url!,
@@ -413,8 +375,6 @@ export class MCPClient {
           this.log,
         );
       } else {
-        // Default: stdio
-        // Env is already resolved by the bridge (via secrets store + process.env)
         this.transport = new StdioTransport(
           this.config.command!,
           this.config.args || [],
@@ -426,7 +386,6 @@ export class MCPClient {
       await this.transport.connect();
       this._statusMessage = 'Handshaking...';
 
-      // MCP Initialize handshake
       const initResult = await this.transport.send('initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {
@@ -441,18 +400,15 @@ export class MCPClient {
       this.serverInfo = initResult?.serverInfo || {};
       this.log.info({ server: this.name, info: this.serverInfo }, 'MCP server initialized');
 
-      // Send initialized notification (stdio only — write directly to stdin)
       if (this.transport instanceof StdioTransport && this.transport.connected) {
         void this.transport.send('notifications/initialized', {}, 5000).catch(err => {
           this.log.warn({ err: (err as Error).message, serverId: this.name }, 'Failed to send initialized notification');
         });
       }
 
-      // Discover tools
       this._statusMessage = 'Discovering tools...';
       await this.refreshTools();
 
-      // Wire up transport close handler for auto-reconnect
       if (this.transport instanceof StdioTransport) {
         this.transport._onClose = (code) => {
           if (this._status === 'connected') {
@@ -480,7 +436,6 @@ export class MCPClient {
     }
   }
 
-  /** Register a handler called when the underlying transport process exits. */
   onTransportClose(handler: (code: number | null) => void): void {
     this._onTransportCloseHandler = handler;
   }
@@ -502,9 +457,8 @@ export class MCPClient {
     const result = await this.transport.send('tools/call', {
       name: toolName,
       arguments: args || {},
-    }, 120000) as MCPToolCallResult | null; // 2 min timeout for tool calls
+    }, 120000) as MCPToolCallResult | null;
 
-    // MCP returns { content: [{ type: "text", text: "..." }, ...], isError?: boolean }
     if (result?.isError) {
       const errorText = (result.content || [])
         .filter(c => c.type === 'text')
@@ -513,7 +467,6 @@ export class MCPClient {
       return { error: errorText || 'MCP tool returned an error' };
     }
 
-    // Extract text content
     const textParts = (result?.content || [])
       .filter(c => c.type === 'text')
       .map(c => c.text || '');

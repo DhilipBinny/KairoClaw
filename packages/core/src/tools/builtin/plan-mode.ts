@@ -24,10 +24,10 @@
  * wired via ToolRegistry.isInPlanMode / setPlanMode.
  */
 
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { ToolRegistry } from '../registry.js';
 import type { Session } from '@agw/types';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 function getSessionId(context: { session?: Session | { id?: string } }): string | undefined {
   const s = context.session;

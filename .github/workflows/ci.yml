@@ -59,6 +59,16 @@ jobs:
       - name: Build types
         run: pnpm --filter @agw/types build
 
+      - name: Build extracted packages
+        run: |
+          pnpm --filter @agw/security build
+          pnpm --filter @agw/mcp-client build
+          pnpm --filter @agw/tool-platform build
+          pnpm --filter @agw/provider-bridge build
+          pnpm --filter @agw/cron build
+          pnpm --filter @agw/memory-engine build
+          pnpm --filter @agw/agent-core build
+
       - name: Type-check core
         run: pnpm --filter @agw/core typecheck
 
@@ -92,6 +102,16 @@ jobs:
 
       - name: Build types (needed for imports)
         run: pnpm --filter @agw/types build
+
+      - name: Build extracted packages (needed for imports)
+        run: |
+          pnpm --filter @agw/security build
+          pnpm --filter @agw/mcp-client build
+          pnpm --filter @agw/tool-platform build
+          pnpm --filter @agw/provider-bridge build
+          pnpm --filter @agw/cron build
+          pnpm --filter @agw/memory-engine build
+          pnpm --filter @agw/agent-core build
 
       - name: Run tests
         run: pnpm test

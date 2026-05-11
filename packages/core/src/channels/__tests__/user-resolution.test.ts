@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb, type TestDb } from '../../db/__tests__/test-db.js';
 import { UserRepository } from '../../db/repositories/user.js';
 import { SenderLinkRepository } from '../../db/repositories/sender-link.js';
-import { deriveScopeKey, deriveGroupScopeKey } from '../../agent/scope.js';
+import { deriveScopeKey, deriveGroupScopeKey } from '@agw/memory-engine';
 import { hashApiKey } from '../../auth/keys.js';
 
 let db: TestDb;

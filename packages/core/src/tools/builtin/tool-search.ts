@@ -25,10 +25,10 @@
  *   - free-form keywords — substring/score-based ranking
  */
 
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { ToolRegistry } from '../registry.js';
 import type { Session } from '@agw/types';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 /**
  * Score a tool against a set of query terms. Higher = better match.

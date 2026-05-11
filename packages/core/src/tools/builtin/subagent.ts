@@ -10,12 +10,12 @@
  */
 
 import crypto from 'node:crypto';
-import type { ToolRegistration } from '../types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { InboundMessage } from '@agw/types';
 import type { SubAgentRegistry } from '../../agent/subagent-registry.js';
 import { backgroundTaskRegistry, type BackgroundTaskRegistry } from '../../agent/background-task-registry.js';
 import { createModuleLogger } from '../../observability/logger.js';
-import { textEnvelope } from '../envelope.js';
+import { textEnvelope } from '@agw/tool-platform';
 
 const log = createModuleLogger('tool');
 

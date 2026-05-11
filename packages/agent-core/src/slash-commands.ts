@@ -1,0 +1,176 @@
+/**
+ * Slash command handler.
+ *
+ * Parses and executes commands like /reset, /status, /help, /model,
+ * /sessions, /compact, /cron. Returns null if the text is not a
+ * recognised slash command.
+ */
+
+import type { GatewayConfig } from '@agw/types';
+import type { MessageLister, SessionRow } from '@agw/memory-engine';
+import { estimateMessageTokens } from '@agw/memory-engine';
+import {
+  needsCompaction,
+  checkAndCompact,
+  type CallLLMFn,
+  type MessageStore,
+} from './compaction.js';
+
+// ── Session store interface (subset of SessionRepository) ────
+export interface SessionLister {
+  listByTenant(tenantId: string, limit?: number): Promise<SessionRow[]>;
+  update(id: string, data: Partial<{ metadata: string }>): Promise<void>;
+}
+
+/** Context needed by slash command handlers. */
+export interface SlashCommandContext {
+  messageStore: MessageStore;
+  sessionStore: SessionLister;
+  config: GatewayConfig;
+  session: SessionRow;
+  tenantId: string;
+  userId?: string;
+  callLLM?: CallLLMFn;
+}
+
+/** Result of a slash command. */
+export interface SlashCommandResult {
+  text: string;
+}
+
+const SLASH_COMMANDS: Record<string, string> = {
+  '/new': 'reset',
+  '/reset': 'reset',
+  '/status': 'status',
+  '/stop': 'stop',
+  '/compact': 'compact',
+  '/model': 'model',
+  '/help': 'help',
+  '/sessions': 'sessions',
+};
+
+/**
+ * Parse and execute a slash command.
+ *
+ * @returns The command result, or `null` if the text is not a slash command.
+ */
+export async function handleSlashCommand(
+  command: string,
+  text: string,
+  context: SlashCommandContext,
+): Promise<SlashCommandResult | null> {
+  const action = SLASH_COMMANDS[command.toLowerCase()];
+  if (!action) return null;
+
+  const { messageStore, sessionStore, config, session } = context;
+
+  if (action === 'reset') {
+    // Delete messages for the session — the caller creates a new session
+    await messageStore.deleteBySession(session.id);
+    return {
+      text: `Session reset. New session: \`${session.id.slice(0, 8)}\``,
+    };
+  }
+
+  if (action === 'status') {
+    const messages = await messageStore.listBySession(session.id);
+    const tokenEst = estimateMessageTokens(messages);
+    const modelName = config.model?.primary || 'default';
+    const compaction = await needsCompaction(session.id, modelName, messageStore, config);
+    return {
+      text:
+        `**Session Status**\n` +
+        `- Key: ${session.channel}:${session.chat_id ?? 'main'}\n` +
+        `- Session: ${session.id.slice(0, 8)}\n` +
+        `- Turns: ${session.turns}\n` +
+        `- Messages: ${messages.length}\n` +
+        `- Tokens (est): ${tokenEst.toLocaleString()}\n` +
+        `- Tokens: ${(session.input_tokens || 0).toLocaleString()} in / ${(session.output_tokens || 0).toLocaleString()} out\n` +
+        `- Model: ${modelName}\n` +
+        `- Compaction: ${compaction.needed ? 'needed' : 'ok'}\n` +
+        `- Updated: ${session.updated_at}`,
+    };
+  }
+
+  if (action === 'stop') {
+    return { text: 'Stopped.' };
+  }
+
+  if (action === 'compact') {
+    try {
+      const result = await checkAndCompact(
+        session.id,
+        config.model.primary,
+        messageStore,
+        undefined,
+        config,
+        context.callLLM,
+        context.tenantId,
+      );
+      if (result.compacted) {
+        const methodLabel = result.method === 'soft-clean' ? 'Soft clean' : 'Compacted';
+        return {
+          text: `${methodLabel}: ${result.oldMessageCount} -> ${result.newMessageCount} messages (${result.method}), saved ~${(result.tokensSaved ?? 0).toLocaleString()} tokens`,
+        };
+      }
+      return {
+        text: `No compaction needed (${(result.tokens ?? 0).toLocaleString()} tokens, threshold: ${(result.threshold ?? 0).toLocaleString()})`,
+      };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { text: `Compaction error: ${msg}` };
+    }
+  }
+
+  if (action === 'model') {
+    const newModel = text.trim();
+    if (!newModel) {
+      const metadata = JSON.parse(session.metadata || '{}');
+      const sessionOverride = metadata.model_override || null;
+      return {
+        text: `Current model: \`${sessionOverride || config.model.primary}\`${sessionOverride ? ' (session override)' : ''}\nUsage: \`/model provider/model-name\``,
+      };
+    }
+    // Validate against known models from fallback chain + primary
+    const knownModels = [config.model.primary, ...(config.model.fallbackChain || [])];
+    if (!knownModels.includes(newModel)) {
+      return {
+        text: `Unknown model: \`${newModel}\`\nAvailable: ${knownModels.map(m => `\`${m}\``).join(', ')}`,
+      };
+    }
+    // Store per-session override in metadata instead of mutating global config
+    const meta = JSON.parse(session.metadata || '{}');
+    meta.model_override = newModel;
+    await sessionStore.update(session.id, { metadata: JSON.stringify(meta) });
+    return {
+      text: `Model switched for this session: \`${newModel}\``,
+    };
+  }
+
+  if (action === 'help') {
+    return {
+      text:
+        `**Available Commands**\n` +
+        `- \`/new\` — Reset session\n` +
+        `- \`/status\` — Show session status\n` +
+        `- \`/model [provider/model]\` — Switch model\n` +
+        `- \`/compact\` — Force context compaction\n` +
+        `- \`/sessions\` — List active sessions\n` +
+        `- \`/stop\` — Stop current generation\n` +
+        `- \`/help\` — Show this help`,
+    };
+  }
+
+  if (action === 'sessions') {
+    const sessions = await sessionStore.listByTenant(context.tenantId);
+    const lines = sessions.map((s) => {
+      const totalTokens = (s.input_tokens || 0) + (s.output_tokens || 0);
+      return `- \`${s.channel}:${s.chat_id ?? 'main'}\` — ${s.turns || 0} turns, ${totalTokens} tokens`;
+    });
+    return {
+      text: `**Active Sessions** (${sessions.length})\n${lines.join('\n') || 'None'}`,
+    };
+  }
+
+  return null;
+}

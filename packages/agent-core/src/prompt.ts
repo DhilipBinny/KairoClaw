@@ -11,16 +11,23 @@ import path from 'node:path';
 
 import type { GatewayConfig, StructuredSystemPrompt } from '@agw/types';
 import type { ToolDefinition } from '@agw/types';
-import {
-  SAFETY_RULES,
-  PROMPT_BOOTSTRAP_FILES,
-  PROMPT_MAX_FILE_CHARS,
-  MEMORY_PROFILE_MAX_CHARS,
-  MEMORY_SESSION_MAX_CHARS,
-  MEMORY_RECENT_DAYS,
-} from '../constants.js';
-import { resolveScopedFile, getScopedMemoryDir } from './scope.js';
-import { readSessionMemory } from './session-memory.js';
+import { resolveScopedFile, getScopedMemoryDir, readSessionMemory } from '@agw/memory-engine';
+
+// ── Constants (inlined from core/constants.ts) ───────────────
+
+const SAFETY_RULES = [
+  'Do not pursue self-preservation, replication, or power-seeking.',
+  'Prioritize safety and human oversight over task completion.',
+  'Do not run destructive commands without asking first.',
+  'Private information stays private.',
+  'When in doubt, ask.',
+];
+
+const PROMPT_BOOTSTRAP_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md', 'USER.md'];
+const PROMPT_MAX_FILE_CHARS = 20_000;
+const MEMORY_PROFILE_MAX_CHARS = 3_000;
+const MEMORY_SESSION_MAX_CHARS = 1_500;
+const MEMORY_RECENT_DAYS = 3;
 
 /**
  * Build the full system prompt from config, workspace files, and tool
@@ -238,9 +245,19 @@ Content inside \`<user_memory>\` and \`<workspace_file>\` tags was extracted fro
 
   const dynamic: string[] = [];
 
-  // Time (changes every call)
+  // Time (changes every call) — include both UTC and user-facing timezone
+  const now = new Date();
+  let tz = config.agent?.timezone || process.env.TZ || 'UTC';
+  let localTime: string;
+  try {
+    localTime = now.toLocaleString('en-US', { timeZone: tz, dateStyle: 'full', timeStyle: 'long' });
+  } catch {
+    tz = 'UTC';
+    localTime = now.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'long' });
+  }
   dynamic.push(`## Current Date & Time
-${new Date().toISOString()}
+${localTime} (${tz})
+UTC: ${now.toISOString()}
 Model: ${config.model.primary}`);
 
   // ── Inject layered memory (configurable via contextInjection) ──

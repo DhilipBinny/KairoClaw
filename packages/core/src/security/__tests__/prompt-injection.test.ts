@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../input.js';
-import { filterOutput, checkOutputSafety } from '../output.js';
-import { buildSystemPrompt } from '../../agent/prompt.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
+import { filterOutput, checkOutputSafety } from '@agw/security';
+import { buildSystemPrompt } from '@agw/agent-core';
 import { configSchema } from '../../config/schema.js';
 import type { GatewayConfig, ToolDefinition } from '@agw/types';
 

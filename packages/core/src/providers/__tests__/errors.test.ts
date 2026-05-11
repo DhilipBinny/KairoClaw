@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyError } from '../errors.js';
+import { classifyError } from '@agw/provider-bridge';
 
 describe('classifyError — timeout classification', () => {
   it('classifies AbortError by name', () => {

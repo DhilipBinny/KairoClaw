@@ -8,7 +8,7 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { GatewayConfig } from '@agw/types';
-import type { ToolRegistration } from '../tools/types.js';
+import type { ToolRegistration } from '@agw/tool-platform';
 import type { ToolRegistry } from '../tools/registry.js';
 import { SAFE_ENV_KEYS } from '../tools/builtin/exec.js';
 import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR } from '../constants.js';

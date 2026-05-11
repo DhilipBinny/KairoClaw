@@ -15,7 +15,7 @@ import {
   runPostToolUseHooks,
   runSessionStartHooks,
   type HookConfig,
-} from '../runner.js';
+} from '@agw/tool-platform';
 
 describe('matchesHookPattern', () => {
   it('matches "*" against any tool name', () => {

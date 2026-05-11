@@ -12,7 +12,7 @@ import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import type { InboundMessage, ChatRequest, ChatResponse } from '@agw/types';
 import type { AgentRunner } from './types.js';
 import { createModuleLogger } from '../observability/logger.js';
-import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '../security/input.js';
+import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
 const log = createModuleLogger('system');
 

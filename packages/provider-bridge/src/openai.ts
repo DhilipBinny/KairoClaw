@@ -1,27 +1,21 @@
 import OpenAI from 'openai';
 import type { ProviderInterface, ProviderResponse, ChatArgs } from './types.js';
 import type { ProviderOptions } from './types.js';
-import type { GatewayConfig, ToolCall } from '@agw/types';
-import { createModuleLogger } from '../observability/logger.js';
+import type { GatewayConfig, ToolCall, AgwLogger } from '@agw/types';
+import { noopLogger } from '@agw/types';
 import { createStreamingTimeout } from './streaming-timeout.js';
 
-const log = createModuleLogger('llm');
-
-/**
- * OpenAI-compatible provider.
- *
- * Works for both OpenAI (standard API) and Ollama (same SDK, different baseUrl).
- * The provider name is set based on whether a custom baseUrl is provided.
- */
 export class OpenAIProvider implements ProviderInterface {
   readonly name: string;
   private client: OpenAI;
   private defaultModel: string;
   private config?: GatewayConfig;
+  private log: AgwLogger;
 
-  constructor(options: ProviderOptions, config?: GatewayConfig) {
+  constructor(options: ProviderOptions, config?: GatewayConfig, logger?: AgwLogger) {
     const { apiKey, baseUrl, defaultModel } = options;
     this.config = config;
+    this.log = logger ?? noopLogger;
 
     this.client = new OpenAI({
       apiKey: apiKey || 'ollama',
@@ -35,8 +29,6 @@ export class OpenAIProvider implements ProviderInterface {
     const { messages, tools, model, systemPrompt, onDelta, signal } = args;
     const modelId = model || this.defaultModel;
 
-    // Build messages with system prompt
-    // If structured prompt (cached + dynamic), concatenate for OpenAI (no caching API)
     const apiMessages: OpenAI.ChatCompletionMessageParam[] = [];
     const flatPrompt = typeof systemPrompt === 'object' && systemPrompt !== null && 'cached' in systemPrompt
       ? (systemPrompt as { cached: string; dynamic: string }).cached +
@@ -49,7 +41,7 @@ export class OpenAIProvider implements ProviderInterface {
     }
 
     for (const m of messages) {
-      if (m.role === 'system') continue; // Already added
+      if (m.role === 'system') continue;
       if (m.role === 'tool') {
         apiMessages.push({
           role: 'tool',
@@ -67,32 +59,21 @@ export class OpenAIProvider implements ProviderInterface {
           })),
         });
       } else if (Array.isArray(m.content)) {
-        // Handle multimodal content — convert to OpenAI format
         const parts: OpenAI.ChatCompletionContentPart[] = m.content.map((part) => {
           if (part.type === 'image') {
             return {
               type: 'image_url' as const,
-              image_url: {
-                url: `data:${part.source.media_type};base64,${part.source.data}`,
-              },
+              image_url: { url: `data:${part.source.media_type};base64,${part.source.data}` },
             };
           }
           return { type: 'text' as const, text: part.text };
         });
-        // Multimodal messages are always user messages
-        apiMessages.push({
-          role: 'user' as const,
-          content: parts,
-        });
+        apiMessages.push({ role: 'user' as const, content: parts });
       } else {
-        apiMessages.push({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        });
+        apiMessages.push({ role: m.role as 'user' | 'assistant', content: m.content });
       }
     }
 
-    // Build tool definitions
     const openaiTools: OpenAI.ChatCompletionTool[] = (tools || []).map((t) => ({
       type: 'function' as const,
       function: {
@@ -111,7 +92,6 @@ export class OpenAIProvider implements ProviderInterface {
       params.tools = openaiTools;
     }
 
-    // Streaming timeout: TTFT + idle timer (replaces single wall-clock timeout)
     const streamTimeout = createStreamingTimeout({ signal });
 
     try {
@@ -129,7 +109,6 @@ export class OpenAIProvider implements ProviderInterface {
         const delta = chunk.choices?.[0]?.delta;
         if (!delta) continue;
 
-        // Handle reasoning_content from Ollama thinking models (qwen3, deepseek-r1)
         const reasoningContent = (delta as any).reasoning_content as string | undefined;
         if (reasoningContent) {
           thinkingText += reasoningContent;
@@ -149,8 +128,7 @@ export class OpenAIProvider implements ProviderInterface {
               }
               if (tc.id) toolCalls[tc.index].id = tc.id;
               if (tc.function?.name) toolCalls[tc.index].function.name += tc.function.name;
-              if (tc.function?.arguments)
-                toolCalls[tc.index].function.arguments += tc.function.arguments;
+              if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
             }
           }
         }
@@ -173,7 +151,7 @@ export class OpenAIProvider implements ProviderInterface {
       streamTimeout.clear();
       const err = e as Error & { status?: number };
       if (err.name === 'AbortError') throw new Error('Request timed out');
-      log.error({ err: err.message, model: modelId }, 'OpenAI API error');
+      this.log.error({ err: err.message, model: modelId }, 'OpenAI API error');
       throw e;
     }
   }

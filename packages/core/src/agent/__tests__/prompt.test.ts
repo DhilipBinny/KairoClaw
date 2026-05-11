@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSystemPrompt } from '../prompt.js';
+import { buildSystemPrompt } from '@agw/agent-core';
 import type { GatewayConfig } from '@agw/types';
 
 const minimalConfig: GatewayConfig = {

@@ -1,6 +1,6 @@
 import dns from 'node:dns';
-import type { ToolRegistration } from '../types.js';
-import { textEnvelope } from '../envelope.js';
+import type { ToolRegistration } from '@agw/tool-platform';
+import { textEnvelope } from '@agw/tool-platform';
 
 export interface SearchResult {
   title: string;

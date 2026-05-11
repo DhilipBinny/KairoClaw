@@ -8,7 +8,7 @@ import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { requireRole } from '../auth/middleware.js';
 import { getConfig } from './utils.js';
-import { getModelCapabilities } from '../models/registry.js';
+import { getModelCapabilities } from '@agw/provider-bridge';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
 import { resolveMasterKey, readEncryptedStore, decryptStore, encryptStore, writeEncryptedStore } from '../secrets/crypto.js';

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createStreamingTimeout } from '../streaming-timeout.js';
+import { createStreamingTimeout } from '@agw/provider-bridge';
 
 describe('createStreamingTimeout', () => {
   afterEach(() => {

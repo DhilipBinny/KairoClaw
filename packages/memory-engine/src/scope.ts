@@ -15,8 +15,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SCOPE_DIR_NAME, GLOBAL_ONLY_FILES, SCOPED_CHANNELS, SHARED_DIR, DOCUMENTS_DIR } from '../constants.js';
-import type { DatabaseAdapter } from '../db/index.js';
+import type { DatabaseAdapter } from '@agw/types';
+
+// ── Inlined constants (previously from core/constants.ts) ─────
+const SCOPE_DIR_NAME = 'scopes';
+const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'SOUL.md'];
+const SCOPED_CHANNELS = ['telegram', 'whatsapp', 'web'];
+const SHARED_DIR = 'shared';
+const DOCUMENTS_DIR = 'documents';
 
 /**
  * Derive the scope key for per-user isolation.
