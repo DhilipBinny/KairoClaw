@@ -105,10 +105,12 @@ export class SessionRepository {
 
   /** Delete a session and all child records (tool_calls, usage_records, messages). */
   async deleteWithCascade(id: string): Promise<void> {
-    await this.db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
-    await this.db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
-    await this.db.run('DELETE FROM messages WHERE session_id = ?', [id]);
-    await this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
+    await this.db.transaction(async () => {
+      await this.db.run('DELETE FROM tool_calls WHERE session_id = ?', [id]);
+      await this.db.run('DELETE FROM usage_records WHERE session_id = ?', [id]);
+      await this.db.run('DELETE FROM messages WHERE session_id = ?', [id]);
+      await this.db.run('DELETE FROM sessions WHERE id = ?', [id]);
+    });
   }
 
   /** Clean up orphaned internal sessions (sub-agents that didn't clean up). Returns count cleaned. */
