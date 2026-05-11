@@ -204,8 +204,8 @@ export class ProviderRegistry {
         logClassifiedError(classified, { provider: provider.name, attempt, maxRetries });
 
         if (classified.retriable && attempt < maxRetries) {
-          if (classified.action === 'compact_and_retry') {
-            throw e; // compaction handled by agent loop, not provider layer
+          if (classified.action === 'compact_and_retry' || classified.action === 'failover') {
+            throw e; // handled by outer callWithFailover or agent loop
           }
           if (classified.retryDelayMs > 0) {
             await new Promise((r) => setTimeout(r, classified.retryDelayMs));
