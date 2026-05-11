@@ -29,6 +29,7 @@ import { getWorkspace } from './utils.js';
 import { textEnvelope } from '@agw/tool-platform';
 
 const EXEC_TIMEOUT_MS = 30_000;
+const PERSONA_FILES = new Set(['IDENTITY.md', 'SOUL.md', 'RULES.md', 'USER.md']);
 
 interface GitApplyResult {
   stdout: string;
@@ -173,6 +174,12 @@ export const applyPatchTools: ToolRegistration[] = [
             `Patch validation failed (git apply --check exit ${check.exitCode}):\n` +
             (check.stderr || check.stdout || '(no output)'),
         };
+      }
+
+      const touchedPaths = extractPatchPaths(patch);
+      const blocked = touchedPaths.filter(p => PERSONA_FILES.has(path.basename(p)));
+      if (blocked.length > 0) {
+        return { error: `Patch rejected — modifies protected persona files: ${blocked.join(', ')}. Use the admin UI to edit these files.` };
       }
 
       const dryRun = args.dry_run === true;

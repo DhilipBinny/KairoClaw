@@ -234,13 +234,25 @@ export function registerHttpPlugins(
               method: endpoint.method,
               headers: requestHeaders,
               signal: AbortSignal.timeout(plugin.timeout * 1000),
+              redirect: 'manual',
             };
 
             if (isBodyMethod && Object.keys(resolvedArgs).length > 0) {
               fetchOpts.body = JSON.stringify(resolvedArgs);
             }
 
-            const res = await fetch(url.toString(), fetchOpts);
+            let res = await fetch(url.toString(), fetchOpts);
+
+            // Follow redirects manually with SSRF validation on each hop
+            let redirects = 0;
+            while (res.status >= 300 && res.status < 400 && redirects < 5) {
+              const location = res.headers.get('location');
+              if (!location) break;
+              const redirectUrl = new URL(location, url.toString()).toString();
+              validatePluginUrl(redirectUrl);
+              res = await fetch(redirectUrl, { ...fetchOpts, method: 'GET', body: undefined });
+              redirects++;
+            }
             const contentType = res.headers.get('content-type') || '';
 
             // ── Binary image response (e.g. /generate returns PNG) ──
