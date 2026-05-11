@@ -69,6 +69,7 @@ jobs:
           pnpm --filter @agw/cron build
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
+          pnpm --filter @agw/database build
 
       - name: Type-check core
         run: pnpm --filter @agw/core typecheck
@@ -114,6 +115,7 @@ jobs:
           pnpm --filter @agw/cron build
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
+          pnpm --filter @agw/database build
 
       - name: Run tests
         run: pnpm test

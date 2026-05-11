@@ -9,6 +9,7 @@ export type { DatabaseAdapter } from '@agw/types';
 export { SQLiteAdapter } from './sqlite.js';
 export { PostgresAdapter } from './postgres.js';
 export { runMigrations } from './migrate.js';
+export type { DbDialect } from './migrate.js';
 
 import { SQLiteAdapter } from './sqlite.js';
 import { PostgresAdapter } from './postgres.js';
