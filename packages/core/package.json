@@ -40,7 +40,8 @@
     "pino-roll": "^4.0.0",
     "playwright-core": "^1.58.2",
     "qrcode": "^1.5.4",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@agw/logger": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
