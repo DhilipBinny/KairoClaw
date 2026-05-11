@@ -476,7 +476,7 @@ async function main(): Promise<void> {
           : { id: 'anonymous', role: 'user', elevated: false }),
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
-      isProviderAvailable: (prefix) => providerRegistry.hasProvider(prefix),
+      isProviderAvailable: (prefix) => providerRegistry.hasProviderSync(prefix),
       tools: initialTools,
       refreshTools,
       executeTool: async (name, args, ctx) => {

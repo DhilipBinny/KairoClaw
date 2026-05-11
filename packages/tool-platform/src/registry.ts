@@ -501,14 +501,15 @@ export class ToolRegistry {
     const budget = context.resultBudget;
     if (budget) {
       let bytes = 0;
-      try {
-        if (typeof result === 'string') {
-          bytes = Buffer.byteLength(result, 'utf8');
-        } else if (result && typeof result === 'object') {
-          bytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
-        }
-      } catch { /* ignore */ }
-      budget.add(bytes);
+      const resultStr = typeof result === 'string' ? result : (result && typeof result === 'object' ? JSON.stringify(result) : '');
+      try { bytes = Buffer.byteLength(resultStr, 'utf8'); } catch { /* ignore */ }
+      const underBudget = budget.add(bytes);
+
+      if (!underBudget && bytes > 10_000) {
+        const maxChars = 10_000;
+        const truncated = resultStr.slice(0, maxChars) + `\n... (truncated — ${bytes} bytes exceeded turn budget)`;
+        result = typeof result === 'string' ? truncated : { _budgetTruncated: true, preview: truncated };
+      }
     }
 
     if (this.toolCallRecorder) {
