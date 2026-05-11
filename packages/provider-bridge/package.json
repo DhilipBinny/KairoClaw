@@ -9,6 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agw/types": "workspace:*"
+    "@agw/types": "workspace:*",
+    "@anthropic-ai/sdk": "^0.73.0",
+    "openai": "^4.104.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0"
   }
 }

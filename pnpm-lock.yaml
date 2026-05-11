@@ -91,6 +91,9 @@ importers:
       '@agw/mcp-client':
         specifier: workspace:*
         version: link:../mcp-client
+      '@agw/provider-bridge':
+        specifier: workspace:*
+        version: link:../provider-bridge
       '@agw/security':
         specifier: workspace:*
         version: link:../security
@@ -198,6 +201,16 @@ importers:
       '@agw/types':
         specifier: workspace:*
         version: link:../types
+      '@anthropic-ai/sdk':
+        specifier: ^0.73.0
+        version: 0.73.0(zod@4.3.6)
+      openai:
+        specifier: ^4.104.0
+        version: 4.104.0(ws@8.19.0)(zod@4.3.6)
+    devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
 
   packages/security:
     dependencies:
