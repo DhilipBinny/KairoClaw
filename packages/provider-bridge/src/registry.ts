@@ -97,8 +97,13 @@ export class ProviderRegistry {
     await this.initPromise;
   }
 
-  hasProvider(providerPrefix: string): boolean {
-    this.ensureInitialized();
+  async hasProvider(providerPrefix: string): Promise<boolean> {
+    await this.ensureInitialized();
+    return !!this.providers[providerPrefix];
+  }
+
+  /** Synchronous check — only valid after ensureInitialized() has completed. */
+  hasProviderSync(providerPrefix: string): boolean {
     return !!this.providers[providerPrefix];
   }
 
@@ -199,12 +204,13 @@ export class ProviderRegistry {
         logClassifiedError(classified, { provider: provider.name, attempt, maxRetries });
 
         if (classified.retriable && attempt < maxRetries) {
-          if (classified.action === 'retry_with_backoff' || classified.action === 'retry_immediately') {
-            if (classified.retryDelayMs > 0) {
-              await new Promise((r) => setTimeout(r, classified.retryDelayMs));
-            }
-            continue;
+          if (classified.action === 'compact_and_retry') {
+            throw e; // compaction handled by agent loop, not provider layer
           }
+          if (classified.retryDelayMs > 0) {
+            await new Promise((r) => setTimeout(r, classified.retryDelayMs));
+          }
+          continue;
         }
 
         throw e;
