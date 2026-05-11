@@ -94,6 +94,9 @@ importers:
       '@agw/security':
         specifier: workspace:*
         version: link:../security
+      '@agw/tool-platform':
+        specifier: workspace:*
+        version: link:../tool-platform
       '@agw/types':
         specifier: workspace:*
         version: link:../types
@@ -207,6 +210,10 @@ importers:
       '@agw/types':
         specifier: workspace:*
         version: link:../types
+    devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
 
   packages/types: {}
 
