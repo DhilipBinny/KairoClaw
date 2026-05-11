@@ -46,7 +46,7 @@ export async function generateFilePreview(
   // PDF files — extract text via pdftotext
   if (ext === '.pdf') {
     try {
-      const { extractPdfText } = await import('../tools/builtin/pdf.js');
+      const { extractPdfText } = await import('@agw/tools-common');
       const result = await extractPdfText(filePath, {});
       if ('error' in result) throw new Error(result.error);
       const preview = result.text.length > 5000

@@ -10,7 +10,7 @@ export type { PluginToolRegistry, PluginSecretsResolver, PluginMediaStore } from
 
 // Plugin registration
 export { registerCliPlugins } from './cli.js';
-export { registerHttpPlugins } from './http.js';
+export { registerHttpPlugins, validatePluginUrl } from './http.js';
 
 // OpenAPI auto-import
 export { importOpenAPIService, importAllOpenAPIServices, setOpenAPILogger } from './openapi.js';

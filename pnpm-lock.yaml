@@ -104,6 +104,9 @@ importers:
       '@agw/memory-engine':
         specifier: workspace:*
         version: link:../memory-engine
+      '@agw/plugins':
+        specifier: workspace:*
+        version: link:../plugins
       '@agw/provider-bridge':
         specifier: workspace:*
         version: link:../provider-bridge
@@ -116,6 +119,9 @@ importers:
       '@agw/tool-platform':
         specifier: workspace:*
         version: link:../tool-platform
+      '@agw/tools-common':
+        specifier: workspace:*
+        version: link:../tools-common
       '@agw/types':
         specifier: workspace:*
         version: link:../types

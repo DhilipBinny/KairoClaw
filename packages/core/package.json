@@ -43,7 +43,9 @@
     "zod": "^4.3.6",
     "@agw/logger": "workspace:*",
     "@agw/database": "workspace:*",
-    "@agw/schemas": "workspace:*"
+    "@agw/schemas": "workspace:*",
+    "@agw/plugins": "workspace:*",
+    "@agw/tools-common": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

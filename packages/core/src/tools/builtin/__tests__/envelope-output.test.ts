@@ -16,9 +16,9 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { textEnvelope, imageEnvelope, envelope } from '@agw/tool-platform';
-import { formatExecResult } from '../exec.js';
-import { formatSearchResults } from '../web.js';
-import { memoryTools, setMemorySystem } from '../memory.js';
+import { formatExecResult } from '@agw/tools-common';
+import { formatSearchResults } from '@agw/tools-common';
+import { memoryTools, setMemorySystem } from '@agw/tools-common';
 
 // ── envelope.ts helpers ──────────────────────────────────────
 

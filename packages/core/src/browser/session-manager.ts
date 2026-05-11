@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { createModuleLogger } from '../observability/logger.js';
-import { validateFetchUrl, validateResolvedIP } from '../tools/builtin/web.js';
+import { validateFetchUrl, validateResolvedIP } from '@agw/tools-common';
 
 const log = createModuleLogger('browser');
 

@@ -70,6 +70,7 @@ jobs:
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
           pnpm --filter @agw/database build
+          pnpm --filter @agw/tools-common build
           pnpm --filter @agw/schemas build
           pnpm --filter @agw/plugins build
 
@@ -118,6 +119,7 @@ jobs:
           pnpm --filter @agw/memory-engine build
           pnpm --filter @agw/agent-core build
           pnpm --filter @agw/database build
+          pnpm --filter @agw/tools-common build
           pnpm --filter @agw/schemas build
           pnpm --filter @agw/plugins build
 
