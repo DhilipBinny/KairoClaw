@@ -61,6 +61,7 @@ jobs:
 
       - name: Build extracted packages
         run: |
+          pnpm --filter @agw/logger build
           pnpm --filter @agw/security build
           pnpm --filter @agw/mcp-client build
           pnpm --filter @agw/tool-platform build
