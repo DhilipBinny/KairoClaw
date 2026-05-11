@@ -19,7 +19,8 @@
       "@agw/provider-bridge": ["./packages/provider-bridge/src"],
       "@agw/cron": ["./packages/cron/src"],
       "@agw/memory-engine": ["./packages/memory-engine/src"],
-      "@agw/agent-core": ["./packages/agent-core/src"]
+      "@agw/agent-core": ["./packages/agent-core/src"],
+      "@agw/agent-config": ["./packages/agent-config/src"]
     }
   }
 }
