@@ -169,23 +169,33 @@ export function loadSessionMemoryState(session: SessionRow): SessionMemoryState 
   } catch { return null; }
 }
 
-/** Save session memory state to session metadata. */
+const _metadataLocks = new Map<string, Promise<void>>();
+
+/** Save session memory state to session metadata (serialized per session). */
 export async function saveSessionMemoryState(
   sessionId: string,
   state: SessionMemoryState,
   sessionRepo: SessionUpdater,
 ): Promise<void> {
-  const session = await sessionRepo.getById(sessionId);
-  if (!session) return;
+  const prev = _metadataLocks.get(sessionId) ?? Promise.resolve();
+  const run = async () => {
+    const session = await sessionRepo.getById(sessionId);
+    if (!session) return;
 
-  let meta: Record<string, unknown>;
-  try {
-    meta = JSON.parse(session.metadata || '{}');
-  } catch {
-    meta = {};
-  }
-  meta.sessionMemory = state;
-  await sessionRepo.update(sessionId, { metadata: JSON.stringify(meta) });
+    let meta: Record<string, unknown>;
+    try {
+      meta = JSON.parse(session.metadata || '{}');
+    } catch {
+      meta = {};
+    }
+    meta.sessionMemory = state;
+    await sessionRepo.update(sessionId, { metadata: JSON.stringify(meta) });
+  };
+  const next = prev.then(run, run).finally(() => {
+    if (_metadataLocks.get(sessionId) === next) _metadataLocks.delete(sessionId);
+  });
+  _metadataLocks.set(sessionId, next);
+  await next;
 }
 
 /** Create a fresh state for a new session. */

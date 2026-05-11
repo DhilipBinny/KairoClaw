@@ -641,7 +641,13 @@ export async function compactSession(
   if (db) {
     await db.transaction(doCompact);
   } else {
-    await doCompact();
+    // No transaction available — run delete+insert but log on failure
+    // so partial state is diagnosable. In practice db is always provided.
+    try {
+      await doCompact();
+    } catch (e) {
+      throw new Error(`Compaction failed without transaction — session ${sessionId} may have lost messages: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   // ── Post-compact file restoration ──────────────────────────
