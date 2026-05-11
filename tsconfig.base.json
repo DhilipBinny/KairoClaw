@@ -21,7 +21,8 @@
       "@agw/memory-engine": ["./packages/memory-engine/src"],
       "@agw/agent-core": ["./packages/agent-core/src"],
       "@agw/logger": ["./packages/logger/src"],
-      "@agw/database": ["./packages/database/src"]
+      "@agw/database": ["./packages/database/src"],
+      "@agw/tools-common": ["./packages/tools-common/src"]
     }
   }
 }
