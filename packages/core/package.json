@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agw/mcp-client": "workspace:*",
     "@agw/security": "workspace:*",
     "@agw/types": "workspace:*",
     "@anthropic-ai/sdk": "^0.73.0",
