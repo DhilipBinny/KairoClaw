@@ -192,47 +192,418 @@ export interface AgentRoundCallbacks extends AgentCallbacks {
   onRoundEnd?: (round: number, maxRounds: number) => void;
 }
 
+// ─── Shared mutable state for a single agent turn ───────────
+
+interface ParsedToolCall {
+  tc: ToolCall;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  skipped?: string;
+}
+
+interface RunState {
+  inbound: InboundMessage;
+  model: string;
+  messages: Message[];
+  tools: ToolDefinition[];
+  systemPrompt: import('@agw/types').StructuredSystemPrompt;
+  caps: ReturnType<typeof getModelCapabilities>;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  fullText: string;
+  finalThinkingText: string | null;
+  collectedMedia: MediaAttachment[];
+  toolCallCounts: Map<string, number>;
+  subagentRegistry: SubAgentRegistry;
+  sessionMemoryState: SessionMemoryState | null;
+  userMsgResult: { id: number } | null;
+  reactiveCompactFailures: number;
+  round: number;
+  hasContextSummary: boolean;
+  userContent: string | MessageContentPart[];
+  thinkingConfig?: { enabled: true; mode: string; budgetTokens?: number };
+  sdkToolExecutor?: (name: string, args: Record<string, unknown>) => Promise<string>;
+  reqLog: typeof log;
+  sessionRepo: InstanceType<typeof SessionRepository> | null;
+  messageRepo: InstanceType<typeof MessageRepository> | null;
+  usageRepo: InstanceType<typeof UsageRepository> | null;
+  toolCallRepo: InstanceType<typeof ToolCallRepository> | null;
+}
+
+// ─── Stage: Model routing ────────────────────────────────────
+
+async function resolveModel(
+  inbound: InboundMessage,
+  context: AgentContext,
+): Promise<{ model: string; inbound: InboundMessage }> {
+  if (context.model) return { model: context.model, inbound };
+  if (context.config.agent?.routing?.enabled) {
+    const result = await routeModel(inbound, context.callLLM, context.config, context.isProviderAvailable);
+    log.info({ tier: result.tier, reason: result.reason, stage: result.stage, model: result.model, category: 'routing' }, 'Model routed');
+    if (result.stage === 'rule' && result.reason.startsWith('user override')) {
+      return { model: result.model, inbound: { ...inbound, text: stripModelOverride(inbound.text) } };
+    }
+    return { model: result.model, inbound };
+  }
+  return { model: context.config.model.primary, inbound };
+}
+
+// ─── Stage: SessionStart hooks ───────────────────────────────
+
+async function runSessionStartHooksStage(
+  inbound: InboundMessage,
+  historyRows: unknown[],
+  config: GatewayConfig,
+  session: { id: string },
+  scopeKey: string | null,
+  ephemeral: boolean,
+  reqLog: RunState['reqLog'],
+): Promise<InboundMessage> {
+  if (ephemeral || historyRows.length > 0) return inbound;
+  const hooks = (config as unknown as { hooks?: import('@agw/tool-platform').HooksConfig }).hooks;
+  const ssHooks = hooks?.SessionStart;
+  if (!ssHooks || ssHooks.length === 0) return inbound;
+  try {
+    const { runSessionStartHooks } = await import('@agw/tool-platform');
+    const outputs = await runSessionStartHooks(ssHooks, session.id, scopeKey);
+    if (outputs.length > 0) {
+      const prefix = outputs.map((o) => `[hook output]\n${o}`).join('\n\n');
+      reqLog.info({ hookCount: ssHooks.length, outputCount: outputs.length }, 'SessionStart hooks injected');
+      return { ...inbound, text: `${prefix}\n\n---\n\n${inbound.text}` };
+    }
+  } catch (e: unknown) {
+    reqLog.warn({ err: (e as Error).message }, 'SessionStart hook runner crashed');
+  }
+  return inbound;
+}
+
+// ─── Stage: Build user content (text or multimodal) ──────────
+
+function buildUserContent(
+  inbound: InboundMessage,
+  caps: RunState['caps'],
+): string | MessageContentPart[] {
+  if (!inbound.images || inbound.images.length === 0) return inbound.text;
+  if (caps.supportsVision) {
+    const parts: MessageContentPart[] = [];
+    for (const img of inbound.images) {
+      const sniffed = sniffBase64Mime(img.data);
+      parts.push({
+        type: 'image',
+        source: { type: 'base64', media_type: sniffed?.mime || img.mimeType, data: img.data },
+      });
+    }
+    parts.push({ type: 'text', text: inbound.text });
+    return parts;
+  }
+  return inbound.text +
+    '\n\n[Note: Images were sent but the current model does not support vision. Please switch to a vision-capable model like Claude or GPT-4o.]';
+}
+
+// ─── Stage: Normalize messages ───────────────────────────────
+
+function normalizeMessages(history: Message[], userContent: string | MessageContentPart[]): Message[] {
+  const raw: Message[] = [...history, { role: 'user', content: userContent }];
+  const result: Message[] = [];
+  for (const msg of raw) {
+    if (typeof msg.content === 'string' && !msg.content.trim() && !msg.tool_calls?.length) continue;
+    const last = result[result.length - 1];
+    if (last && last.role === msg.role && msg.role === 'user' && typeof last.content === 'string' && typeof msg.content === 'string') {
+      last.content = last.content + '\n' + msg.content;
+    } else {
+      result.push({ ...msg });
+    }
+  }
+  return result;
+}
+
+// ─── Stage: Save images to disk ──────────────────────────────
+
+async function saveImagesToDisk(
+  inbound: InboundMessage,
+  config: GatewayConfig,
+  userIdStr: string,
+): Promise<string[]> {
+  if (!inbound.images || inbound.images.length === 0) return [];
+  const fsMod = await import('node:fs');
+  const pathMod = await import('node:path');
+  const safeUserId = userIdStr.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  const mediaDir = pathMod.default.join(config.agent.workspace, 'scopes', safeUserId, 'media');
+  fsMod.default.mkdirSync(mediaDir, { recursive: true });
+  const paths: string[] = [];
+  for (const img of inbound.images) {
+    const ext = img.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+    try {
+      fsMod.default.writeFileSync(pathMod.default.join(mediaDir, filename), Buffer.from(img.data, 'base64'));
+      paths.push(filename);
+    } catch { /* non-fatal */ }
+  }
+  return paths;
+}
+
+// ─── Stage: Execute a single tool call ───────────────────────
+
+async function executeSingleTool(
+  p: ParsedToolCall,
+  s: RunState,
+  context: AgentContext,
+  callbacks: AgentRoundCallbacks,
+): Promise<{ toolCallId: string; content: string }> {
+  if (p.skipped) return { toolCallId: p.tc.id, content: p.skipped };
+
+  if (callbacks.onToolStart) {
+    try { callbacks.onToolStart(p.toolName, p.toolArgs); } catch { /* ignore */ }
+  }
+
+  const toolStartTime = Date.now();
+  let result: unknown;
+  let toolStatus = 'success';
+
+  try {
+    if (context.executeTool) {
+      result = await context.executeTool(p.toolName, p.toolArgs, {
+        session: context.session, subagentRegistry: s.subagentRegistry,
+        user: context.user, scopeKey: context.scopeKey,
+      } as any);
+    } else {
+      result = { error: 'No tool executor configured' };
+      toolStatus = 'error';
+    }
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : String(e);
+    s.reqLog.error({ tool: p.toolName, err: errMsg, category: 'tool' }, 'Tool execution failed');
+    result = { error: `Tool execution failed: ${errMsg}` };
+    toolStatus = 'error';
+  }
+
+  const durationMs = Date.now() - toolStartTime;
+
+  if (s.toolCallRepo) {
+    try {
+      await s.toolCallRepo.record({
+        id: p.tc.id || crypto.randomUUID(),
+        sessionId: context.session.id, tenantId: context.tenantId,
+        userId: context.userId, toolName: p.toolName,
+        arguments: p.toolArgs, result, status: toolStatus, durationMs,
+      });
+    } catch (e: unknown) {
+      s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: p.toolName }, 'Failed to record tool call (non-critical)');
+    }
+  }
+
+  // Collect _media attachments
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const resultObj = result as Record<string, unknown>;
+    const mediaArr = resultObj._media;
+    if (Array.isArray(mediaArr)) {
+      for (const item of mediaArr) {
+        if (!item || typeof item !== 'object') continue;
+        const m = item as Record<string, unknown>;
+        if (typeof m.filePath === 'string' && typeof m.fileName === 'string' &&
+            typeof m.mimeType === 'string' && typeof m.type === 'string' && fs.existsSync(m.filePath)) {
+          const attachment = item as MediaAttachment;
+          s.collectedMedia.push(attachment);
+          if (callbacks.onMedia) {
+            try { callbacks.onMedia(attachment); } catch { /* ignore */ }
+          }
+        }
+      }
+      delete resultObj._media;
+    }
+  }
+
+  const resultStr = renderToolResultForLLM(result);
+  s.reqLog.info({ tool: p.toolName, resultPreview: resultStr.slice(0, 200), resultLen: resultStr.length, durationMs, category: 'tool' }, 'Tool completed');
+
+  if (callbacks.onToolEnd) {
+    try { callbacks.onToolEnd(p.toolName, resultStr.slice(0, 500)); } catch { /* ignore */ }
+  }
+
+  let cappedResult = resultStr;
+  if (cappedResult.length > MAX_TOOL_RESULT_CHARS) {
+    cappedResult = cappedResult.slice(0, MAX_TOOL_RESULT_CHARS) +
+      `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT_CHARS} chars. Ask the user to narrow the query if more detail is needed.]`;
+  }
+
+  return { toolCallId: p.tc.id, content: `<tool_result name="${p.toolName}">\n${cappedResult}\n</tool_result>` };
+}
+
+// ─── Stage: Execute all tool calls with concurrency strategy ─
+
+async function executeToolCalls(
+  toolCalls: ToolCall[],
+  s: RunState,
+  context: AgentContext,
+  callbacks: AgentRoundCallbacks,
+): Promise<void> {
+  let totalToolResultSize = 0;
+
+  const parsed: ParsedToolCall[] = [];
+  for (const tc of toolCalls) {
+    const toolName = tc.function?.name || 'unknown';
+    let toolArgs: Record<string, unknown>;
+    try {
+      toolArgs = JSON.parse(tc.function?.arguments || '{}') as Record<string, unknown>;
+    } catch {
+      s.reqLog.warn({ tool: toolName }, 'Invalid tool arguments JSON');
+      toolArgs = {};
+    }
+    if (typeof toolArgs !== 'object' || toolArgs === null) toolArgs = {};
+
+    const argSummary = Object.entries(toolArgs).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+    s.reqLog.info({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool called');
+
+    const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
+    const callCount = (s.toolCallCounts.get(toolHash) ?? 0) + 1;
+    s.toolCallCounts.set(toolHash, callCount);
+    if (callCount > TOOL_LOOP_THRESHOLD) {
+      s.reqLog.warn({ tool: toolName, callCount, threshold: TOOL_LOOP_THRESHOLD }, 'Tool loop detected — skipping execution');
+      parsed.push({ tc, toolName, toolArgs, skipped: `[Tool loop detected: "${toolName}" called ${callCount} times with similar arguments. Try a different approach or tool.]` });
+    } else {
+      parsed.push({ tc, toolName, toolArgs });
+    }
+  }
+
+  const isSafe = (name: string) => context.isToolConcurrencySafe?.(name) ?? false;
+  let i = 0;
+  while (i < parsed.length) {
+    if (!parsed[i].skipped && isSafe(parsed[i].toolName)) {
+      const batch: ParsedToolCall[] = [];
+      while (i < parsed.length && (parsed[i].skipped || isSafe(parsed[i].toolName))) {
+        batch.push(parsed[i]);
+        i++;
+      }
+      if (batch.length > 1) {
+        s.reqLog.info({ tools: batch.map(b => b.toolName), count: batch.length, category: 'tool' }, 'Executing tools in parallel');
+      }
+      const results = await Promise.all(batch.map(p => executeSingleTool(p, s, context, callbacks)));
+      for (const r of results) {
+        if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
+          r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
+        }
+        totalToolResultSize += r.content.length;
+        s.messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+      }
+    } else {
+      const r = await executeSingleTool(parsed[i], s, context, callbacks);
+      if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
+        r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
+      }
+      totalToolResultSize += r.content.length;
+      s.messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+      i++;
+    }
+  }
+}
+
+// ─── Stage: Wait for sub-agents ──────────────────────────────
+
+async function drainSubAgents(s: RunState): Promise<void> {
+  if (!s.subagentRegistry.hasPending()) return;
+  s.reqLog.info({ pending: s.subagentRegistry.size }, 'Waiting for sub-agents to complete');
+  await s.subagentRegistry.waitForAll();
+  const summaries = s.subagentRegistry.buildResultSummaries();
+  for (const summary of summaries) {
+    const spawnMsg = s.messages.find(
+      m => m.role === 'tool' && typeof m.content === 'string' &&
+           m.content.includes(summary.childId) && m.content.includes(SUBAGENT_PENDING_MARKER),
+    );
+    if (spawnMsg) spawnMsg.content = JSON.stringify(summary.result);
+  }
+  s.reqLog.info({ completed: summaries.length }, 'Sub-agent results injected');
+}
+
+// ─── Stage: Persist results ──────────────────────────────────
+
+async function persistResults(s: RunState, context: AgentContext): Promise<void> {
+  if ((s.fullText.trim() || s.collectedMedia.length > 0) && s.messageRepo) {
+    const msgMetadata: Record<string, unknown> = {};
+    if (s.collectedMedia.length > 0) {
+      msgMetadata.media = s.collectedMedia.map(m => ({ type: m.type, fileName: m.fileName, mimeType: m.mimeType }));
+    }
+    await s.messageRepo.create({
+      sessionId: context.session.id, tenantId: context.tenantId,
+      role: 'assistant', content: s.fullText || '',
+      metadata: Object.keys(msgMetadata).length > 0 ? JSON.stringify(msgMetadata) : undefined,
+    });
+  }
+  if (s.sessionRepo) {
+    await s.sessionRepo.addUsage(context.session.id, s.totalInputTokens, s.totalOutputTokens);
+    await s.sessionRepo.incrementTurns(context.session.id);
+  }
+}
+
+// ─── Stage: Memory extraction (fire-and-forget) ──────────────
+
+function triggerMemoryExtraction(s: RunState, context: AgentContext): void {
+  const ephemeral = context.ephemeral ?? false;
+  if (ephemeral || !s.sessionMemoryState || s.totalInputTokens + s.totalOutputTokens === 0) return;
+
+  const isGroupScope = context.scopeKey?.startsWith('group_') ?? false;
+  const userRole = context.user?.role || 'user';
+  if (isGroupScope && userRole !== 'admin' && userRole !== 'power_user') return;
+
+  const check = shouldExtractSessionMemory(s.totalInputTokens, s.sessionMemoryState, context.config);
+  if (!check.shouldExtract) {
+    if (s.sessionMemoryState.extractionCount === 0 && s.sessionRepo) {
+      saveSessionMemoryState(context.session.id, s.sessionMemoryState, s.sessionRepo).catch(() => {});
+    }
+    return;
+  }
+
+  if (_activeExtractions.has(context.session.id)) {
+    s.reqLog.debug({ category: 'memory' }, 'Session memory extraction already in progress — skipping');
+    return;
+  }
+
+  s.reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
+  _activeExtractions.add(context.session.id);
+  const state = s.sessionMemoryState;
+
+  extractSessionMemory({
+    sessionId: context.session.id,
+    scopeKey: context.scopeKey ?? null,
+    db: context.db, config: context.config,
+    state, currentTokens: s.totalInputTokens,
+    callLLM: context.callLLM,
+  }).then((newState) => {
+    if (s.sessionRepo) {
+      saveSessionMemoryState(context.session.id, newState, s.sessionRepo).catch((e) => {
+        s.reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
+      });
+    }
+    return maybeExtractToProfile({
+      sessionId: context.session.id, channel: s.inbound.channel,
+      scopeKey: context.scopeKey, db: context.db,
+      config: context.config, callLLM: context.callLLM, minTurns: 5,
+    });
+  }).catch((e) => {
+    s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), category: 'memory' }, 'Session memory extraction or profile extraction failed');
+  }).finally(() => {
+    _activeExtractions.delete(context.session.id);
+  });
+}
+
 // ─── Agent loop ─────────────────────────────────────────────
 
-/**
- * Run the agent loop for an inbound message.
- *
- * @returns AgentResult with the assistant's text, usage, and metadata.
- */
 export async function runAgent(
   inboundParam: InboundMessage,
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
-  // `inbound` is made mutable locally so Phase 12 SessionStart hooks
-  // can prepend synthetic context to the user's first message.
-  let inbound = inboundParam;
-  const { onDelta, onThinkingDelta, onToolStart, onToolEnd, onMedia, onRoundStart, onRoundEnd } = callbacks;
+  const { onDelta, onThinkingDelta, onRoundStart, onRoundEnd } = callbacks;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
-
   const maxToolRounds = config.agent?.maxToolRounds || 25;
 
   // ── Model routing ───────────────────────────────────────
-  // Route the message to the best model tier (fast/standard/powerful).
-  // context.model overrides routing (used by sub-agents, ephemeral sessions).
-  let model: string;
-  if (context.model) {
-    model = context.model;
-  } else if (config.agent?.routing?.enabled) {
-    const routingResult = await routeModel(inbound, context.callLLM, config, context.isProviderAvailable);
-    model = routingResult.model;
-    log.info({ tier: routingResult.tier, reason: routingResult.reason, stage: routingResult.stage, model: routingResult.model, category: 'routing' }, 'Model routed');
-    // Strip @model prefix from message text so the LLM doesn't see it
-    if (routingResult.stage === 'rule' && routingResult.reason.startsWith('user override')) {
-      inbound = { ...inbound, text: stripModelOverride(inbound.text) };
-    }
-  } else {
-    model = config.model.primary;
-  }
+  const routing = await resolveModel(inboundParam, context);
+  const model = routing.model;
+  let inbound = routing.inbound;
 
-  // Tool executor bridge for SDK/CLI providers (in-process MCP)
+  // SDK/CLI tool executor bridge
   const sdkToolExecutor = context.executeTool
     ? async (name: string, args: Record<string, unknown>): Promise<string> => {
         try {
@@ -244,224 +615,106 @@ export async function runAgent(
       }
     : undefined;
 
-  // Child logger with request context — auto-propagated to all log calls
   const reqLog = log.child({ requestId, sessionId: session.id, channel: inbound.channel, model, ephemeral });
-
   const sessionRepo = !ephemeral ? new SessionRepository(db) : null;
   const messageRepo = !ephemeral ? new MessageRepository(db) : null;
   const usageRepo = !ephemeral ? new UsageRepository(db) : null;
   const toolCallRepo = !ephemeral ? new ToolCallRepository(db) : null;
 
-  // ── Slash commands (skip for ephemeral/sub-agent sessions) ──
+  // ── Slash commands ──────────────────────────────────────
   const trimmed = inbound.text.trim();
   if (!ephemeral && trimmed.startsWith('/')) {
     const [cmd, ...rest] = trimmed.split(/\s+/);
     const slashResult = await handleSlashCommand(cmd!, rest.join(' '), {
-      db,
-      config,
-      session,
-      tenantId,
-      userId,
-      callLLM: context.callLLM,
+      db, config, session, tenantId, userId, callLLM: context.callLLM,
     });
-    if (slashResult) {
-      return { text: slashResult.text, slashResult: true };
-    }
+    if (slashResult) return { text: slashResult.text, slashResult: true };
   }
 
-  // ── Empty message guard ─────────────────────────────────
-  if (!trimmed) {
-    return { text: null };
-  }
+  if (!trimmed) return { text: null };
 
-  // ── Initialize session memory state ─────────────────────
+  // ── Session memory ──────────────────────────────────────
   let sessionMemoryState: SessionMemoryState | null = null;
   if (!ephemeral && config.agent?.sessionMemory?.enabled !== false) {
     sessionMemoryState = loadSessionMemoryState(session) ?? createInitialState();
   }
 
-  // ── Pre-turn compaction check (skip for ephemeral) ──────
+  // ── Pre-turn compaction ─────────────────────────────────
   if (!ephemeral) {
     try {
       await checkAndCompact(session.id, model, db, config, context.callLLM, tenantId, context.scopeKey);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      reqLog.warn({ err: msg }, 'Compaction check failed');
+      reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Compaction check failed');
     }
   }
 
-  // ── Load conversation history (empty for ephemeral) ─────
+  // ── Load history + SessionStart hooks ───────────────────
   const historyRows = messageRepo ? await messageRepo.listBySession(session.id) : [];
+  inbound = await runSessionStartHooksStage(inbound, historyRows, config, session, context.scopeKey ?? null, ephemeral, reqLog);
 
-  // ── Phase 12 TB-2: SessionStart hooks ─────────────────────
-  // Fire once per session on the first turn (when there's no prior
-  // history). Hook stdout is prepended to the inbound user message
-  // as `[hook output] ...` synthetic context so the agent sees it
-  // without us having to fabricate a separate user turn.
-  // Skips for ephemeral (sub-agent) sessions — hooks are user-facing.
-  if (!ephemeral && historyRows.length === 0) {
-    const hooks = (config as unknown as { hooks?: import('@agw/tool-platform').HooksConfig }).hooks;
-    const ssHooks = hooks?.SessionStart;
-    if (ssHooks && ssHooks.length > 0) {
-      try {
-        const { runSessionStartHooks } = await import('@agw/tool-platform');
-        const outputs = await runSessionStartHooks(ssHooks, session.id, context.scopeKey ?? null);
-        if (outputs.length > 0) {
-          const prefix = outputs.map((o) => `[hook output]\n${o}`).join('\n\n');
-          inbound = { ...inbound, text: `${prefix}\n\n---\n\n${inbound.text}` };
-          reqLog.info({ hookCount: ssHooks.length, outputCount: outputs.length }, 'SessionStart hooks injected');
-        }
-      } catch (e: unknown) {
-        reqLog.warn({ err: (e as Error).message }, 'SessionStart hook runner crashed');
-      }
-    }
-  }
-
-  // ── Build system prompt ─────────────────────────────────
-  // Skip session memory injection when a [Context Summary] compaction message exists —
-  // the summary already contains session memory content; injecting both wastes tokens.
+  // ── Build prompt + messages ─────────────────────────────
   const hasContextSummary = historyRows.some(
     r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
   );
-  // Phase 8: `tools` and `systemPrompt` are mutable because
-  // `context.refreshTools` can expand the set mid-turn via tool_search.
-  // Both get rebuilt at the top of each LLM round when the set grows.
   let tools = context.tools ?? [];
   const caps = getModelCapabilities(model, config);
   let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary, { supportsVision: caps.supportsVision });
   const history: Message[] = historyRows.map(rowToMessage);
+  const userContent = buildUserContent(inbound, caps);
+  const messages = normalizeMessages(history, userContent);
 
-  // ── Build the user message content (text or multimodal) ──
-  let userContent: string | MessageContentPart[];
-  if (inbound.images && inbound.images.length > 0) {
-    if (caps.supportsVision) {
-      // Build multimodal content array
-      const parts: MessageContentPart[] = [];
-      for (const img of inbound.images) {
-        // Sniff actual MIME from base64 magic bytes — channels may report wrong type
-        const sniffed = sniffBase64Mime(img.data);
-        const mimeType = sniffed?.mime || img.mimeType;
-
-        parts.push({
-          type: 'image',
-          source: { type: 'base64', media_type: mimeType, data: img.data },
-        });
-      }
-      parts.push({ type: 'text', text: inbound.text });
-      userContent = parts;
-    } else {
-      // Model doesn't support vision — append note to text
-      userContent = inbound.text +
-        '\n\n[Note: Images were sent but the current model does not support vision. Please switch to a vision-capable model like Claude or GPT-4o.]';
-    }
-  } else {
-    userContent = inbound.text;
-  }
-
-  // ── Build messages array (normalize: merge consecutive same-role messages) ──
-  const rawMessages: Message[] = [...history, { role: 'user', content: userContent }];
-  const messages: Message[] = [];
-  for (const msg of rawMessages) {
-    // Skip messages with empty text content (Anthropic API rejects empty content blocks)
-    if (typeof msg.content === 'string' && !msg.content.trim() && !msg.tool_calls?.length) continue;
-    const last = messages[messages.length - 1];
-    if (last && last.role === msg.role && msg.role === 'user' && typeof last.content === 'string' && typeof msg.content === 'string') {
-      // Merge consecutive user messages (only when both are plain text)
-      last.content = last.content + '\n' + msg.content;
-    } else {
-      messages.push({ ...msg });
-    }
-  }
-
-  // ── Save images to disk for session viewer thumbnails ──
-  const savedImagePaths: string[] = [];
-  if (inbound.images && inbound.images.length > 0) {
-    const fsMod = await import('node:fs');
-    const pathMod = await import('node:path');
-    const workspace = config.agent.workspace;
-    const userId = (context.user?.id || 'anonymous').replace(/[^a-zA-Z0-9_\-]/g, '_');
-    const mediaDir = pathMod.default.join(workspace, 'scopes', userId, 'media');
-    fsMod.default.mkdirSync(mediaDir, { recursive: true });
-    for (const img of inbound.images) {
-      const ext = img.mimeType?.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
-      const filePath = pathMod.default.join(mediaDir, filename);
-      try {
-        fsMod.default.writeFileSync(filePath, Buffer.from(img.data, 'base64'));
-        savedImagePaths.push(filename);
-      } catch { /* non-fatal */ }
-    }
-  }
-
-  // ── Persist inbound user message (skip for ephemeral) ──
+  // ── Save images + persist user message ──────────────────
+  const savedImagePaths = await saveImagesToDisk(inbound, config, context.user?.id || 'anonymous');
   const persistText = typeof userContent === 'string' ? userContent : inbound.text;
   const userMsgResult = messageRepo ? await messageRepo.create({
-    sessionId: session.id,
-    tenantId,
-    role: 'user',
-    content: persistText,
+    sessionId: session.id, tenantId, role: 'user', content: persistText,
     metadata: JSON.stringify({
-      channel: inbound.channel,
-      sender: inbound.senderName,
+      channel: inbound.channel, sender: inbound.senderName,
       ...(inbound.images && inbound.images.length > 0 ? { imageCount: inbound.images.length } : {}),
       ...(savedImagePaths.length > 0 ? { images: savedImagePaths } : {}),
     }),
   }) : null;
-  // ── Build thinking config if enabled + model supports it ──
+
+  // ── Thinking config ─────────────────────────────────────
   const thinkingCfg = config.agent?.thinking;
   const thinkingConfig = (thinkingCfg?.enabled && caps.supportsThinking)
     ? { enabled: true as const, mode: thinkingCfg.mode || ('adaptive' as const), budgetTokens: thinkingCfg.budgetTokens }
     : undefined;
 
-  // ── ReAct loop ──────────────────────────────────────────
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let fullText = '';
-  let finalThinkingText: string | null = null;
-  const collectedMedia: MediaAttachment[] = [];
-  const toolCallCounts = new Map<string, number>();
-  const subagentRegistry = new SubAgentRegistry();
-  const MAX_REACTIVE_COMPACT_FAILURES = 3; // circuit breaker: stop after 3 consecutive compact attempts
-  let reactiveCompactFailures = 0;
-  let round = 0;
-  while (round < maxToolRounds) {
-    round++;
-    if (onRoundStart) onRoundStart(round, maxToolRounds);
+  // ── Shared state for the ReAct loop ─────────────────────
+  const s: RunState = {
+    inbound, model, messages, tools, systemPrompt, caps,
+    totalInputTokens: 0, totalOutputTokens: 0,
+    fullText: '', finalThinkingText: null,
+    collectedMedia: [], toolCallCounts: new Map(),
+    subagentRegistry: new SubAgentRegistry(),
+    sessionMemoryState, userMsgResult,
+    reactiveCompactFailures: 0, round: 0,
+    hasContextSummary, userContent, thinkingConfig,
+    sdkToolExecutor, reqLog,
+    sessionRepo, messageRepo, usageRepo, toolCallRepo,
+  };
 
-    // ── Phase 8: refresh tools mid-turn ─────────────────────
-    // If the session has loaded new tools via tool_search since the
-    // last round (or since createRunner built the initial set), pick
-    // them up before the next provider call. A size change is enough
-    // to detect — tools can only be added, never removed mid-turn.
+  // ── ReAct loop ──────────────────────────────────────────
+  while (s.round < maxToolRounds) {
+    s.round++;
+    if (onRoundStart) onRoundStart(s.round, maxToolRounds);
+
+    // Refresh tools mid-turn (Phase 8)
     if (context.refreshTools) {
       try {
         const fresh = await context.refreshTools();
-        if (fresh.length !== tools.length) {
-          tools = fresh;
-          systemPrompt = buildSystemPrompt(
-            config,
-            tools,
-            context.scopeKey,
-            inbound.channel,
-            session.id,
-            hasContextSummary,
-            { supportsVision: caps.supportsVision },
-          );
+        if (fresh.length !== s.tools.length) {
+          s.tools = fresh;
+          s.systemPrompt = buildSystemPrompt(config, s.tools, context.scopeKey, inbound.channel, session.id, s.hasContextSummary, { supportsVision: s.caps.supportsVision });
         }
-      } catch {
-        /* ignore — keep existing tools if refresh fails */
-      }
+      } catch { /* keep existing tools */ }
     }
 
-    // Log detailed request info for debugging
-    const contentLen = (c: string | MessageContentPart[]) =>
-      typeof c === 'string' ? c.length : JSON.stringify(c).length;
-    const totalContentSize = messages.reduce((sum, m) => sum + contentLen(m.content), 0);
-    reqLog.info({
-      round, maxRounds: maxToolRounds,
-      messageCount: messages.length, toolCount: tools.length,
-      contentKB: +(totalContentSize / 1024).toFixed(1),
-    }, 'Agent round started');
+    // Log round info
+    const contentLen = (c: string | MessageContentPart[]) => typeof c === 'string' ? c.length : JSON.stringify(c).length;
+    const totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
+    reqLog.info({ round: s.round, maxRounds: maxToolRounds, messageCount: s.messages.length, toolCount: s.tools.length, contentKB: +(totalContentSize / 1024).toFixed(1) }, 'Agent round started');
 
     // ── Call LLM ──────────────────────────────────────────
     const debugEnabled = !ephemeral && (config.agent as unknown as { debug?: { recordPrompt?: boolean } })?.debug?.recordPrompt === true;
@@ -471,30 +724,21 @@ export async function runAgent(
     const llmStart = Date.now();
     try {
       response = await context.callLLM({
-        messages,
-        tools: tools.length > 0 ? tools : undefined,
-        model,
-        systemPrompt,
-        onDelta,
-        onThinkingDelta,
-        thinkingConfig,
-        // Pass tool executor for SDK/CLI providers (in-process MCP tool bridge)
-        _executeTool: sdkToolExecutor,
-        _maxToolRounds: maxToolRounds,
+        messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
+        model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+        _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
       });
     } catch (e: unknown) {
-      // ── Classify the error and determine recovery action ──
       const classified = classifyError(e);
-      logClassifiedError(classified, { round, requestId, sessionId: session.id });
+      logClassifiedError(classified, { round: s.round, requestId, sessionId: session.id });
 
-      // ── prompt_too_long → reactive compact recovery ──
-      if (classified.type === 'prompt_too_long' && !ephemeral && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
-        reactiveCompactFailures++;
-        reqLog.warn({ round, attempt: reactiveCompactFailures, errorType: classified.type }, 'Context overflow — starting reactive compact recovery');
+      if (classified.type === 'prompt_too_long' && !ephemeral && s.reactiveCompactFailures < 3) {
+        s.reactiveCompactFailures++;
+        reqLog.warn({ round: s.round, attempt: s.reactiveCompactFailures, errorType: classified.type }, 'Context overflow — starting reactive compact recovery');
 
-        // Stage 1: Strip images from messages (cheapest — no LLM call)
+        // Stage 1: Strip images
         let strippedImages = false;
-        for (const m of messages) {
+        for (const m of s.messages) {
           if (Array.isArray(m.content)) {
             const textParts = (m.content as MessageContentPart[]).filter(p => p.type !== 'image');
             if (textParts.length < (m.content as MessageContentPart[]).length) {
@@ -507,54 +751,43 @@ export async function runAgent(
         }
         if (strippedImages) reqLog.info('Stage 1: Stripped images from messages');
 
-        // Stage 2: Force hard compaction (LLM summarization)
-        if (messageRepo) {
+        // Stage 2: Force hard compaction
+        if (s.messageRepo) {
           try {
             reqLog.info('Stage 2: Forcing hard compaction');
             await compactSession(session.id, tenantId, model, db, config, context.callLLM);
-            const freshRows = await messageRepo.listBySession(session.id);
-            messages.splice(0, messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: userContent });
+            const freshRows = await s.messageRepo.listBySession(session.id);
+            s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: s.userContent });
           } catch (compactErr: unknown) {
             reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');
           }
         }
 
-        // Stage 3: Retry the LLM call
+        // Stage 3: Retry
         try {
           response = await context.callLLM({
-            messages, tools: tools.length > 0 ? tools : undefined,
-            model, systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
-            _executeTool: sdkToolExecutor,
-            _maxToolRounds: maxToolRounds,
+            messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
+            model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+            _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
           });
-          reqLog.info({ round, attempt: reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
-          reactiveCompactFailures = 0;
+          reqLog.info({ round: s.round, attempt: s.reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
+          s.reactiveCompactFailures = 0;
         } catch (retryErr: unknown) {
           const retryClassified = classifyError(retryErr);
-          if (retryClassified.type === 'prompt_too_long' && reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
-            reqLog.warn({ attempt: reactiveCompactFailures }, 'Still overflowing after compact — will retry');
+          if (retryClassified.type === 'prompt_too_long' && s.reactiveCompactFailures < 3) {
+            reqLog.warn({ attempt: s.reactiveCompactFailures }, 'Still overflowing after compact — will retry');
             continue;
           }
-          reqLog.error({ attempt: reactiveCompactFailures, errorType: retryClassified.type }, 'LLM call failed after reactive compact — giving up');
-          if (userMsgResult?.id) {
-            try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
-          }
+          reqLog.error({ attempt: s.reactiveCompactFailures, errorType: retryClassified.type }, 'LLM call failed after reactive compact — giving up');
+          if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
           return { text: retryClassified.userMessage || 'Your conversation is too long even after compaction. Please start a new session with /new.', error: true };
         }
-
-      // ── auth_error → clear message, don't retry ──
       } else if (classified.type === 'auth_error') {
-        if (userMsgResult?.id) {
-          try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
-        }
+        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
         return { text: classified.userMessage || 'Authentication failed. Please check your API key configuration.', error: true };
-
-      // ── All other errors → generic failure ──
       } else {
         reqLog.error({ latencyMs: Date.now() - llmStart, errorType: classified.type, action: classified.action }, 'LLM call failed');
-        if (userMsgResult?.id) {
-          try { messageRepo?.deleteById(userMsgResult.id); } catch { /* best effort */ }
-        }
+        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
         if (classified.type === 'prompt_too_long') {
           return { text: 'Your conversation is too long even after multiple compaction attempts. Please start a new session with /new.', error: true };
         }
@@ -564,420 +797,88 @@ export async function runAgent(
 
     const llmLatencyMs = Date.now() - llmStart;
 
-    // ── Debug JSONL logging ───────────────────────────────
+    // Debug JSONL logging
     if (debugEnabled) {
       appendDebugLog(config.agent.workspace, {
-        ts: new Date().toISOString(),
-        sessionId: session.id,
-        messageId: userMsgResult?.id ?? null,
-        turn: debugTurnIndex,
-        round,
-        model,
-        systemPrompt: { cached: systemPrompt.cached, dynamic: systemPrompt.dynamic },
-        messages: sanitizeMessagesForLog(messages),
-        response: {
-          text: response.text || null,
-          toolCalls: response.toolCalls ?? null,
-          usage: response.usage ?? null,
-          latencyMs: llmLatencyMs,
-        },
+        ts: new Date().toISOString(), sessionId: session.id, messageId: s.userMsgResult?.id ?? null,
+        turn: debugTurnIndex, round: s.round, model,
+        systemPrompt: { cached: s.systemPrompt.cached, dynamic: s.systemPrompt.dynamic },
+        messages: sanitizeMessagesForLog(s.messages),
+        response: { text: response.text || null, toolCalls: response.toolCalls ?? null, usage: response.usage ?? null, latencyMs: llmLatencyMs },
       });
     }
 
+    // Track tokens + log
     const inTok = response.usage?.inputTokens ?? 0;
     const outTok = response.usage?.outputTokens ?? 0;
-    totalInputTokens += inTok;
-    totalOutputTokens += outTok;
+    s.totalInputTokens += inTok;
+    s.totalOutputTokens += outTok;
 
     const toolCount = response.toolCalls?.length ?? 0;
     reqLog.info({
-      round, inputTokens: inTok, outputTokens: outTok,
-      toolCalls: toolCount, latencyMs: llmLatencyMs,
+      round: s.round, inputTokens: inTok, outputTokens: outTok, toolCalls: toolCount, latencyMs: llmLatencyMs,
       stopReason: ('stopReason' in response ? (response as Record<string, unknown>).stopReason : undefined) || (toolCount > 0 ? 'tool_use' : 'end_turn'),
     }, 'LLM call completed');
 
-    // Log LLM response preview
     if (response.text) {
-      reqLog.info({
-        round,
-        responsePreview: response.text.slice(0, 300),
-        responseLen: response.text.length,
-        category: 'llm',
-      }, 'LLM response text');
+      reqLog.info({ round: s.round, responsePreview: response.text.slice(0, 300), responseLen: response.text.length, category: 'llm' }, 'LLM response text');
     }
 
-    // Record per-round usage with cost estimate (skip for ephemeral)
+    // Record usage
     const provider = model.split('/')[0] ?? 'unknown';
     const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
-    if (costUsd > 0) {
-      reqLog.info({ round, costUsd: +costUsd.toFixed(6), category: 'llm' }, 'Round cost');
-    }
-    if (usageRepo) {
+    if (costUsd > 0) reqLog.info({ round: s.round, costUsd: +costUsd.toFixed(6), category: 'llm' }, 'Round cost');
+    if (s.usageRepo) {
       try {
-        await usageRepo.record({
-          tenantId, userId,
-          sessionId: session.id,
-          model, provider,
-          inputTokens: inTok, outputTokens: outTok,
-          costUsd,
-        });
-      } catch (e: unknown) {
-        reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)');
-      }
+        await s.usageRepo.record({ tenantId, userId, sessionId: session.id, model, provider, inputTokens: inTok, outputTokens: outTok, costUsd });
+      } catch (e: unknown) { reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)'); }
     }
 
-    // If no tool calls, we're done
+    // No tool calls → done
     if (!response.toolCalls) {
-      fullText = response.text || '';
-      finalThinkingText = response.thinkingText || null;
-      if (finalThinkingText) {
-        reqLog.info({ thinkingLen: finalThinkingText.length }, 'Thinking complete');
-        reqLog.debug({ thinking: finalThinkingText.slice(0, 2000) }, 'Thinking content');
+      s.fullText = response.text || '';
+      s.finalThinkingText = response.thinkingText || null;
+      if (s.finalThinkingText) {
+        reqLog.info({ thinkingLen: s.finalThinkingText.length }, 'Thinking complete');
+        reqLog.debug({ thinking: s.finalThinkingText.slice(0, 2000) }, 'Thinking content');
       }
-      if (onRoundEnd) onRoundEnd(round, maxToolRounds);
+      if (onRoundEnd) onRoundEnd(s.round, maxToolRounds);
       break;
     }
 
-    // ── Append assistant message with tool calls ──────────
-    const assistantMsg: Message = {
-      role: 'assistant',
-      content: response.text || '',
-      tool_calls: response.toolCalls,
-      thinking_blocks: response.thinkingBlocks,
-    };
-    messages.push(assistantMsg);
+    // Append assistant message + execute tools
+    s.messages.push({ role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks });
+    await executeToolCalls(response.toolCalls, s, context, callbacks);
+    await drainSubAgents(s);
 
-    // ── Execute tool calls (parallel for safe tools, sequential for others) ──
-    // Tool result budgets from constants.ts
-    let totalToolResultSize = 0;
-
-    // Pre-parse all tool calls and run pre-execution checks
-    interface ParsedToolCall {
-      tc: ToolCall;
-      toolName: string;
-      toolArgs: Record<string, unknown>;
-      skipped?: string; // reason if skipped (loop detection)
-    }
-    const parsed: ParsedToolCall[] = [];
-    for (const tc of response.toolCalls) {
-      const toolName = tc.function?.name || 'unknown';
-      let toolArgs: Record<string, unknown>;
-      try {
-        toolArgs = JSON.parse(tc.function?.arguments || '{}') as Record<string, unknown>;
-      } catch {
-        reqLog.warn({ tool: toolName }, 'Invalid tool arguments JSON');
-        toolArgs = {};
-      }
-      if (typeof toolArgs !== 'object' || toolArgs === null) {
-        toolArgs = {};
-      }
-
-      // Compact tool log
-      const argSummary = Object.entries(toolArgs)
-        .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
-        .join(', ');
-      reqLog.info({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool called');
-
-      // Tool loop detection
-      const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
-      const callCount = (toolCallCounts.get(toolHash) ?? 0) + 1;
-      toolCallCounts.set(toolHash, callCount);
-      if (callCount > TOOL_LOOP_THRESHOLD) {
-        reqLog.warn({ tool: toolName, callCount, threshold: TOOL_LOOP_THRESHOLD }, 'Tool loop detected — skipping execution');
-        parsed.push({ tc, toolName, toolArgs, skipped: `[Tool loop detected: "${toolName}" called ${callCount} times with similar arguments. Try a different approach or tool.]` });
-      } else {
-        parsed.push({ tc, toolName, toolArgs });
-      }
-    }
-
-    // Execute a single tool call and return the result message
-    const executeSingleTool = async (p: ParsedToolCall): Promise<{ toolCallId: string; content: string }> => {
-      if (p.skipped) {
-        return { toolCallId: p.tc.id, content: p.skipped };
-      }
-
-      if (onToolStart) {
-        try { onToolStart(p.toolName, p.toolArgs); } catch { /* ignore */ }
-      }
-
-      const toolStartTime = Date.now();
-      let result: unknown;
-      let toolStatus = 'success';
-
-      try {
-        if (context.executeTool) {
-          result = await context.executeTool(p.toolName, p.toolArgs, { session, subagentRegistry, user: context.user, scopeKey: context.scopeKey } as any);
-        } else {
-          result = { error: 'No tool executor configured' };
-          toolStatus = 'error';
-        }
-      } catch (e: unknown) {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        reqLog.error({ tool: p.toolName, err: errMsg, category: 'tool' }, 'Tool execution failed');
-        result = { error: `Tool execution failed: ${errMsg}` };
-        toolStatus = 'error';
-      }
-
-      const durationMs = Date.now() - toolStartTime;
-
-      // Record tool call in the database (skip for ephemeral, non-critical)
-      if (toolCallRepo) {
-        try {
-          await toolCallRepo.record({
-            id: p.tc.id || crypto.randomUUID(),
-            sessionId: session.id,
-            tenantId,
-            userId,
-            toolName: p.toolName,
-            arguments: p.toolArgs,
-            result,
-            status: toolStatus,
-            durationMs,
-          });
-        } catch (e: unknown) {
-          reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: p.toolName }, 'Failed to record tool call (non-critical)');
-        }
-      }
-
-      // Collect _media attachments from tool results
-      if (result && typeof result === 'object' && !Array.isArray(result)) {
-        const resultObj = result as Record<string, unknown>;
-        const mediaArr = resultObj._media;
-        if (Array.isArray(mediaArr)) {
-          for (const item of mediaArr) {
-            if (!item || typeof item !== 'object') continue;
-            const m = item as Record<string, unknown>;
-            if (
-              typeof m.filePath === 'string' &&
-              typeof m.fileName === 'string' &&
-              typeof m.mimeType === 'string' &&
-              typeof m.type === 'string' &&
-              fs.existsSync(m.filePath)
-            ) {
-              const attachment = item as MediaAttachment;
-              collectedMedia.push(attachment);
-              if (onMedia) {
-                try { onMedia(attachment); } catch { /* ignore callback errors */ }
-              }
-            }
-          }
-          delete resultObj._media;
-        }
-      }
-
-      const resultStr = renderToolResultForLLM(result);
-      reqLog.info({
-        tool: p.toolName,
-        resultPreview: resultStr.slice(0, 200),
-        resultLen: resultStr.length,
-        durationMs,
-        category: 'tool',
-      }, 'Tool completed');
-
-      if (onToolEnd) {
-        try { onToolEnd(p.toolName, resultStr.slice(0, 500)); } catch { /* ignore */ }
-      }
-
-      // Cap tool results to prevent context overflow
-      let cappedResult = resultStr;
-      if (cappedResult.length > MAX_TOOL_RESULT_CHARS) {
-        cappedResult = cappedResult.slice(0, MAX_TOOL_RESULT_CHARS) +
-          `\n\n[... truncated ${resultStr.length - MAX_TOOL_RESULT_CHARS} chars. Ask the user to narrow the query if more detail is needed.]`;
-      }
-
-      return { toolCallId: p.tc.id, content: `<tool_result name="${p.toolName}">\n${cappedResult}\n</tool_result>` };
-    };
-
-    // Split into concurrent-safe and sequential tools, preserving order.
-    // Strategy: batch consecutive concurrent-safe tools, execute sequentially otherwise.
-    const isSafe = (name: string) => context.isToolConcurrencySafe?.(name) ?? false;
-    let i = 0;
-    while (i < parsed.length) {
-      if (!parsed[i].skipped && isSafe(parsed[i].toolName)) {
-        // Collect consecutive concurrent-safe tools into a batch
-        const batch: ParsedToolCall[] = [];
-        while (i < parsed.length && (parsed[i].skipped || isSafe(parsed[i].toolName))) {
-          batch.push(parsed[i]);
-          i++;
-        }
-        if (batch.length > 1) {
-          reqLog.info({ tools: batch.map(b => b.toolName), count: batch.length, category: 'tool' }, 'Executing tools in parallel');
-        }
-        // Execute batch concurrently
-        const results = await Promise.all(batch.map(executeSingleTool));
-        for (const r of results) {
-          // Apply total budget check
-          if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
-            r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
-          }
-          totalToolResultSize += r.content.length;
-          messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
-        }
-      } else {
-        // Execute sequentially
-        const r = await executeSingleTool(parsed[i]);
-        if (totalToolResultSize + r.content.length > MAX_TOTAL_TOOL_RESULTS) {
-          r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
-        }
-        totalToolResultSize += r.content.length;
-        messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
-        i++;
-      }
-    }
-
-    // ── Wait for pending sub-agents and inject results ──────
-    if (subagentRegistry.hasPending()) {
-      reqLog.info({ pending: subagentRegistry.size }, 'Waiting for sub-agents to complete');
-      await subagentRegistry.waitForAll();
-
-      // Build lightweight result summaries and inject as tool results
-      // We need to match childId → toolCallId from the spawn_agent calls
-      const summaries = subagentRegistry.buildResultSummaries();
-      for (const summary of summaries) {
-        // Find the tool message that spawned this child (by matching childId in content)
-        const spawnMsg = messages.find(
-          m => m.role === 'tool' && typeof m.content === 'string' &&
-               m.content.includes(summary.childId) && m.content.includes(SUBAGENT_PENDING_MARKER),
-        );
-        if (spawnMsg) {
-          // Replace the pending placeholder with the actual result
-          spawnMsg.content = JSON.stringify(summary.result);
-        }
-      }
-      reqLog.info({ completed: summaries.length }, 'Sub-agent results injected');
-    }
-
-    if (onRoundEnd) onRoundEnd(round, maxToolRounds);
+    if (onRoundEnd) onRoundEnd(s.round, maxToolRounds);
   }
 
-  // Drain all sub-agent promises (including killed ones) to prevent floating promises
-  if (subagentRegistry.size > 0) {
-    await subagentRegistry.drainAll();
+  // ── Post-loop finalization ──────────────────────────────
+  if (s.subagentRegistry.size > 0) await s.subagentRegistry.drainAll();
+  if (s.round >= maxToolRounds) s.fullText += '\n\nReached maximum tool call rounds.';
+  if (s.fullText.trim() === 'NO_REPLY') s.fullText = '';
+
+  // Output filtering
+  if (s.fullText) {
+    s.fullText = filterOutput(s.fullText);
+    const safety = checkOutputSafety(s.fullText);
+    if (!safety.safe) reqLog.warn({ flags: safety.flags }, 'Output safety flags detected');
   }
 
-  if (round >= maxToolRounds) {
-    fullText += '\n\nReached maximum tool call rounds.';
-  }
-
-  // ── Handle NO_REPLY ───────────────────────────────────────
-  if (fullText.trim() === 'NO_REPLY') {
-    fullText = '';
-  }
-
-  // ── Output filtering: redact secrets and check safety ─────
-  if (fullText) {
-    fullText = filterOutput(fullText);
-    const safety = checkOutputSafety(fullText);
-    if (!safety.safe) {
-      reqLog.warn({ flags: safety.flags }, 'Output safety flags detected');
-    }
-  }
-
-  // ── Agent turn summary ──────────────────────────────────
   reqLog.info({
-    totalRounds: round,
-    totalInputTokens,
-    totalOutputTokens,
-    responseLen: fullText.length,
-    responsePreview: fullText.slice(0, 200),
-    mediaCount: collectedMedia.length,
-    category: 'llm',
+    totalRounds: s.round, totalInputTokens: s.totalInputTokens, totalOutputTokens: s.totalOutputTokens,
+    responseLen: s.fullText.length, responsePreview: s.fullText.slice(0, 200), mediaCount: s.collectedMedia.length, category: 'llm',
   }, 'Agent turn completed');
 
-  // ── Persist assistant message (skip for ephemeral) ───────
-  if ((fullText.trim() || collectedMedia.length > 0) && messageRepo) {
-    const msgMetadata: Record<string, unknown> = {};
-    if (collectedMedia.length > 0) {
-      msgMetadata.media = collectedMedia.map(m => ({
-        type: m.type,
-        fileName: m.fileName,
-        mimeType: m.mimeType,
-      }));
-    }
-    await messageRepo.create({
-      sessionId: session.id,
-      tenantId,
-      role: 'assistant',
-      content: fullText || '',
-      metadata: Object.keys(msgMetadata).length > 0 ? JSON.stringify(msgMetadata) : undefined,
-    });
-  }
-
-  // ── Update session usage (skip for ephemeral) ─────────────
-  if (sessionRepo) {
-    await sessionRepo.addUsage(session.id, totalInputTokens, totalOutputTokens);
-    await sessionRepo.incrementTurns(session.id);
-  }
-
-  // ── Session memory extraction (fire-and-forget) ──────────────
-  // When extraction threshold is met:
-  //   1. Extract session memory (Haiku updates structured notes file)
-  //   2. Then extract long-term facts to profile (Haiku reads session notes → daily file)
-  // Profile extraction only runs when session memory was just updated —
-  // no point re-reading the same file every turn.
-  // Design: Group memory extraction — only admin/power users can shape persistent
-  // group memory. Regular users' messages are processed but don't trigger extraction,
-  // preventing a non-privileged member from poisoning the group's PROFILE.md or
-  // session notes that affect all future interactions for every member.
-  const isGroupScope = context.scopeKey?.startsWith('group_') ?? false;
-  const userRole = context.user?.role || 'user';
-  const canExtractGroupMemory = !isGroupScope || userRole === 'admin' || userRole === 'power_user';
-  if (!ephemeral && canExtractGroupMemory && sessionMemoryState && totalInputTokens + totalOutputTokens > 0) {
-    const currentTokens = totalInputTokens;
-    const check = shouldExtractSessionMemory(currentTokens, sessionMemoryState, config);
-    if (check.shouldExtract) {
-      // Skip if extraction is already in progress for this session (prevents race on rapid messages)
-      if (_activeExtractions.has(session.id)) {
-        reqLog.debug({ category: 'memory' }, 'Session memory extraction already in progress — skipping');
-      } else {
-        reqLog.info({ reason: check.reason, category: 'memory' }, 'Session memory extraction triggered');
-        _activeExtractions.add(session.id);
-        extractSessionMemory({
-          sessionId: session.id,
-          scopeKey: context.scopeKey ?? null,
-          db,
-          config,
-          state: sessionMemoryState,
-          currentTokens,
-          callLLM: context.callLLM,
-        }).then((newState) => {
-          sessionMemoryState = newState;
-          // Persist updated state to session metadata
-          if (sessionRepo) {
-            saveSessionMemoryState(session.id, newState, sessionRepo).catch((e) => {
-              reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist session memory state');
-            });
-          }
-          // Session memory just updated → extract long-term facts to profile
-          return maybeExtractToProfile({
-            sessionId: session.id,
-            channel: inbound.channel,
-            scopeKey: context.scopeKey,
-            db,
-            config,
-            callLLM: context.callLLM,
-            minTurns: 5,
-          });
-        }).catch((e) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          reqLog.warn({ err: msg, category: 'memory' }, 'Session memory extraction or profile extraction failed');
-        }).finally(() => {
-          _activeExtractions.delete(session.id);
-        });
-      }
-    } else {
-      // Persist state even if no extraction (in case state was just initialized)
-      if (sessionMemoryState.extractionCount === 0 && sessionRepo) {
-        saveSessionMemoryState(session.id, sessionMemoryState, sessionRepo).catch(() => {});
-      }
-    }
-  }
+  await persistResults(s, context);
+  triggerMemoryExtraction(s, context);
 
   return {
-    text: fullText || null,
-    thinkingText: finalThinkingText,
-    usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
-    ...(collectedMedia.length > 0 ? { media: collectedMedia } : {}),
+    text: s.fullText || null,
+    thinkingText: s.finalThinkingText,
+    usage: { inputTokens: s.totalInputTokens, outputTokens: s.totalOutputTokens },
+    ...(s.collectedMedia.length > 0 ? { media: s.collectedMedia } : {}),
     model,
     userRole: context.user?.role,
   };
