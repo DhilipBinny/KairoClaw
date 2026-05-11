@@ -1,8 +1,26 @@
+const ZERO_WIDTH_RE = /[​‌‍﻿­⁠᠎]/g;
+
+const HOMOGLYPH_MAP: Record<string, string> = {
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p',
+  'с': 'c', 'у': 'y', 'х': 'x', 'і': 'i',
+  'ј': 'j', 'һ': 'h', 'ѕ': 's', 'ґ': 'g',
+  'А': 'A', 'В': 'B', 'Е': 'E', 'Н': 'H',
+  'М': 'M', 'О': 'O', 'Р': 'P', 'С': 'C',
+  'Т': 'T', 'Х': 'X',
+};
+const HOMOGLYPH_RE = new RegExp(`[${Object.keys(HOMOGLYPH_MAP).join('')}]`, 'g');
+
 export function sanitizeInput(text: string, maxLength = 50_000): string {
   let clean = text.replace(/\0/g, '');
+  clean = clean.replace(ZERO_WIDTH_RE, '');
   clean = clean.normalize('NFC');
   if (clean.length > maxLength) clean = clean.slice(0, maxLength);
   return clean;
+}
+
+/** Normalize homoglyphs to ASCII for pattern matching (not for display). */
+export function normalizeForDetection(text: string): string {
+  return text.replace(HOMOGLYPH_RE, ch => HOMOGLYPH_MAP[ch] || ch);
 }
 
 export type InjectionSeverity = 'block' | 'warn';
@@ -34,11 +52,12 @@ export interface InjectionResult {
 }
 
 export function detectPromptInjection(text: string): InjectionResult {
+  const normalized = normalizeForDetection(text);
   const patterns: string[] = [];
   let maxSeverity: InjectionSeverity | null = null;
 
   for (const { pattern, name, severity } of INJECTION_PATTERNS) {
-    if (pattern.test(text)) {
+    if (pattern.test(normalized)) {
       patterns.push(name);
       if (!maxSeverity || severity === 'block') maxSeverity = severity;
     }

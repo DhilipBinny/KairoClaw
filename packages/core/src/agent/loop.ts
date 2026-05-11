@@ -285,7 +285,9 @@ async function executeSingleTool(
         id: p.tc.id || crypto.randomUUID(),
         sessionId: context.session.id, tenantId: context.tenantId,
         userId: context.userId, toolName: p.toolName,
-        arguments: p.toolArgs, result, status: toolStatus, durationMs,
+        arguments: p.toolArgs,
+        result: typeof result === 'string' ? filterOutput(result) : result,
+        status: toolStatus, durationMs,
       });
     } catch (e: unknown) {
       s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), tool: p.toolName }, 'Failed to record tool call (non-critical)');
@@ -314,10 +316,11 @@ async function executeSingleTool(
   }
 
   const resultStr = renderToolResultForLLM(result);
-  s.reqLog.info({ tool: p.toolName, resultPreview: resultStr.slice(0, 200), resultLen: resultStr.length, durationMs, category: 'tool' }, 'Tool completed');
+  const safePreview = filterOutput(resultStr.slice(0, 500));
+  s.reqLog.info({ tool: p.toolName, resultPreview: safePreview.slice(0, 200), resultLen: resultStr.length, durationMs, category: 'tool' }, 'Tool completed');
 
   if (callbacks.onToolEnd) {
-    try { callbacks.onToolEnd(p.toolName, resultStr.slice(0, 500)); } catch { /* ignore */ }
+    try { callbacks.onToolEnd(p.toolName, safePreview); } catch { /* ignore */ }
   }
 
   let cappedResult = resultStr;
