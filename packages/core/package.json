@@ -42,7 +42,8 @@
     "qrcode": "^1.5.4",
     "zod": "^4.3.6",
     "@agw/logger": "workspace:*",
-    "@agw/database": "workspace:*"
+    "@agw/database": "workspace:*",
+    "@agw/schemas": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
