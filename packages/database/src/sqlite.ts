@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { DatabaseAdapter } from './index.js';
+import type { DatabaseAdapter } from '@agw/types';
 
 export class SQLiteAdapter implements DatabaseAdapter {
   private db: Database.Database;

@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DatabaseAdapter } from './index.js';
+import type { DatabaseAdapter } from '@agw/types';
 
 export type DbDialect = 'sqlite' | 'postgres';
 

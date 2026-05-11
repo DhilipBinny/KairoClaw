@@ -9,7 +9,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import pg from 'pg';
 import type { PoolConfig, PoolClient } from 'pg';
-import type { DatabaseAdapter } from './index.js';
+import type { DatabaseAdapter } from '@agw/types';
 
 const { Pool } = pg;
 
