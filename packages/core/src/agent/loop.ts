@@ -656,9 +656,9 @@ export async function runAgent(
   const hasContextSummary = historyRows.some(
     r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
   );
-  let tools = context.tools ?? [];
+  const tools = context.tools ?? [];
   const caps = getModelCapabilities(model, config);
-  let systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary, { supportsVision: caps.supportsVision });
+  const systemPrompt = buildSystemPrompt(config, tools, context.scopeKey, inbound.channel, session.id, hasContextSummary, { supportsVision: caps.supportsVision });
   const history: Message[] = historyRows.map(rowToMessage);
   const userContent = buildUserContent(inbound, caps);
   const messages = normalizeMessages(history, userContent);
@@ -696,6 +696,7 @@ export async function runAgent(
   };
 
   // ── ReAct loop ──────────────────────────────────────────
+  const MAX_REACTIVE_COMPACT_FAILURES = 3;
   while (s.round < maxToolRounds) {
     s.round++;
     if (onRoundStart) onRoundStart(s.round, maxToolRounds);
@@ -732,7 +733,7 @@ export async function runAgent(
       const classified = classifyError(e);
       logClassifiedError(classified, { round: s.round, requestId, sessionId: session.id });
 
-      if (classified.type === 'prompt_too_long' && !ephemeral && s.reactiveCompactFailures < 3) {
+      if (classified.type === 'prompt_too_long' && !ephemeral && s.reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
         s.reactiveCompactFailures++;
         reqLog.warn({ round: s.round, attempt: s.reactiveCompactFailures, errorType: classified.type }, 'Context overflow — starting reactive compact recovery');
 
@@ -774,7 +775,7 @@ export async function runAgent(
           s.reactiveCompactFailures = 0;
         } catch (retryErr: unknown) {
           const retryClassified = classifyError(retryErr);
-          if (retryClassified.type === 'prompt_too_long' && s.reactiveCompactFailures < 3) {
+          if (retryClassified.type === 'prompt_too_long' && s.reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
             reqLog.warn({ attempt: s.reactiveCompactFailures }, 'Still overflowing after compact — will retry');
             continue;
           }
