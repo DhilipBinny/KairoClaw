@@ -13,8 +13,10 @@ import type { InboundMessage, ChatRequest, ChatResponse } from '@agw/types';
 import type { AgentRunner } from './types.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
+import { AgentQueue } from '../queue/index.js';
 
 const log = createModuleLogger('system');
+const apiQueue = new AgentQueue();
 
 // ─── Per-user rate limiter ───────────────────────────────────
 
@@ -154,7 +156,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       });
 
       try {
-        const result = await runner(inbound, {
+        const result = await apiQueue.enqueue(String(inbound.chatId), () => runner(inbound, {
           onDelta: (delta: string) => {
             if (!aborted) {
               sendSSE('delta', { text: delta, requestId });
@@ -170,7 +172,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
               sendSSE('tool_end', { name, preview: (resultPreview || '').slice(0, 200), requestId });
             }
           },
-        });
+        }));
 
         if (!aborted) {
           sendSSE('done', {
@@ -245,7 +247,7 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
       log.info({ requestId, userId: inbound.userId, len: inbound.text.length }, 'REST chat (sync)');
 
       try {
-        const result = await runner(inbound);
+        const result = await apiQueue.enqueue(String(inbound.chatId), () => runner(inbound));
 
         const response: ChatResponse = {
           text: result.text || null,
