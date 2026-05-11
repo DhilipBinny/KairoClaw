@@ -35,7 +35,6 @@ import {
   renderToolResultForLLM,
   sanitizeMessagesForLog,
   rowToMessage,
-  executeToolCalls as agwExecuteToolCalls,
 } from '@agw/agent-core';
 import { checkAndCompact, compactSession } from './compaction.js';
 import { handleSlashCommand } from './slash-commands.js';
