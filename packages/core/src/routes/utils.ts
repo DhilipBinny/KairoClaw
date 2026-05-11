@@ -36,7 +36,11 @@ export function assertSessionAccess(
   reply: FastifyReply,
 ): boolean {
   if (request.user?.role === 'admin') return true;
-  if (request.user?.id && session.user_id && session.user_id !== request.user.id) {
+  if (!session.user_id) {
+    reply.code(403).send({ error: 'Forbidden' });
+    return false;
+  }
+  if (session.user_id !== request.user?.id) {
     reply.code(403).send({ error: 'Forbidden' });
     return false;
   }

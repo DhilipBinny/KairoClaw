@@ -270,15 +270,15 @@ describe('ToolPermissionRepository', () => {
     expect(await repo.checkPermission(TENANT, 'user', 'exec')).toBe('deny'); // glob matches
   });
 
-  it('no match returns allow', async () => {
+  it('no match returns no_rule', async () => {
     await repo.create({ tenantId: TENANT, role: 'user', toolPattern: 'exec', permission: 'deny' });
-    expect(await repo.checkPermission(TENANT, 'user', 'read_file')).toBe('allow');
+    expect(await repo.checkPermission(TENANT, 'user', 'read_file')).toBe('no_rule');
   });
 
   it('glob prefix matching', async () => {
     await repo.create({ tenantId: TENANT, role: 'user', toolPattern: 'mcp__*', permission: 'deny' });
     expect(await repo.checkPermission(TENANT, 'user', 'mcp__github__issues')).toBe('deny');
-    expect(await repo.checkPermission(TENANT, 'user', 'read_file')).toBe('allow');
+    expect(await repo.checkPermission(TENANT, 'user', 'read_file')).toBe('no_rule');
   });
 
   it('deletes with tenant scoping', async () => {

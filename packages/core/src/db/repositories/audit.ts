@@ -49,7 +49,7 @@ export class AuditRepository {
 
       entryHash = crypto
         .createHash('sha256')
-        .update(prevHash + entry.action + detailsJson + now)
+        .update(prevHash + entry.action + (entry.userId ?? '') + (entry.resource ?? '') + (entry.ipAddress ?? '') + detailsJson + now)
         .digest('hex');
 
       await this.db.run(
@@ -103,13 +103,17 @@ export class AuditRepository {
         return { valid: false, brokenAt: i };
       }
 
-      // Recompute the entry hash
-      const computedHash = crypto
+      // Recompute the entry hash — try new format (v2: includes all fields), fall back to legacy (v1: action+details+timestamp only)
+      const v2Hash = crypto
+        .createHash('sha256')
+        .update(expectedPrevHash + entry.action + (entry.user_id ?? '') + (entry.resource ?? '') + (entry.ip_address ?? '') + entry.details + entry.created_at)
+        .digest('hex');
+      const v1Hash = crypto
         .createHash('sha256')
         .update(expectedPrevHash + entry.action + entry.details + entry.created_at)
         .digest('hex');
 
-      if (entry.entry_hash !== computedHash) {
+      if (entry.entry_hash !== v2Hash && entry.entry_hash !== v1Hash) {
         return { valid: false, brokenAt: i };
       }
 
