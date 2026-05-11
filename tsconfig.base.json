@@ -12,7 +12,14 @@
     "sourceMap": true,
     "paths": {
       "@agw/types": ["./packages/types/src"],
-      "@agw/core": ["./packages/core/src"]
+      "@agw/core": ["./packages/core/src"],
+      "@agw/security": ["./packages/security/src"],
+      "@agw/mcp-client": ["./packages/mcp-client/src"],
+      "@agw/tool-platform": ["./packages/tool-platform/src"],
+      "@agw/provider-bridge": ["./packages/provider-bridge/src"],
+      "@agw/cron": ["./packages/cron/src"],
+      "@agw/memory-engine": ["./packages/memory-engine/src"],
+      "@agw/agent-core": ["./packages/agent-core/src"]
     }
   }
 }
