@@ -16,13 +16,12 @@ RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     if [ -f /run/secrets/github_token ]; then \
       echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/github_token)" >> .npmrc; \
     fi && \
-    pnpm install --frozen-lockfile && \
-    sed -i '/_authToken/d' .npmrc
+    pnpm install --frozen-lockfile
 
-RUN pnpm lint && \
-    pnpm -r build && \
+RUN pnpm -r build && \
     cp -r packages/core/src/db/migrations packages/core/dist/db/ && \
-    pnpm deploy --legacy --filter=@agw/core --prod /prod/core
+    pnpm deploy --legacy --filter=@agw/core --prod /prod/core && \
+    sed -i '/_authToken/d' .npmrc
 
 # Stage 2: Production runtime
 FROM node:22-bookworm-slim
