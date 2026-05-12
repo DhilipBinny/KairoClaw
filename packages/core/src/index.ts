@@ -35,7 +35,8 @@ import { backgroundTaskRegistry } from './agent/background-task-registry.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { UserRepository } from './db/repositories/user.js';
-import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir } from '@agw/memory-engine';
+import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
+import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
 import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
@@ -46,6 +47,12 @@ import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
 import { createModuleLogger } from './observability/logger.js';
+
+// Wire loggers for extracted packages that added setters in PR #120
+const _agentLog = createModuleLogger('agent');
+setMessagesLogger(_agentLog as any);
+setPromptLogger(_agentLog as any);
+setTokenEstimatorLogger(_agentLog as any);
 
 // Routes
 import { registerHealthRoutes } from './routes/health.js';
