@@ -6,6 +6,15 @@
  */
 
 import type { MessageRow } from './interfaces.js';
+import type { AgwLogger } from '@agw/types';
+import { noopLogger } from '@agw/types';
+
+// ── Logger (module-level setter) ──
+let log: AgwLogger = noopLogger;
+
+export function setTokenEstimatorLogger(logger: AgwLogger): void {
+  log = logger;
+}
 
 /**
  * Estimate token count from text using a content-aware heuristic.
@@ -38,8 +47,8 @@ export function estimateMessageTokens(messages: MessageRow[]): number {
           total += estimateTokens(tc.function?.arguments ?? '');
           total += estimateTokens(tc.function?.name ?? '');
         }
-      } catch {
-        // Malformed JSON — count the raw string
+      } catch (e) {
+        log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Malformed tool_calls JSON in token estimation, counting raw string');
         total += estimateTokens(msg.tool_calls);
       }
     }

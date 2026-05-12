@@ -4,6 +4,15 @@
  */
 
 import type { Message, MessageContentPart, ToolCall } from '@agw/types';
+import type { AgwLogger } from '@agw/types';
+import { noopLogger } from '@agw/types';
+
+// ── Logger (module-level setter, like other extracted packages) ──
+let log: AgwLogger = noopLogger;
+
+export function setMessagesLogger(logger: AgwLogger): void {
+  log = logger;
+}
 
 /**
  * Build user content: plain text or multimodal (text + images).
@@ -120,7 +129,7 @@ export function rowToMessage(row: {
   if (row.tool_calls) {
     try {
       msg.tool_calls = JSON.parse(row.tool_calls) as ToolCall[];
-    } catch { /* skip malformed */ }
+    } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped malformed tool_calls JSON in rowToMessage'); }
   }
   if (row.tool_call_id) {
     msg.tool_call_id = row.tool_call_id;

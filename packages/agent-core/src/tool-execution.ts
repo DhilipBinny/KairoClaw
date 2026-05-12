@@ -158,8 +158,8 @@ export async function executeToolCalls(
     let toolArgs: Record<string, unknown>;
     try {
       toolArgs = JSON.parse(tc.function?.arguments || '{}') as Record<string, unknown>;
-    } catch {
-      ctx.logger.warn({ tool: toolName }, 'Invalid tool arguments JSON');
+    } catch (e) {
+      ctx.logger.warn({ tool: toolName, err: e instanceof Error ? e.message : String(e) }, 'Invalid tool arguments JSON');
       toolArgs = {};
     }
     if (typeof toolArgs !== 'object' || toolArgs === null) toolArgs = {};

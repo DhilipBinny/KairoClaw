@@ -7,7 +7,7 @@ export type {
 } from './interfaces.js';
 
 // ── Token estimation ──────────────────────────────────────
-export { estimateTokens, estimateMessageTokens } from './token-estimator.js';
+export { estimateTokens, estimateMessageTokens, setTokenEstimatorLogger } from './token-estimator.js';
 
 // ── Memory system (chunk indexing + search) ───────────────
 export { MemorySystem } from './memory-system.js';
