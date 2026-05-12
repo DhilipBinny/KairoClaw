@@ -1,7 +1,14 @@
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const execFileAsync = promisify(execFile);
+async function hasBinary(cmd: string): Promise<boolean> {
+  try { await execFileAsync('which', [cmd], { timeout: 3000 }); return true; } catch { return false; }
+}
 import type { InboundMessage, AgentCallbacks, AgentResult } from '@agw/types';
 import type { Logger } from 'pino';
 import { loadConfig, CONFIG_PATH } from './config/loader.js';
@@ -247,12 +254,18 @@ async function main(): Promise<void> {
   // hooks from config. setHooks() can be called again on config reload
   // for hot-reload support; for now it's a startup-only application.
   toolRegistry.setHooks((config as { hooks?: unknown }).hooks as Parameters<typeof toolRegistry.setHooks>[0]);
+  const hasPdftotext = await hasBinary('pdftotext');
+  const hasChromium = await hasBinary('chromium') || await hasBinary('chromium-browser');
+  if (!hasPdftotext) console.log('  WARN: pdftotext not found — read_pdf tool disabled');
+  if (!hasChromium) console.log('  WARN: chromium not found — browse tool disabled');
+
   const toolEnabledMap: Record<string, boolean> = {
     exec: config.tools?.exec?.enabled !== false,
     web_search: config.tools?.webSearch?.enabled !== false,
     web_fetch: config.tools?.webFetch?.enabled !== false,
     send_email: !!config.tools?.email?.enabled,
-    browse: config.tools?.browse?.enabled !== false,
+    browse: (config.tools?.browse?.enabled !== false) && hasChromium,
+    read_pdf: hasPdftotext,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
