@@ -15,32 +15,41 @@ export async function createServer(context: ServerContext): Promise<FastifyInsta
   const stateDir = context.config._stateDir || process.env.AGW_STATE_DIR || '';
   const { stream } = createServerLogger(stateDir);
 
+  const gw = context.config.gateway;
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL || 'info',
       stream,
-      // Tag all Fastify-internal logs (startup, listen, errors) with category
       base: { category: 'system' },
     },
-    // Disable default request/response logging — we use a custom hook below
     disableRequestLogging: true,
+    trustProxy: gw?.trustProxy ?? false,
   });
 
-  // Register plugins
-  // CORS — restrict to configured origins, fallback to same-origin
+  // CORS — env override > auto-derive from listen config
   const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean);
+  const host = gw?.host || '0.0.0.0';
+  const port = gw?.port || 18181;
+  let corsOrigin: boolean | string[];
+  if (allowedOrigins && allowedOrigins.length > 0) {
+    corsOrigin = allowedOrigins;
+  } else if (host === '0.0.0.0' || host === '::') {
+    corsOrigin = true;
+  } else {
+    corsOrigin = [`http://${host}:${port}`, `http://localhost:${port}`];
+  }
+
   await app.register(import('@fastify/cors'), {
-    origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : ['http://localhost:18181', 'http://localhost:5173'],
+    origin: corsOrigin,
     credentials: true,
   });
   await app.register(import('@fastify/multipart'), {
-    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max for import
+    limits: { fileSize: 100 * 1024 * 1024 },
   });
   await app.register(import('@fastify/rate-limit'), {
     max: RATE_LIMIT_MAX,
     timeWindow: '1 minute',
     allowList: (req) => {
-      // Don't rate-limit static assets, WebSocket upgrades, or health checks
       const url = req.url || '';
       return url.startsWith('/_app/') || url.startsWith('/favicon') || url === '/ws' || url === '/api/v1/health';
     },

@@ -128,6 +128,8 @@ export interface GatewayNetworkConfig {
   token: string;
   /** Path to a file containing the token. */
   tokenFile?: string;
+  /** Trust proxy headers (X-Forwarded-For). false=direct, true=all, number=hop count. */
+  trustProxy?: boolean | number | string;
 }
 
 /** Active model selection. */
