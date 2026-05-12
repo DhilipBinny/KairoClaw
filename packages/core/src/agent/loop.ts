@@ -304,6 +304,9 @@ async function executeSingleTool(
         const m = item as Record<string, unknown>;
         if (typeof m.filePath === 'string' && typeof m.fileName === 'string' &&
             typeof m.mimeType === 'string' && typeof m.type === 'string' && fs.existsSync(m.filePath)) {
+          const stateDir = context.config._stateDir || process.env.AGW_STATE_DIR || '';
+          const resolvedMedia = path.resolve(m.filePath);
+          if (stateDir && !resolvedMedia.startsWith(path.resolve(stateDir))) continue;
           const attachment = item as MediaAttachment;
           s.collectedMedia.push(attachment);
           if (callbacks.onMedia) {

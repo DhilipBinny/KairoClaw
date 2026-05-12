@@ -22,6 +22,20 @@ export function setRouterLogger(logger: AgwLogger): void {
   log = logger;
 }
 
+const PATTERN_MATCH_MAX_CHARS = 500;
+const _regexCache = new Map<string, RegExp | null>();
+function getCachedRegex(pattern: string): RegExp | null {
+  if (_regexCache.has(pattern)) return _regexCache.get(pattern)!;
+  try {
+    const re = new RegExp(pattern, 'i');
+    _regexCache.set(pattern, re);
+    return re;
+  } catch {
+    _regexCache.set(pattern, null);
+    return null;
+  }
+}
+
 // ─── Types ─────────────────────────────────────────────────
 
 export type RoutingTier = 'fast' | 'standard' | 'powerful' | 'forced';
@@ -70,25 +84,24 @@ export function classifyByRules(
     return { tier: 'standard', reason: 'has images' };
   }
 
-  // ── Admin opus patterns ──
+  // ── Admin opus patterns (cached regex, input limited to prevent ReDoS) ──
+  const limitedText = text.slice(0, PATTERN_MATCH_MAX_CHARS);
   if (routing.opusPatterns) {
     for (const pattern of routing.opusPatterns) {
-      try {
-        if (new RegExp(pattern, 'i').test(text)) {
-          return { tier: 'powerful', reason: `opus pattern: ${pattern}` };
-        }
-      } catch { /* skip invalid regex */ }
+      const re = getCachedRegex(pattern);
+      if (re && re.test(limitedText)) {
+        return { tier: 'powerful', reason: `opus pattern: ${pattern}` };
+      }
     }
   }
 
   // ── Admin haiku patterns ──
   if (routing.haikuPatterns) {
     for (const pattern of routing.haikuPatterns) {
-      try {
-        if (new RegExp(pattern, 'i').test(text)) {
-          return { tier: 'fast', reason: `haiku pattern: ${pattern}` };
-        }
-      } catch { /* skip invalid regex */ }
+      const re = getCachedRegex(pattern);
+      if (re && re.test(limitedText)) {
+        return { tier: 'fast', reason: `haiku pattern: ${pattern}` };
+      }
     }
   }
 
