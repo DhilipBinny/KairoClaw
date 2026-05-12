@@ -20,4 +20,8 @@ for f in IDENTITY.md SOUL.md RULES.md; do
 done
 
 echo "Starting AGW..."
-exec gosu node node /app/packages/core/dist/index.js
+if [ -f /app/dist/index.js ]; then
+  exec gosu node node /app/dist/index.js
+else
+  exec gosu node node /app/packages/core/dist/index.js
+fi

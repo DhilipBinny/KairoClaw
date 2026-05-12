@@ -291,7 +291,7 @@ export interface ToolExecutionContext {
 }
 
 /** Permission level for a tool. */
-export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm' | 'power_user';
+export type ToolPermissionLevel = 'allow' | 'deny' | 'confirm' | 'power_user' | 'no_rule';
 
 /**
  * A permission rule controlling tool access.
