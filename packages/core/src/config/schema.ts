@@ -50,6 +50,7 @@ const gatewayNetworkSchema = z.object({
   host: z.string().default('0.0.0.0'),
   token: z.string().default(''),
   tokenFile: z.string().optional(),
+  trustProxy: z.union([z.boolean(), z.number(), z.string()]).default(false),
 });
 
 const modelSelectionSchema = z.object({
