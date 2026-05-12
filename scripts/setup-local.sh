@@ -121,8 +121,7 @@ ok "Dependencies installed"
 # ── Build ──────────────────────────────────────────────────
 step "Building KairoClaw"
 
-pnpm --filter @agw/types build
-pnpm --filter @agw/core build
+pnpm -r build
 pnpm --filter @agw/ui build
 ok "Build complete"
 
@@ -292,8 +291,7 @@ case "$CMD" in
 
   build)
     echo "Building KairoClaw..."
-    pnpm --filter @agw/types build
-    pnpm --filter @agw/core build
+    pnpm -r build
     pnpm --filter @agw/ui build
     echo "Build complete."
     ;;
@@ -331,8 +329,7 @@ case "$CMD" in
       echo "systemd is not available on this OS (macOS?). Rebuilding only."
     fi
     echo "Building..."
-    pnpm --filter @agw/types build
-    pnpm --filter @agw/core build
+    pnpm -r build
     pnpm --filter @agw/ui build
     echo ""
     if command -v systemctl &>/dev/null; then
