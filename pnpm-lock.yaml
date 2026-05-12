@@ -195,6 +195,10 @@ importers:
       '@types/qrcode':
         specifier: ^1.5.6
         version: 1.5.6
+    optionalDependencies:
+      '@bsigma-ai/kairo-enterprise':
+        specifier: ^0.2.3
+        version: 0.2.3
 
   packages/cron:
     dependencies:
