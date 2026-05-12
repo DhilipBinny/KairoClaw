@@ -180,5 +180,7 @@ export function loadPlugins(stateDir: string): PluginsConfig {
 export function savePlugins(stateDir: string, config: PluginsConfig): void {
   const filePath = path.join(stateDir, PLUGINS_FILENAME);
   fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), { mode: 0o600 });
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, filePath);
 }

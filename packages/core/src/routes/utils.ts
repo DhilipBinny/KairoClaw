@@ -2,6 +2,8 @@
  * Shared utilities for route handlers.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { GatewayConfig } from '@agw/types';
@@ -68,4 +70,11 @@ export function setNestedPath(obj: Record<string, unknown>, dotPath: string, val
     current = current[key] as Record<string, unknown>;
   }
   current[parts[parts.length - 1]] = value;
+}
+
+/** Atomic JSON write — temp file + rename to prevent corruption on crash. */
+export function atomicWriteJson(filePath: string, data: unknown): void {
+  const tmp = filePath + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, filePath);
 }
