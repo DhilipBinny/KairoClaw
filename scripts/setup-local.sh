@@ -287,7 +287,7 @@ case "$CMD" in
     echo "  http://localhost:18181"
     echo "  Ctrl+C to stop"
     echo ""
-    exec node packages/core/dist/index.js
+    exec env NODE_ENV=production node packages/core/dist/index.js
     ;;
 
   build)
