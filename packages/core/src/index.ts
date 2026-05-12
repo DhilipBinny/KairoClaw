@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { InboundMessage, AgentCallbacks, AgentResult } from '@agw/types';
@@ -63,7 +64,9 @@ import { webchatPlugin } from './channels/webchat.js';
 import { AuditService } from './security/audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, '..', '..', '..');
+const monorepoRoot = path.resolve(__dirname, '..', '..', '..');
+const flatRoot = path.resolve(__dirname, '..');
+const projectRoot = fs.existsSync(path.join(monorepoRoot, 'packages', 'ui')) ? monorepoRoot : flatRoot;
 
 // ─── Process-level crash protection ─────────────────────────
 // Log but do NOT crash the process for unhandled errors.
