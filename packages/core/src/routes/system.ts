@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { requireRole } from '../auth/middleware.js';
-import { getConfig } from './utils.js';
+import { getConfig, atomicWriteJson } from './utils.js';
 import { getModelCapabilities } from '@agw/provider-bridge';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
@@ -518,7 +518,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
               if (!raw.providers) raw.providers = {};
               if (!raw.providers.kairoPremium) raw.providers.kairoPremium = {};
               raw.providers.kairoPremium.enabled = shouldEnable;
-              fs.writeFileSync(configPath, JSON.stringify(raw, null, 2), { mode: 0o600 });
+              atomicWriteJson(configPath, raw);
             }
           }
         } catch { /* non-critical — config will be correct in memory */ }
@@ -696,7 +696,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // Write back
     try {
-      fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
+      atomicWriteJson(configPath, rawConfig);
     } catch {
       return reply.code(500).send({ error: 'Failed to write config file' });
     }

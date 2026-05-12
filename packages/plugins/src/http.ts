@@ -241,17 +241,28 @@ export function registerHttpPlugins(
               fetchOpts.body = JSON.stringify(resolvedArgs);
             }
 
-            let res = await fetch(url.toString(), fetchOpts);
+            let res!: Response;
+            for (let attempt = 0; attempt <= 2; attempt++) {
+              try {
+                res = await fetch(url.toString(), fetchOpts);
 
-            // Follow redirects manually with SSRF validation on each hop
-            let redirects = 0;
-            while (res.status >= 300 && res.status < 400 && redirects < 5) {
-              const location = res.headers.get('location');
-              if (!location) break;
-              const redirectUrl = new URL(location, url.toString()).toString();
-              validatePluginUrl(redirectUrl);
-              res = await fetch(redirectUrl, { ...fetchOpts, method: 'GET', body: undefined });
-              redirects++;
+                // Follow redirects manually with SSRF validation on each hop
+                let redirects = 0;
+                while (res.status >= 300 && res.status < 400 && redirects < 5) {
+                  const location = res.headers.get('location');
+                  if (!location) break;
+                  const redirectUrl = new URL(location, url.toString()).toString();
+                  validatePluginUrl(redirectUrl);
+                  res = await fetch(redirectUrl, { ...fetchOpts, method: 'GET', body: undefined });
+                  redirects++;
+                }
+
+                if (res.status < 500 || attempt === 2) break;
+                await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
+              } catch (fetchErr) {
+                if (attempt === 2) throw fetchErr;
+                await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
+              }
             }
             const contentType = res.headers.get('content-type') || '';
 

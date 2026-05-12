@@ -107,8 +107,8 @@ async function summarizeWithLLM(
             conversationLines.push(`[Tool Call]: ${tc.function.name}(${(tc.function.arguments || '').slice(0, 200)})`);
           }
         }
-      } catch {
-        // skip
+      } catch (e) {
+        log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped malformed tool_calls JSON in summarization');
       }
     }
   }
@@ -226,8 +226,8 @@ function buildCompactionSummary(messages: MessageRow[]): string {
             toolCounts[tc.function.name] = (toolCounts[tc.function.name] || 0) + 1;
           }
         }
-      } catch {
-        // skip
+      } catch (e) {
+        log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped malformed tool_calls JSON in fallback summary');
       }
     }
   }
@@ -368,7 +368,7 @@ async function extractTouchedFilePaths(sessionId: string, db: DatabaseAdapter): 
         } else {
           readPaths.push(filePath);
         }
-      } catch { /* skip malformed args */ }
+      } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped malformed tool_call arguments during file path extraction'); }
     }
   } catch (err) {
     log.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to extract file paths from tool_calls');
@@ -436,8 +436,8 @@ function buildFileRestorationMessage(
       restored.push(`### ${relPath}\n\`\`\`\n${content}\n\`\`\``);
       totalChars += content.length;
       filesRestored++;
-    } catch {
-      // Skip unreadable files
+    } catch (e) {
+      log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped unreadable file during restoration');
     }
   }
 
