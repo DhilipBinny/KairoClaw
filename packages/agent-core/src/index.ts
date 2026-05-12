@@ -17,7 +17,7 @@ export type {
 } from './compaction.js';
 
 // ── System Prompt ────────────────────────────────────────
-export { buildSystemPrompt } from './prompt.js';
+export { buildSystemPrompt, setPromptLogger } from './prompt.js';
 
 // ── Router ───────────────────────────────────────────────
 export {
@@ -51,6 +51,7 @@ export {
   renderToolResultForLLM,
   sanitizeMessagesForLog,
   rowToMessage,
+  setMessagesLogger,
 } from './messages.js';
 
 // ── Tool Execution ──────────────────────────────────────────

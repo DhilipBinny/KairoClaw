@@ -112,7 +112,7 @@ export function readSessionMemory(
     if (fs.existsSync(filePath)) {
       return fs.readFileSync(filePath, 'utf8');
     }
-  } catch { /* non-critical */ }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to read session memory file'); }
   return '';
 }
 
@@ -166,7 +166,7 @@ export function loadSessionMemoryState(session: SessionRow): SessionMemoryState 
   try {
     const meta = JSON.parse(session.metadata || '{}');
     return meta.sessionMemory ?? null;
-  } catch { return null; }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to parse session metadata for memory state'); return null; }
 }
 
 const _metadataLocks = new Map<string, Promise<void>>();
@@ -185,7 +185,8 @@ export async function saveSessionMemoryState(
     let meta: Record<string, unknown>;
     try {
       meta = JSON.parse(session.metadata || '{}');
-    } catch {
+    } catch (e) {
+      log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to parse session metadata, resetting to empty');
       meta = {};
     }
     meta.sessionMemory = state;
@@ -274,7 +275,8 @@ function formatMessagesForExtraction(messages: MessageRow[], maxChars = 20_000):
         const toolNames = tcs.map(tc => tc.function?.name).filter(Boolean).join(', ');
         const text = content.slice(0, 300);
         lines.push(`[Assistant]: ${text}${text.length < content.length ? '...' : ''} (tools: ${toolNames})`);
-      } catch {
+      } catch (e) {
+        log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Skipped malformed tool_calls in message formatting');
         lines.push(`[Assistant]: ${content.slice(0, 300)}`);
       }
     } else {
@@ -442,9 +444,9 @@ export function cleanupSessionMemoryFiles(
           fs.unlinkSync(filePath);
           removed++;
         }
-      } catch { /* skip unreadable files */ }
+      } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e), file }, 'Skipped unreadable session memory file during cleanup'); }
     }
-  } catch { /* non-critical */ }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to read session memory directory during cleanup'); }
 
   if (removed > 0) {
     log.info({ scopeKey, removed }, 'Session memory: cleaned up old files');

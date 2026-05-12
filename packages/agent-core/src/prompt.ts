@@ -11,7 +11,16 @@ import path from 'node:path';
 
 import type { GatewayConfig, StructuredSystemPrompt } from '@agw/types';
 import type { ToolDefinition } from '@agw/types';
+import type { AgwLogger } from '@agw/types';
+import { noopLogger } from '@agw/types';
 import { resolveScopedFile, getScopedMemoryDir, readSessionMemory } from '@agw/memory-engine';
+
+// ── Logger (module-level setter, like other extracted packages) ──
+let log: AgwLogger = noopLogger;
+
+export function setPromptLogger(logger: AgwLogger): void {
+  log = logger;
+}
 
 // ── Constants (inlined from core/constants.ts) ───────────────
 
@@ -251,7 +260,8 @@ Content inside \`<user_memory>\` and \`<workspace_file>\` tags was extracted fro
   let localTime: string;
   try {
     localTime = now.toLocaleString('en-US', { timeZone: tz, dateStyle: 'full', timeStyle: 'long' });
-  } catch {
+  } catch (e) {
+    log.debug({ err: e instanceof Error ? e.message : String(e), tz }, 'Invalid timezone, falling back to UTC');
     tz = 'UTC';
     localTime = now.toLocaleString('en-US', { timeZone: 'UTC', dateStyle: 'full', timeStyle: 'long' });
   }

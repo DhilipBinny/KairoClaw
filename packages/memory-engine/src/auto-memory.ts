@@ -44,7 +44,7 @@ const SESSION_RETENTION_DAYS = MEMORY_SESSION_RETENTION_DAYS;
 function readFileOrEmpty(filePath: string): string {
   try {
     return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-  } catch { return ''; }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to read file, returning empty'); return ''; }
 }
 
 function ensureDir(dirPath: string): void {
@@ -307,7 +307,7 @@ export async function consolidateMemory(opts: {
         }
       }
     }
-  } catch { /* non-critical */ }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to read session notes directory for consolidation'); }
 
   if (!sessionNotes.trim()) {
     log.debug('Memory consolidation: no session notes to process');
@@ -376,5 +376,5 @@ function cleanExpiredSessions(sessionsDir: string): void {
         log.info({ file }, 'Auto-memory: cleaned expired session file');
       }
     }
-  } catch { /* non-critical */ }
+  } catch (e) { log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to clean expired session files'); }
 }

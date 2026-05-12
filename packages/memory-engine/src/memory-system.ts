@@ -253,8 +253,8 @@ export class MemorySystem {
     for (const w of this.watchers) {
       try {
         w.close();
-      } catch {
-        /* ignore */
+      } catch (e) {
+        this.log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to close file watcher');
       }
     }
     this.watchers = [];
@@ -303,7 +303,7 @@ export class MemorySystem {
             }
           }
         }
-      } catch { /* non-critical */ }
+      } catch (e) { this.log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to read scoped memory files'); }
     }
 
     return files;
@@ -405,7 +405,7 @@ export class MemorySystem {
         }
       }
       if (removed > 0) this.log.info({ removed }, 'Cleaned up orphaned memory chunks');
-    } catch { /* non-critical */ }
+    } catch (e) { this.log.debug({ err: e instanceof Error ? e.message : String(e) }, 'Failed to clean up orphaned memory chunks'); }
 
     this.log.info({ files: files.length }, 'Memory files indexed');
   }
