@@ -4,7 +4,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { GatewayConfig } from '@agw/types';
 import { requireRole } from '../auth/middleware.js';
 import type { AuditService } from '../security/audit.js';
-import { setNestedPath, getConfig, getTenantId } from './utils.js';
+import { setNestedPath, getConfig, getTenantId, atomicWriteJson } from './utils.js';
 import { configSchema, pluginsSchema } from '../config/schema.js';
 import { loadPlugins, savePlugins } from '../plugins/index.js';
 
@@ -119,7 +119,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
     // Write back to disk
     try {
-      fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
+      atomicWriteJson(configPath, rawConfig);
     } catch (_e) {
       return reply.code(500).send({ error: 'Failed to write config file' });
     }
@@ -381,7 +381,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
 
     // Write to disk
     try {
-      fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
+      atomicWriteJson(configPath, merged);
     } catch {
       return reply.code(500).send({ error: 'Failed to write config file' });
     }

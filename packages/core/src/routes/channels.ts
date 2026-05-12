@@ -17,7 +17,7 @@ import { SenderLinkRepository } from '../db/repositories/sender-link.js';
 import { UserRepository } from '../db/repositories/user.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateApiKey, hashApiKey } from '../auth/keys.js';
-import { setNestedPath, getDb, getTenantId, getConfig } from './utils.js';
+import { setNestedPath, getDb, getTenantId, getConfig, atomicWriteJson } from './utils.js';
 
 export interface ChannelRoutesOptions {
   channelRegistry: {
@@ -168,7 +168,7 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       // Update raw config and live config
       setNestedPath(rawConfig, dotPath, existingList);
       setNestedPath(liveConfig as unknown as Record<string, unknown>, dotPath, existingList);
-      fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
+      atomicWriteJson(configPath, rawConfig);
     } catch {
       return reply.code(500).send({ error: 'Failed to update config' });
     }
@@ -230,32 +230,35 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
     const validRoles = ['admin', 'user'];
     const userRole = role && validRoles.includes(role) ? role : 'user';
 
-    // 1. Create user account
+    // 1-2-4. Create user, link sender, mark approved — in a transaction
     const apiKey = generateApiKey();
     const apiKeyHash = hashApiKey(apiKey);
     const userRepo = new UserRepository(db);
-    const user = await userRepo.create({
-      tenantId,
-      name: name.trim(),
-      email: email?.trim() || undefined,
-      role: userRole,
-      apiKeyHash,
-    });
-    if (elevated) {
-      await userRepo.update(user.id, tenantId, { elevated: 1 });
-    }
-
-    // 2. Create sender_link
     const senderLinkRepo = new SenderLinkRepository(db);
-    await senderLinkRepo.link({
-      tenantId,
-      channelType: sender.channel,
-      senderId: sender.sender_id,
-      userId: user.id,
-      linkedBy: request.user?.id,
+
+    const user = await db.transaction(async () => {
+      const u = await userRepo.create({
+        tenantId,
+        name: name.trim(),
+        email: email?.trim() || undefined,
+        role: userRole,
+        apiKeyHash,
+      });
+      if (elevated) {
+        await userRepo.update(u.id, tenantId, { elevated: 1 });
+      }
+      await senderLinkRepo.link({
+        tenantId,
+        channelType: sender.channel,
+        senderId: sender.sender_id,
+        userId: u.id,
+        linkedBy: request.user?.id,
+      });
+      await pendingRepo.updateStatus(Number(id), 'approved');
+      return u;
     });
 
-    // 3. Add to allowFrom config (same logic as approve)
+    // 3. Add to allowFrom config (non-critical — user+link already committed)
     const isGroup = (sender.channel === 'telegram' && sender.sender_id.startsWith('-'))
       || (sender.channel === 'whatsapp' && sender.sender_id.endsWith('@g.us'));
     const stateDir = liveConfig._stateDir || '';
@@ -285,13 +288,10 @@ export const registerChannelRoutes: FastifyPluginAsync<ChannelRoutesOptions> = a
       }
       setNestedPath(rawConfig, dotPath, existingList);
       setNestedPath(liveConfig as unknown as Record<string, unknown>, dotPath, existingList);
-      fs.writeFileSync(configPath, JSON.stringify(rawConfig, null, 2), { mode: 0o600 });
+      atomicWriteJson(configPath, rawConfig);
     } catch {
-      // Config update failed, but user + link created — not critical
+      // Config update failed, but user + link already committed
     }
-
-    // 4. Mark sender as approved (after DB operations succeed, before return)
-    try { await pendingRepo.updateStatus(Number(id), 'approved'); } catch { /* non-critical */ }
 
     return {
       user: {
