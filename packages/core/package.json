@@ -47,6 +47,9 @@
     "@agw/plugins": "workspace:*",
     "@agw/tools-common": "workspace:*"
   },
+  "optionalDependencies": {
+    "@bsigma-ai/kairo-enterprise": "^0.2.3"
+  },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/nodemailer": "^7.0.11",
