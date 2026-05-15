@@ -18,7 +18,7 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
 
   // GET /api/v1/admin/cron — list cron jobs (with user names)
   app.get('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async (request) => {
-    const jobs = scheduler.list();
+    const jobs = await scheduler.listFresh();
     // Enrich with user names
     const db = getDb(request);
     if (db) {
@@ -105,7 +105,7 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
   app.get('/api/v1/my/cron', async (request) => {
     const userId = request.user?.id;
     if (!userId) return { jobs: [] };
-    const allJobs = scheduler.list();
+    const allJobs = await scheduler.listFresh();
     return { jobs: allJobs.filter(j => j.userId === userId) };
   });
 

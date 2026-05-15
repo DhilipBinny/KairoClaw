@@ -95,10 +95,10 @@ export class CronJobRepository {
     await this.db.run(`UPDATE cron_jobs SET ${fields.join(', ')} WHERE id = ? AND tenant_id = ?`, values);
   }
 
-  async updateLastRun(id: string, result?: string): Promise<void> {
+  async updateLastRun(id: string, tenantId: string, result?: string): Promise<void> {
     await this.db.run(
-      'UPDATE cron_jobs SET last_run = ?, last_result = ?, run_count = run_count + 1 WHERE id = ?',
-      [new Date().toISOString(), result ?? null, id],
+      'UPDATE cron_jobs SET last_run = ?, last_result = ?, run_count = run_count + 1 WHERE id = ? AND tenant_id = ?',
+      [new Date().toISOString(), result ?? null, id, tenantId],
     );
   }
 
