@@ -239,8 +239,8 @@ describe('CronJobRepository', () => {
 
   it('tracks run count', async () => {
     await repo.create({ id: 'j1', tenantId: TENANT, name: 'Runner', scheduleType: 'cron', scheduleValue: '* * * * *', prompt: 'x', delivery: '{}' });
-    await repo.updateLastRun('j1', 'result text');
-    await repo.updateLastRun('j1', 'result 2');
+    await repo.updateLastRun('j1', TENANT, 'result text');
+    await repo.updateLastRun('j1', TENANT, 'result 2');
     const job = await repo.getById('j1', TENANT);
     expect(job!.run_count).toBe(2);
     expect(job!.last_result).toBe('result 2');
