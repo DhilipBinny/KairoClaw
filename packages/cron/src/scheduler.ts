@@ -325,7 +325,7 @@ export class CronScheduler {
     return {
       id: row.id,
       name: row.name,
-      schedule: { type: row.schedule_type as CronJobSchedule['type'], value: row.schedule_value, tz: row.timezone || undefined },
+      schedule: { type: row.schedule_type as CronJobSchedule['type'], value: row.schedule_type === 'every' ? Number(row.schedule_value) : row.schedule_value, tz: row.timezone || undefined },
       prompt: row.prompt,
       delivery,
       enabled: !!row.enabled,
@@ -396,6 +396,10 @@ export class CronScheduler {
         void this._executeJob(job);
         this.jobs.delete(job.id);
         this.timers.delete(job.id);
+        if (this.store) {
+          this.store.delete(job.id, this.tenantId).catch(e =>
+            this.log.warn({ err: e instanceof Error ? e.message : String(e), jobId: job.id }, 'Failed to delete one-shot job from DB'));
+        }
         this._save();
       }, delay);
       this.timers.set(job.id, { timer, type: 'timeout' });
@@ -459,7 +463,7 @@ export class CronScheduler {
     this.log.info({ jobId: job.id, name: job.name }, 'Executing cron job');
     job.lastRun = new Date().toISOString();
     job.runCount = (job.runCount || 0) + 1;
-    this._save();
+    this._saveJob(job);
 
     try {
       if (!this.executor) {
@@ -531,13 +535,13 @@ export class CronScheduler {
         }
       }
 
-      this._save();
+      this._saveJob(job);
       this.log.info({ jobId: job.id, resultLen: responseText.length }, 'Cron job completed');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       this.log.error({ jobId: job.id, err: errMsg }, 'Cron job execution failed');
       job.lastError = errMsg;
-      this._save();
+      this._saveJob(job);
     } finally {
       this.runningJobs.delete(job.id);
     }
@@ -677,6 +681,19 @@ export class CronScheduler {
 
   list(): CronJob[] {
     return Array.from(this.jobs.values());
+  }
+
+  async listFresh(): Promise<CronJob[]> {
+    if (this.store) {
+      try {
+        const rows = await this.store.listByTenant(this.tenantId);
+        return rows.map(r => this._rowToJob(r));
+      } catch (e) {
+        this.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to list cron jobs from DB, using in-memory cache');
+        return this.list();
+      }
+    }
+    return this.list();
   }
 
   get(id: string): CronJob | null {
