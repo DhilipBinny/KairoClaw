@@ -144,9 +144,16 @@ export const messagingTools: ToolRegistration[] = [
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
-      // Classify type for channel-specific sending
+      // Classify type for channel-specific sending (matches channel sender switch cases)
       const imageExts = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
-      const type = imageExts.has(ext) ? 'image' : 'document';
+      const audioExts = new Set(['mp3', 'm4a', 'wav', 'flac']);
+      const voiceExts = new Set(['ogg']);
+      const videoExts = new Set(['mp4', 'webm', 'mov', 'avi']);
+      const type = imageExts.has(ext) ? 'image'
+        : audioExts.has(ext) ? 'audio'
+        : voiceExts.has(ext) ? 'voice'
+        : videoExts.has(ext) ? 'video'
+        : 'document';
 
       const _media: MediaAttachment[] = [{
         type: type as MediaAttachment['type'],
