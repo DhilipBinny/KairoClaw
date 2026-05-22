@@ -12,6 +12,7 @@ export interface TestDb {
   run(sql: string, params?: unknown[]): Promise<any>;
   get<T>(sql: string, params?: unknown[]): Promise<T | undefined>;
   query<T>(sql: string, params?: unknown[]): Promise<T[]>;
+  transaction<T>(fn: () => Promise<T>): Promise<T>;
   close(): void;
 }
 
@@ -36,6 +37,7 @@ export function createTestDb(): TestDb {
     async run(sql: string, params?: unknown[]) { return sqlite.prepare(sql).run(...(params || [])); },
     async get<T>(sql: string, params?: unknown[]) { return sqlite.prepare(sql).get(...(params || [])) as T; },
     async query<T>(sql: string, params?: unknown[]) { return sqlite.prepare(sql).all(...(params || [])) as T[]; },
+    async transaction<T>(fn: () => Promise<T>) { return fn(); },
     close() { sqlite.close(); },
   };
 }

@@ -121,11 +121,13 @@ export class UserRepository {
   }
 
   async hardDelete(id: string, tenantId: string): Promise<void> {
-    // Cascade: delete sender_links, usage_records, then sessions (messages cascade from sessions), then user
-    await this.db.run('DELETE FROM sender_links WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
-    await this.db.run('DELETE FROM usage_records WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
-    // Nullify user_id on sessions (keep sessions for audit), then delete user
-    await this.db.run('UPDATE sessions SET user_id = NULL WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
-    await this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    await this.db.transaction(async () => {
+      // Cascade: delete sender_links, usage_records, then sessions (messages cascade from sessions), then user
+      await this.db.run('DELETE FROM sender_links WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
+      await this.db.run('DELETE FROM usage_records WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
+      // Nullify user_id on sessions (keep sessions for audit), then delete user
+      await this.db.run('UPDATE sessions SET user_id = NULL WHERE user_id = ? AND tenant_id = ?', [id, tenantId]);
+      await this.db.run('DELETE FROM users WHERE id = ? AND tenant_id = ?', [id, tenantId]);
+    });
   }
 }

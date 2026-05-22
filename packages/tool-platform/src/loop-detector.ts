@@ -82,7 +82,7 @@ export class LoopDetector {
    */
   static fingerprint(toolName: string, args: Record<string, unknown>): string {
     const keys = Object.keys(args).sort();
-    const normalised = JSON.stringify(args, keys);
+    const normalised = JSON.stringify(args, keys).slice(0, 4096);
     return crypto.createHash('sha256').update(`${toolName}:${normalised}`).digest('hex').slice(0, 16);
   }
 }

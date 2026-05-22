@@ -298,10 +298,11 @@ class TelegramChannel implements Channel {
     const cfg = this.config.channels.telegram;
 
     // Allowlist check — compare as strings to handle mixed types
+    const allowSet = cfg.allowFrom?.length > 0 ? new Set(cfg.allowFrom.map(String)) : null;
+    const groupAllowSet = cfg.groupAllowFrom?.length > 0 ? new Set(cfg.groupAllowFrom.map(String)) : null;
     const senderName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ') || 'Unknown';
-    if (cfg.allowFrom?.length > 0) {
-      const allowed = cfg.allowFrom.map(String);
-      if (!allowed.includes(senderId)) {
+    if (allowSet) {
+      if (!allowSet.has(senderId)) {
         log.warn({ senderId }, 'Telegram: sender not in allowFrom list — rejected');
         try {
           // Evict oldest pending if at cap
@@ -319,16 +320,15 @@ class TelegramChannel implements Channel {
 
       // Record group for admin discovery
       const groupName = ctx.chat?.title || `Group ${chatId}`;
-      const hasGroupAllowlist = cfg.groupAllowFrom?.length > 0;
       try {
-        const status = hasGroupAllowlist ? 'pending' : 'seen';
+        const status = groupAllowSet ? 'pending' : 'seen';
         const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
         await this.pendingSenders.recordWithResolutionCheck('telegram', chatId, groupName, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist (if set, only listed group IDs are allowed)
-      if (hasGroupAllowlist) {
-        if (!cfg.groupAllowFrom.map(String).includes(chatId)) {
+      if (groupAllowSet) {
+        if (!groupAllowSet.has(chatId)) {
           log.debug({ chatId }, 'Telegram: group not in groupAllowFrom — ignored');
           return;
         }
@@ -343,9 +343,8 @@ class TelegramChannel implements Channel {
       }
 
       // Per-user check inside groups: sender must be in allowFrom
-      if (cfg.groupRequireAllowFrom && cfg.allowFrom?.length > 0) {
-        const allowed = cfg.allowFrom.map(String);
-        if (!allowed.includes(senderId)) {
+      if (cfg.groupRequireAllowFrom && allowSet) {
+        if (!allowSet.has(senderId)) {
           log.debug({ senderId, chatId }, 'Telegram: group sender not in allowFrom — ignored');
           // Record as pending for admin approval
           try {
