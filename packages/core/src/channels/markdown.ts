@@ -68,10 +68,20 @@ const whatsappMarked = new Marked({ async: false, breaks: true, renderer: makeRe
  * Convert standard Markdown to Telegram HTML format.
  * Use with parse_mode: 'HTML' in Grammy/Bot API calls.
  */
+// Telegram only supports: b, i, u, s, code, pre, a, blockquote, tg-spoiler
+const TG_ALLOWED_TAGS = new Set(['b', 'i', 'u', 's', 'code', 'pre', 'a', 'blockquote', 'tg-spoiler']);
+
 export function markdownToTelegramHtml(text: string): string {
   if (!text) return text;
   try {
-    return (telegramMarked.parse(text) as string).trim();
+    let result = (telegramMarked.parse(text) as string).trim();
+    // Strip unsupported HTML tags (ul, ol, li, p, etc.) — Telegram rejects them
+    result = result.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) => {
+      return TG_ALLOWED_TAGS.has(tag.toLowerCase()) ? match : '';
+    });
+    // Collapse excessive blank lines
+    result = result.replace(/\n{3,}/g, '\n\n');
+    return result;
   } catch {
     return text;
   }
