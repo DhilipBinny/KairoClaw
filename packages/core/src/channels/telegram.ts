@@ -632,7 +632,7 @@ class TelegramChannel implements Channel {
     caption?: string,
     replyParams?: { message_id: number },
   ): Promise<void> {
-    const file = new InputFile(fs.createReadStream(item.filePath));
+    const file = new InputFile(fs.createReadStream(item.filePath), item.fileName);
     const opts = {
       caption,
       parse_mode: caption ? 'HTML' as const : undefined,
@@ -736,7 +736,7 @@ class TelegramChannel implements Channel {
       const caption = formattedCaption.slice(0, 1024) || undefined;
       let mediaSent = false;
       for (const item of items) {
-        const file = new InputFile(fs.createReadStream(item.filePath));
+        const file = new InputFile(fs.createReadStream(item.filePath), item.fileName);
         const opts = { caption: !mediaSent ? caption : undefined, parse_mode: (!mediaSent && caption) ? 'HTML' as const : undefined };
         try {
           switch (item.type) {
