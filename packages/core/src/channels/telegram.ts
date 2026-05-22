@@ -20,6 +20,7 @@ import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
+import { markdownToTelegramHtml } from './markdown.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
@@ -532,11 +533,14 @@ class TelegramChannel implements Channel {
           displayText = appendModelIndicator(displayText, result.model);
         }
 
+        // Convert standard Markdown to Telegram HTML
+        displayText = markdownToTelegramHtml(displayText);
+
         // Split long messages (Telegram limit: 4096 chars)
         const chunks = splitMessage(displayText, 4000);
         for (const chunk of chunks) {
           await sendWithRetry(ctx, chunk, {
-            parse_mode: 'Markdown',
+            parse_mode: 'HTML',
             reply_parameters:
               chatType === 'group' && ctx.message
                 ? { message_id: ctx.message.message_id }
@@ -683,16 +687,14 @@ class TelegramChannel implements Channel {
       }
     };
 
+    const formatted = markdownToTelegramHtml(text);
     const MAX_LEN = 4000;
-    if (text.length <= MAX_LEN) {
-      await sendWithBackoff(text, { parse_mode: 'Markdown' });
+    if (formatted.length <= MAX_LEN) {
+      await sendWithBackoff(formatted, { parse_mode: 'HTML' });
     } else {
-      const chunks = [];
-      for (let i = 0; i < text.length; i += MAX_LEN) {
-        chunks.push(text.slice(i, i + MAX_LEN));
-      }
+      const chunks = splitMessage(formatted, MAX_LEN);
       for (const chunk of chunks) {
-        await sendWithBackoff(chunk).catch((e: unknown) => {
+        await sendWithBackoff(chunk, { parse_mode: 'HTML' }).catch((e: unknown) => {
           log.warn({ err: e instanceof Error ? e.message : String(e), chatId: targetChatId }, 'Telegram chunk send failed');
         });
       }
