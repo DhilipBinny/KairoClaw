@@ -65,13 +65,15 @@ export class ProviderRegistry {
 
     const openaiApiKey = this.secretsResolver?.get('providers.openai', 'apiKey')
       || cfg.openai?.apiKey || '';
-    if (openaiApiKey) {
+    const openaiBaseUrl = this.secretsResolver?.get('providers.openai', 'baseUrl')
+      || cfg.openai?.baseUrl || '';
+    if (openaiApiKey || openaiBaseUrl) {
       this.providers.openai = new OpenAIProvider(
-        { apiKey: openaiApiKey, defaultModel: cfg.openai?.defaultModel || 'gpt-4o' },
+        { apiKey: openaiApiKey, baseUrl: openaiBaseUrl || undefined, defaultModel: cfg.openai?.defaultModel || 'gpt-4o' },
         this.config,
         this.log,
       );
-      this.log.info('OpenAI provider initialized');
+      this.log.info({ hasBaseUrl: !!openaiBaseUrl }, 'OpenAI provider initialized');
     }
 
     const ollamaBaseUrl = this.secretsResolver?.get('providers.ollama', 'baseUrl')
