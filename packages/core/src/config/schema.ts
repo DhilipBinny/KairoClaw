@@ -23,6 +23,7 @@ const anthropicProviderSchema = z.object({
 
 const openaiProviderSchema = z.object({
   apiKey: z.string().default(''),
+  baseUrl: z.string().default(''),
   defaultModel: z.string().default('gpt-4o'),
   apiKeyFile: z.string().optional(),
 });
@@ -349,6 +350,7 @@ export const configDefaults: GatewayConfig = {
     },
     openai: {
       apiKey: '${OPENAI_API_KEY}',
+      baseUrl: '',
       defaultModel: 'gpt-4o',
     },
     ollama: {

@@ -201,7 +201,7 @@ function isProviderConfigured(
     case 'anthropic':
       return !!(providers.anthropic?.apiKey?.trim() || providers.anthropic?.apiKeyFile?.trim());
     case 'openai':
-      return !!(providers.openai?.apiKey?.trim() || providers.openai?.apiKeyFile?.trim());
+      return !!(providers.openai?.apiKey?.trim() || providers.openai?.apiKeyFile?.trim() || providers.openai?.baseUrl?.trim());
     case 'ollama':
       return !!(providers.ollama?.baseUrl?.trim());
     default:

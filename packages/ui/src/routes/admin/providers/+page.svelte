@@ -367,7 +367,7 @@
       if (providerId === 'anthropic') {
         credForm[providerId] = { apiKey: '', baseUrl: '' };
       } else if (providerId === 'openai') {
-        credForm[providerId] = { apiKey: '' };
+        credForm[providerId] = { apiKey: '', baseUrl: '' };
       } else if (providerId === 'ollama') {
         credForm[providerId] = { baseUrl: 'http://localhost:11434' };
       }
@@ -385,6 +385,7 @@
         if (form.baseUrl) creds.baseUrl = form.baseUrl;
       } else if (providerId === 'openai') {
         creds.apiKey = form.apiKey;
+        if (form.baseUrl) creds.baseUrl = form.baseUrl;
       } else if (providerId === 'ollama') {
         creds.baseUrl = form.baseUrl;
       }
@@ -589,10 +590,17 @@
                 </div>
               {/if}
               {#if provider.id === 'openai'}
+                {@const opc = getProviderConfig('openai')}
                 <div class="detail-row">
                   <span class="detail-label">API Key:</span>
                   <span class="detail-value">****</span>
                 </div>
+                {#if opc?.baseUrl}
+                  <div class="detail-row">
+                    <span class="detail-label">Base URL:</span>
+                    <span class="detail-value">{opc.baseUrl}</span>
+                  </div>
+                {/if}
               {/if}
               {#if provider.id === 'ollama'}
                 {@const pc = getProviderConfig('ollama')}
@@ -653,6 +661,11 @@
                       {showPassword['openai-apikey'] ? 'Hide' : 'Show'}
                     </button>
                   </div>
+                </div>
+                <div class="cred-field">
+                  <label class="cred-label" for="openai-baseurl">Base URL (optional)</label>
+                  <input id="openai-baseurl" type="text" class="cred-input" bind:value={credForm[provider.id].baseUrl} placeholder="https://api.openai.com/v1" />
+                  <span class="cred-hint">For OpenAI-compatible APIs: NVIDIA, Azure, Together AI, Fireworks, vLLM</span>
                 </div>
               {:else if provider.id === 'ollama'}
                 <div class="cred-field">
