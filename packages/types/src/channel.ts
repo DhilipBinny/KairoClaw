@@ -6,7 +6,7 @@
  */
 
 /** Supported channel identifiers. */
-export type ChannelType = 'web' | 'telegram' | 'slack' | 'api';
+export type ChannelType = 'web' | 'telegram' | 'slack' | 'api' | 'whatsapp' | 'cron';
 
 /**
  * Interface for a channel handler.

@@ -2,7 +2,7 @@ import type { GatewayConfig, ProviderInterface, ProviderResponse, ChatArgs, AgwL
 import { noopLogger } from '@agw/types';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
-import { classifyError, logClassifiedError } from './errors.js';
+import { classifyError, logClassifiedError, CompactionNeededError } from './errors.js';
 
 export interface SecretsResolver {
   get(namespace: string, key: string): string | undefined;
@@ -158,6 +158,12 @@ export class ProviderRegistry {
     try {
       return await this.callWithRetry(primary, { ...chatArgs, model });
     } catch (primaryErr: unknown) {
+      // compact_and_retry should NOT trigger failover — re-throw for agent loop
+      if (primaryErr instanceof CompactionNeededError) {
+        this.log.info({ provider: providerName }, 'Context too long, needs compaction — skipping failover');
+        throw primaryErr;
+      }
+
       const primaryError = primaryErr as Error;
       this.log.warn({ provider: providerName, err: primaryError.message }, 'Primary provider failed');
 
@@ -206,8 +212,11 @@ export class ProviderRegistry {
         logClassifiedError(classified, { provider: provider.name, attempt, maxRetries });
 
         if (classified.retriable && attempt < maxRetries) {
-          if (classified.action === 'compact_and_retry' || classified.action === 'failover') {
-            throw e; // handled by outer callWithFailover or agent loop
+          if (classified.action === 'compact_and_retry') {
+            throw new CompactionNeededError(e); // signal agent loop to compact, not failover
+          }
+          if (classified.action === 'failover') {
+            throw e; // handled by outer callWithFailover
           }
           if (classified.retryDelayMs > 0) {
             await new Promise((r) => setTimeout(r, classified.retryDelayMs));

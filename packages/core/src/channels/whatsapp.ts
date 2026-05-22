@@ -259,14 +259,18 @@ class WhatsAppChannel implements Channel {
       : jid;
     const rawPhone = phoneFromJid(jidNormalizedUser(senderJid));
     // Resolve LID → phone number using cache or Baileys' auth state reverse files
-    const senderPhone = this.resolveLidToPhone(rawPhone);
+    const senderPhone = await this.resolveLidToPhone(rawPhone);
 
     log.debug({ jid, isGroup, senderPhone }, 'WhatsApp: message received');
 
+    // Build allowlist Sets once for O(1) lookups
+    const allowSet = cfg.allowFrom?.length > 0 ? new Set(cfg.allowFrom.map(String)) : null;
+    const groupAllowSet = cfg.groupAllowFrom?.length > 0 ? new Set(cfg.groupAllowFrom.map(String)) : null;
+
     // Allowlist check for direct messages
     const waSenderName = msg.pushName || senderPhone || 'Unknown';
-    if (!isGroup && cfg.allowFrom?.length > 0) {
-      if (!cfg.allowFrom.includes(senderPhone)) {
+    if (!isGroup && allowSet) {
+      if (!allowSet.has(senderPhone)) {
         log.warn({ senderPhone }, 'WhatsApp: sender not in allowFrom list — rejected');
         try {
           await this.pendingSenders.evictOverCap('whatsapp', 'pending', PENDING_PENDING_CAP);
@@ -289,16 +293,15 @@ class WhatsAppChannel implements Channel {
       }
 
       // Record group for admin discovery
-      const hasGroupAllowlist = cfg.groupAllowFrom?.length > 0;
       try {
-        const status = hasGroupAllowlist ? 'pending' : 'seen';
+        const status = groupAllowSet ? 'pending' : 'seen';
         const cap = status === 'seen' ? PENDING_SEEN_CAP : PENDING_PENDING_CAP;
         await this.pendingSenders.recordWithResolutionCheck('whatsapp', jid, jid, status, cap);
       } catch { /* non-critical */ }
 
       // Group allowlist
-      if (hasGroupAllowlist) {
-        if (!cfg.groupAllowFrom.includes(jid)) {
+      if (groupAllowSet) {
+        if (!groupAllowSet.has(jid)) {
           log.debug({ jid }, 'WhatsApp: group not in groupAllowFrom — ignored');
           return;
         }
@@ -328,23 +331,33 @@ class WhatsAppChannel implements Channel {
         // Look up our own LID from auth state
         try {
           const lidPath = path.join(this.authDir, `lid-mapping-${ownPhone}.json`);
-          if (fs.existsSync(lidPath)) {
-            const lid = JSON.parse(fs.readFileSync(lidPath, 'utf8'));
-            if (typeof lid === 'string') ownIdentifiers.push(lid);
-          }
-        } catch { /* non-critical */ }
+          await fs.promises.access(lidPath);
+          const lid = JSON.parse(await fs.promises.readFile(lidPath, 'utf8'));
+          if (typeof lid === 'string') ownIdentifiers.push(lid);
+        } catch { /* non-critical — file may not exist */ }
 
+        // Resolve mentioned JIDs to phone numbers for comparison (async)
+        let mentionMatchesOwn = false;
+        if (this.ownJid && !mentionedJids.includes(this.ownJid)) {
+          for (const j of mentionedJids) {
+            const resolved = await this.resolveLidToPhone(phoneFromJid(j));
+            if (resolved === ownPhone) { mentionMatchesOwn = true; break; }
+          }
+        }
         const isMentioned = this.ownJid
           ? mentionedJids.includes(this.ownJid) ||
-            mentionedJids.some(j => this.resolveLidToPhone(phoneFromJid(j)) === ownPhone) ||
+            mentionMatchesOwn ||
             ownIdentifiers.some(id => textContent.includes(`@${id}`))
           : false;
         const ctxParticipant =
           msgContent?.extendedTextMessage?.contextInfo?.participant ||
           msgContent?.imageMessage?.contextInfo?.participant ||
           msgContent?.documentMessage?.contextInfo?.participant || '';
+        const resolvedParticipant = ctxParticipant
+          ? await this.resolveLidToPhone(phoneFromJid(ctxParticipant))
+          : '';
         const isQuoteReply = ctxParticipant === this.ownJid ||
-          (ctxParticipant && ownPhone && this.resolveLidToPhone(phoneFromJid(ctxParticipant)) === ownPhone);
+          (ctxParticipant && ownPhone && resolvedParticipant === ownPhone);
 
         log.debug({ jid, isMentioned, isQuoteReply }, 'WhatsApp: group mention check');
 
@@ -355,8 +368,8 @@ class WhatsAppChannel implements Channel {
       }
 
       // Per-user check inside groups: sender must be in allowFrom
-      if (cfg.groupRequireAllowFrom && cfg.allowFrom?.length > 0) {
-        if (!cfg.allowFrom.includes(senderPhone)) {
+      if (cfg.groupRequireAllowFrom && allowSet) {
+        if (!allowSet.has(senderPhone)) {
           log.debug({ senderPhone, jid }, 'WhatsApp: group sender not in allowFrom — ignored');
           // Record as pending for admin approval
           try {
@@ -738,7 +751,7 @@ class WhatsAppChannel implements Channel {
    * Uses in-memory cache first, falls back to Baileys' auth state
    * reverse mapping files (lid-mapping-{LID}_reverse.json → "phone").
    */
-  private resolveLidToPhone(rawPhone: string): string {
+  private async resolveLidToPhone(rawPhone: string): Promise<string> {
     // Check in-memory cache first
     const cached = this.lidToPhone.get(rawPhone);
     if (cached) return cached;
@@ -746,15 +759,14 @@ class WhatsAppChannel implements Channel {
     // Try the Baileys auth state reverse file: lid-mapping-{LID}_reverse.json
     try {
       const reversePath = path.join(this.authDir, `lid-mapping-${rawPhone}_reverse.json`);
-      if (fs.existsSync(reversePath)) {
-        const phone = JSON.parse(fs.readFileSync(reversePath, 'utf8'));
-        if (typeof phone === 'string' && phone) {
-          this.lidToPhone.set(rawPhone, phone);
-          log.info({ lid: rawPhone, phone }, 'WhatsApp: resolved LID→phone from auth state');
-          return phone;
-        }
+      await fs.promises.access(reversePath);
+      const phone = JSON.parse(await fs.promises.readFile(reversePath, 'utf8'));
+      if (typeof phone === 'string' && phone) {
+        this.lidToPhone.set(rawPhone, phone);
+        log.info({ lid: rawPhone, phone }, 'WhatsApp: resolved LID→phone from auth state');
+        return phone;
       }
-    } catch { /* non-critical */ }
+    } catch { /* non-critical — file may not exist */ }
 
     return rawPhone;
   }
@@ -765,7 +777,7 @@ class WhatsAppChannel implements Channel {
   /** Send a media item via the appropriate WhatsApp message type. */
   private async sendWhatsAppMedia(jid: string, item: MediaItem, caption?: string): Promise<void> {
     if (!this.sock) throw new Error('WhatsApp not connected');
-    const data = fs.readFileSync(item.filePath);
+    const data = await fs.promises.readFile(item.filePath);
 
     switch (item.type) {
       case 'image':

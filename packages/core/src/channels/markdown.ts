@@ -77,13 +77,16 @@ const whatsappMarked = new Marked({ async: false, breaks: true, renderer: makeRe
  */
 // Telegram only supports: b, i, u, s, code, pre, a, blockquote, tg-spoiler
 const TG_ALLOWED_TAGS = new Set(['b', 'i', 'u', 's', 'code', 'pre', 'a', 'blockquote', 'tg-spoiler']);
+/** Pre-compiled regex for stripping unsupported HTML tags — hoisted to avoid recompilation per call. */
+const UNSUPPORTED_TAG_RE = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
 
 export function markdownToTelegramHtml(text: string): string {
   if (!text) return text;
   try {
     let result = (telegramMarked.parse(text) as string).trim();
     // Strip unsupported HTML tags (ul, ol, li, p, etc.) — Telegram rejects them
-    result = result.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) => {
+    UNSUPPORTED_TAG_RE.lastIndex = 0;
+    result = result.replace(UNSUPPORTED_TAG_RE, (match, tag) => {
       return TG_ALLOWED_TAGS.has(tag.toLowerCase()) ? match : '';
     });
     // Collapse excessive blank lines

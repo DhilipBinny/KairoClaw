@@ -43,7 +43,7 @@ export const SAFE_ENV_KEYS = [
 // Only truly catastrophic / irreversible system commands
 const MINIMAL_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
   // Filesystem destruction
-  { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*-.*r.*-.*f|.*-.*f.*-.*r)\s*\//i, reason: 'rm -rf on root path' },
+  { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|-\S*rf|-\S*fr)\s*\//i, reason: 'rm -rf on root path' },
   { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s+\/(?!\w)/i, reason: 'recursive delete on root' },
   { pattern: /\bmkfs\b/i, reason: 'format filesystem' },
   { pattern: /\bdd\b.*\bof\s*=\s*\/dev\//i, reason: 'write to disk device' },
