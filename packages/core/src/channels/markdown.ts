@@ -55,8 +55,15 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
     // Structural tokens — return false to use default (marked aggregates listitem results)
     list() { return false as any; },
     hr() { return '\n'; },
-    table(token: any) { return `${token.header || ''}${token.body || ''}\n`; },
-    tablerow({ text }: any) { return `${text}\n`; },
+    table(this: any, token: any) {
+      const headerCells = token.header.map((cell: any) => this.parser.parseInline(cell.tokens));
+      let result = headerCells.join(' | ') + '\n';
+      for (const row of token.rows) {
+        const cells = row.map((cell: any) => this.parser.parseInline(cell.tokens));
+        result += cells.join(' | ') + '\n';
+      }
+      return result + '\n';
+    },
     br() { return '\n'; },
   };
 }
