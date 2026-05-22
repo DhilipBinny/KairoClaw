@@ -500,7 +500,8 @@ class TelegramChannel implements Channel {
           const replyParams = chatType === 'group' && ctx.message
             ? { message_id: ctx.message.message_id }
             : undefined;
-          const caption = cleanText.slice(0, 1024) || undefined;
+          const formattedCaption = markdownToTelegramHtml(cleanText);
+          const caption = formattedCaption.slice(0, 1024) || undefined;
           let mediaSent = false;
 
           for (const item of mediaItems) {
@@ -514,17 +515,15 @@ class TelegramChannel implements Channel {
           }
 
           if (mediaSent) {
-            // If there's remaining text beyond the caption, send it as a separate message
-            if (cleanText.length > 1024) {
-              const remainingText = cleanText.slice(1024);
+            if (formattedCaption.length > 1024) {
+              const remainingText = formattedCaption.slice(1024);
               const chunks = splitMessage(remainingText, 4000);
               for (const chunk of chunks) {
-                await sendWithRetry(ctx, chunk, { parse_mode: 'Markdown' });
+                await sendWithRetry(ctx, chunk, { parse_mode: 'HTML' });
               }
             }
             return;
           }
-          // If no media was sent successfully, fall through to text
         }
 
         // Append model indicator if enabled (display only, not stored in DB)
@@ -636,6 +635,7 @@ class TelegramChannel implements Channel {
     const file = new InputFile(fs.createReadStream(item.filePath));
     const opts = {
       caption,
+      parse_mode: caption ? 'HTML' as const : undefined,
       reply_parameters: replyParams,
     };
 
@@ -732,11 +732,12 @@ class TelegramChannel implements Channel {
 
     if (items.length > 0) {
       const { cleanText } = extractMedia(text, stateDir, workspace);
-      const caption = cleanText.slice(0, 1024) || undefined;
+      const formattedCaption = markdownToTelegramHtml(cleanText);
+      const caption = formattedCaption.slice(0, 1024) || undefined;
       let mediaSent = false;
       for (const item of items) {
         const file = new InputFile(fs.createReadStream(item.filePath));
-        const opts = { caption: !mediaSent ? caption : undefined };
+        const opts = { caption: !mediaSent ? caption : undefined, parse_mode: (!mediaSent && caption) ? 'HTML' as const : undefined };
         try {
           switch (item.type) {
             case 'image':
