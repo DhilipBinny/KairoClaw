@@ -336,15 +336,17 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         }
         const data = (await resp.json()) as { data?: { id: string }[] };
         const isCustomEndpoint = !!testBaseUrl && !testBaseUrl.includes('api.openai.com');
+        const seen = new Set<string>();
         const chatModels = (data.data || [])
-          .filter(
-            (m) =>
-              isCustomEndpoint ||
+          .filter((m) => {
+            if (seen.has(m.id)) return false;
+            seen.add(m.id);
+            return isCustomEndpoint ||
               m.id.includes('gpt') ||
               m.id.includes('o1') ||
               m.id.includes('o3') ||
-              m.id.includes('o4'),
-          )
+              m.id.includes('o4');
+          })
           .map((m) => ({ id: m.id, name: m.id, capabilities: getModelCapabilities(m.id, config) }))
           .sort((a, b) => a.id.localeCompare(b.id));
         return { success: true, models: chatModels };
