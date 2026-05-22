@@ -305,19 +305,6 @@ export class CronScheduler {
     }
   }
 
-  /** Backward-compatible sync save -- persists all jobs (fire-and-forget for DB). */
-  private _save(): void {
-    if (this.store) {
-      // Fire-and-forget DB writes for each job
-      for (const job of this.jobs.values()) {
-        this._saveJob(job).catch(e =>
-          this.log.error({ err: e instanceof Error ? e.message : String(e), jobId: job.id }, 'Failed to persist cron job'));
-      }
-    } else {
-      this._saveAllJson();
-    }
-  }
-
   /** Convert a DB row to a CronJob object. */
   private _rowToJob(row: CronJobRow): CronJob {
     let delivery: CronJobDelivery | string;
@@ -399,8 +386,9 @@ export class CronScheduler {
         if (this.store) {
           this.store.delete(job.id, this.tenantId).catch(e =>
             this.log.warn({ err: e instanceof Error ? e.message : String(e), jobId: job.id }, 'Failed to delete one-shot job from DB'));
+        } else {
+          this._saveAllJson();
         }
-        this._save();
       }, delay);
       this.timers.set(job.id, { timer, type: 'timeout' });
     } else if (job.schedule.type === 'every') {
@@ -463,7 +451,7 @@ export class CronScheduler {
     this.log.info({ jobId: job.id, name: job.name }, 'Executing cron job');
     job.lastRun = new Date().toISOString();
     job.runCount = (job.runCount || 0) + 1;
-    this._saveJob(job);
+    this._saveJob(job).catch(e => this.log.error({ jobId: job.id, err: e instanceof Error ? e.message : String(e) }, 'Failed to persist job run start'));
 
     try {
       if (!this.executor) {
@@ -535,13 +523,13 @@ export class CronScheduler {
         }
       }
 
-      this._saveJob(job);
+      this._saveJob(job).catch(e2 => this.log.error({ jobId: job.id, err: e2 instanceof Error ? e2.message : String(e2) }, 'Failed to persist job result'));
       this.log.info({ jobId: job.id, resultLen: responseText.length }, 'Cron job completed');
     } catch (e) {
       const errMsg = e instanceof Error ? e.message : String(e);
       this.log.error({ jobId: job.id, err: errMsg }, 'Cron job execution failed');
       job.lastError = errMsg;
-      this._saveJob(job);
+      this._saveJob(job).catch(e2 => this.log.error({ jobId: job.id, err: e2 instanceof Error ? e2.message : String(e2) }, 'Failed to persist job error'));
     } finally {
       this.runningJobs.delete(job.id);
     }
@@ -620,7 +608,7 @@ export class CronScheduler {
     };
 
     this.jobs.set(job.id, job);
-    this._save();
+    this._saveJob(job).catch(e => this.log.error({ jobId: job.id, err: e instanceof Error ? e.message : String(e) }, 'Failed to persist new job'));
     if (job.enabled) this._scheduleJob(job);
     this.log.info({ jobId: job.id, name: job.name, schedule: job.schedule }, 'Cron job added');
     return job;
@@ -638,7 +626,7 @@ export class CronScheduler {
       }
     }
     Object.assign(job, safeUpdates, { id }); // don't overwrite id
-    this._save();
+    this._saveJob(job).catch(e => this.log.error({ jobId: job.id, err: e instanceof Error ? e.message : String(e) }, 'Failed to persist job update'));
     if (job.enabled) {
       this._scheduleJob(job);
     } else {

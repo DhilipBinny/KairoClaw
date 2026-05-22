@@ -78,6 +78,11 @@ export function appendDebugLog(workspace: string, entry: Record<string, unknown>
 
 const log = createModuleLogger('llm');
 
+/** Approximate character-length of a message content field. */
+function contentLen(c: string | MessageContentPart[]): number {
+  return typeof c === 'string' ? c.length : JSON.stringify(c).length;
+}
+
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -156,6 +161,7 @@ interface RunState {
   subagentRegistry: SubAgentRegistry;
   sessionMemoryState: SessionMemoryState | null;
   userMsgResult: { id: number } | null;
+  totalContentSize: number;
   reactiveCompactFailures: number;
   round: number;
   hasContextSummary: boolean;
@@ -389,7 +395,9 @@ async function executeToolCalls(
           r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
         }
         totalToolResultSize += r.content.length;
-        s.messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+        const msg: Message = { role: 'tool', tool_call_id: r.toolCallId, content: r.content };
+        s.messages.push(msg);
+        s.totalContentSize += contentLen(msg.content);
       }
     } else {
       const r = await executeSingleTool(parsed[i], s, context, callbacks);
@@ -397,7 +405,9 @@ async function executeToolCalls(
         r.content = `[Result omitted — total tool output budget (${MAX_TOTAL_TOOL_RESULTS / 1000}KB) exceeded this round. Summarize what you have so far and ask the user if they need more.]`;
       }
       totalToolResultSize += r.content.length;
-      s.messages.push({ role: 'tool', tool_call_id: r.toolCallId, content: r.content });
+      const msg: Message = { role: 'tool', tool_call_id: r.toolCallId, content: r.content };
+      s.messages.push(msg);
+      s.totalContentSize += contentLen(msg.content);
       i++;
     }
   }
@@ -588,6 +598,7 @@ export async function runAgent(
     : undefined;
 
   // ── Shared state for the ReAct loop ─────────────────────
+  const initialContentSize = messages.reduce((sum, m) => sum + contentLen(m.content), 0);
   const s: RunState = {
     inbound, model, messages, tools, systemPrompt, caps,
     totalInputTokens: 0, totalOutputTokens: 0,
@@ -595,6 +606,7 @@ export async function runAgent(
     collectedMedia: [], toolCallCounts: new Map(),
     subagentRegistry: new SubAgentRegistry(),
     sessionMemoryState, userMsgResult,
+    totalContentSize: initialContentSize,
     reactiveCompactFailures: 0, round: 0,
     hasContextSummary, userContent, thinkingConfig,
     sdkToolExecutor, reqLog,
@@ -619,9 +631,7 @@ export async function runAgent(
     }
 
     // Log round info
-    const contentLen = (c: string | MessageContentPart[]) => typeof c === 'string' ? c.length : JSON.stringify(c).length;
-    const totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
-    reqLog.info({ round: s.round, maxRounds: maxToolRounds, messageCount: s.messages.length, toolCount: s.tools.length, contentKB: +(totalContentSize / 1024).toFixed(1) }, 'Agent round started');
+    reqLog.info({ round: s.round, maxRounds: maxToolRounds, messageCount: s.messages.length, toolCount: s.tools.length, contentKB: +(s.totalContentSize / 1024).toFixed(1) }, 'Agent round started');
 
     // ── Call LLM ──────────────────────────────────────────
     const debugEnabled = !ephemeral && (config.agent as unknown as { debug?: { recordPrompt?: boolean } })?.debug?.recordPrompt === true;
@@ -665,6 +675,7 @@ export async function runAgent(
             await compactSession(session.id, tenantId, model, db, config, context.callLLM);
             const freshRows = await s.messageRepo.listBySession(session.id);
             s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: s.userContent });
+            s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
           } catch (compactErr: unknown) {
             reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');
           }
@@ -754,7 +765,9 @@ export async function runAgent(
     }
 
     // Append assistant message + execute tools
-    s.messages.push({ role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks });
+    const assistantMsg: Message = { role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks };
+    s.messages.push(assistantMsg);
+    s.totalContentSize += contentLen(assistantMsg.content);
     await executeToolCalls(response.toolCalls, s, context, callbacks);
     await drainSubAgents(s);
 

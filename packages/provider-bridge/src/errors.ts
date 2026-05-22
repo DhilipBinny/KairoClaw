@@ -36,6 +36,16 @@ export interface ClassifiedError {
   userMessage?: string;
 }
 
+export class CompactionNeededError extends Error {
+  readonly needsCompaction = true;
+  readonly original: unknown;
+  constructor(original: unknown) {
+    super(original instanceof Error ? original.message : String(original));
+    this.name = 'CompactionNeededError';
+    this.original = original;
+  }
+}
+
 export function classifyError(error: unknown, attempt = 0): ClassifiedError {
   const err = error as Error & { status?: number; code?: string; headers?: Record<string, string> };
   const message = err?.message || String(error);
