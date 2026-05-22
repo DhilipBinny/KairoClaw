@@ -99,25 +99,30 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
 
     // 2. Check OpenAI connectivity (check secrets store + config)
     const openaiKey = secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey;
-    if (openaiKey) {
+    const openaiBaseUrl = secretsStore?.get('providers.openai', 'baseUrl') || config.providers.openai?.baseUrl || '';
+    const openaiModelsUrl = openaiBaseUrl ? `${openaiBaseUrl.replace(/\/$/, '')}/models` : 'https://api.openai.com/v1/models';
+    const openaiLabel = openaiBaseUrl ? 'OpenAI-Compatible API' : 'OpenAI API';
+    if (openaiKey || openaiBaseUrl) {
       try {
-        const resp = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${openaiKey}` },
+        const headers: Record<string, string> = {};
+        if (openaiKey) headers.Authorization = `Bearer ${openaiKey}`;
+        const resp = await fetch(openaiModelsUrl, {
+          headers,
           signal: AbortSignal.timeout(10000),
         });
         if (resp.ok) {
-          checks.push({ name: 'OpenAI API', status: 'ok', message: 'Connected' });
+          checks.push({ name: openaiLabel, status: 'ok', message: 'Connected' });
         } else if (resp.status === 401) {
-          checks.push({ name: 'OpenAI API', status: 'error', message: 'Invalid API key (401)' });
+          checks.push({ name: openaiLabel, status: 'error', message: 'Invalid API key (401)' });
         } else {
-          checks.push({ name: 'OpenAI API', status: 'error', message: `HTTP ${resp.status}` });
+          checks.push({ name: openaiLabel, status: 'error', message: `HTTP ${resp.status}` });
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        checks.push({ name: 'OpenAI API', status: 'error', message: `Connection failed: ${msg}` });
+        checks.push({ name: openaiLabel, status: 'error', message: `Connection failed: ${msg}` });
       }
     } else {
-      checks.push({ name: 'OpenAI API', status: 'skip', message: 'No API key configured' });
+      checks.push({ name: 'OpenAI API', status: 'skip', message: 'No API key or base URL configured' });
     }
 
     // 3. Check Ollama connectivity
@@ -315,23 +320,33 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
           models: models.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id)),
         };
       } else if (provider === 'openai') {
-        if (!apiKey) return reply.code(400).send({ error: 'No API key provided' });
-        const resp = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${apiKey}` },
+        const testBaseUrl = baseUrl
+          || secretsStore?.get('providers.openai', 'baseUrl')
+          || config.providers.openai?.baseUrl || '';
+        const testModelsUrl = testBaseUrl ? `${testBaseUrl.replace(/\/$/, '')}/models` : 'https://api.openai.com/v1/models';
+        if (!apiKey && !testBaseUrl) return reply.code(400).send({ error: 'No API key or base URL provided' });
+        const headers: Record<string, string> = {};
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const resp = await fetch(testModelsUrl, {
+          headers,
           signal: AbortSignal.timeout(10000),
         });
         if (!resp.ok) {
-          return { success: false, error: `HTTP ${resp.status} — invalid key?` };
+          return { success: false, error: `HTTP ${resp.status} — invalid key or unreachable endpoint?` };
         }
         const data = (await resp.json()) as { data?: { id: string }[] };
+        const isCustomEndpoint = !!testBaseUrl && !testBaseUrl.includes('api.openai.com');
+        const seen = new Set<string>();
         const chatModels = (data.data || [])
-          .filter(
-            (m) =>
+          .filter((m) => {
+            if (seen.has(m.id)) return false;
+            seen.add(m.id);
+            return isCustomEndpoint ||
               m.id.includes('gpt') ||
               m.id.includes('o1') ||
               m.id.includes('o3') ||
-              m.id.includes('o4'),
-          )
+              m.id.includes('o4');
+          })
           .map((m) => ({ id: m.id, name: m.id, capabilities: getModelCapabilities(m.id, config) }))
           .sort((a, b) => a.id.localeCompare(b.id));
         return { success: true, models: chatModels };
@@ -491,6 +506,10 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         secretsStore.set(namespace, 'apiKey', body.apiKey || '');
         changed = true;
       }
+      if (body.baseUrl !== undefined) {
+        secretsStore.set(namespace, 'baseUrl', body.baseUrl || '');
+        changed = true;
+      }
     } else if (id === 'ollama') {
       if (body.baseUrl !== undefined) {
         secretsStore.set(namespace, 'baseUrl', body.baseUrl || '');
@@ -534,8 +553,9 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     if (id === 'anthropic') {
       if (body.apiKey !== undefined) cfg.anthropic.apiKey = body.apiKey;
       if (body.baseUrl !== undefined) cfg.anthropic.baseUrl = body.baseUrl;
-    } else if (id === 'openai' && body.apiKey !== undefined) {
-      cfg.openai.apiKey = body.apiKey;
+    } else if (id === 'openai') {
+      if (body.apiKey !== undefined) cfg.openai.apiKey = body.apiKey;
+      if (body.baseUrl !== undefined) cfg.openai.baseUrl = body.baseUrl;
     } else if (id === 'ollama' && body.baseUrl !== undefined) {
       cfg.ollama.baseUrl = body.baseUrl;
     }

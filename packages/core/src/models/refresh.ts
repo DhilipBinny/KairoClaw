@@ -140,19 +140,26 @@ async function doRefresh(
     }
   }
 
-  // 4. OpenAI (API returns no capabilities — just register model IDs)
+  // 4. OpenAI / OpenAI-compatible (API returns no capabilities — just register model IDs)
   const openaiKey = secretsStore?.get('providers.openai', 'apiKey')
     || config.providers?.openai?.apiKey;
-  if (openaiKey && !openaiKey.startsWith('${')) {
+  const openaiRefreshBaseUrl = secretsStore?.get('providers.openai', 'baseUrl')
+    || config.providers?.openai?.baseUrl || '';
+  const openaiRefreshUrl = openaiRefreshBaseUrl ? `${openaiRefreshBaseUrl.replace(/\/$/, '')}/models` : 'https://api.openai.com/v1/models';
+  const isCustomOpenai = !!openaiRefreshBaseUrl && !openaiRefreshBaseUrl.includes('api.openai.com');
+  if ((openaiKey && !openaiKey.startsWith('${')) || openaiRefreshBaseUrl) {
     try {
-      const resp = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${openaiKey}` },
+      const headers: Record<string, string> = {};
+      if (openaiKey && !openaiKey.startsWith('${')) headers.Authorization = `Bearer ${openaiKey}`;
+      const resp = await fetch(openaiRefreshUrl, {
+        headers,
         signal: AbortSignal.timeout(10000),
       });
       if (resp.ok) {
         const data = await resp.json() as { data?: Array<{ id: string }> };
         const chatModels = (data.data || [])
           .filter(m =>
+            isCustomOpenai ||
             m.id.startsWith('gpt-') || m.id.startsWith('o1') ||
             m.id.startsWith('o3') || m.id.startsWith('o4'),
           );

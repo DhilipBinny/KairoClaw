@@ -26,6 +26,8 @@ export interface AnthropicProviderConfig {
 export interface OpenAIProviderConfig {
   /** API key. Resolved from `${OPENAI_API_KEY}`. */
   apiKey: string;
+  /** Optional custom base URL for OpenAI-compatible APIs (NVIDIA, Azure, Together, vLLM). */
+  baseUrl: string;
   /** Default model ID. */
   defaultModel: string;
   /** Path to a file containing the API key. */
