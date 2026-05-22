@@ -4,9 +4,10 @@
  * Parses standard Markdown (from LLM output), then renders
  * to channel-native formatting via custom renderer overrides.
  *
- * - Telegram: HTML (parse_mode: 'HTML')
- * - WhatsApp: Native formatting (*bold* _italic_ ~strike~ ```code```)
- * - WebChat: Raw markdown (client-side rendering, no conversion needed)
+ * Key rule for marked v17: block-level and inline renderers that contain
+ * child content MUST use `{ tokens }` + `this.parser.parseInline(tokens)`
+ * (or `this.parser.parse(tokens)` for block children). Using `{ text }`
+ * returns raw markdown and skips inline rendering entirely.
  */
 
 import { Marked } from 'marked';
@@ -15,7 +16,6 @@ function escHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Common renderer overrides shared between Telegram and WhatsApp
 function makeRenderer(fmt: 'telegram' | 'whatsapp') {
   const b = (t: string) => fmt === 'telegram' ? `<b>${t}</b>` : `*${t}*`;
   const i = (t: string) => fmt === 'telegram' ? `<i>${t}</i>` : `_${t}_`;
@@ -27,11 +27,20 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
     fmt === 'telegram' ? `<blockquote>${t.trim()}</blockquote>\n` : t.split('\n').map((l: string) => `> ${l}`).join('\n') + '\n';
 
   return {
-    heading({ text }: any) { return `\n${b(text)}\n\n`; },
-    paragraph({ text }: any) { return `${text}\n\n`; },
-    strong({ text }: any) { return b(text); },
-    em({ text }: any) { return i(text); },
-    del({ text }: any) { return s(text); },
+    // Block-level: use tokens + parser for child content
+    heading(this: any, { tokens }: any) { return `\n${b(this.parser.parseInline(tokens))}\n\n`; },
+    paragraph(this: any, { tokens }: any) { return `${this.parser.parseInline(tokens)}\n\n`; },
+    blockquote(this: any, { tokens }: any) { return bq(this.parser.parse(tokens)); },
+    listitem(this: any, { tokens }: any) { return `• ${this.parser.parse(tokens).trim()}\n`; },
+    tablecell(this: any, { tokens }: any) { return `${this.parser.parseInline(tokens)} | `; },
+
+    // Inline with children: use tokens + parser
+    strong(this: any, { tokens }: any) { return b(this.parser.parseInline(tokens)); },
+    em(this: any, { tokens }: any) { return i(this.parser.parseInline(tokens)); },
+    del(this: any, { tokens }: any) { return s(this.parser.parseInline(tokens)); },
+    link(this: any, { href, tokens }: any) { return lnk(href, this.parser.parseInline(tokens)); },
+
+    // Leaf tokens: use text directly (no children)
     codespan({ text }: any) { return cs(text); },
     code({ text, lang }: any) {
       if (fmt === 'telegram') {
@@ -41,15 +50,13 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
       }
       return `\`\`\`\n${text}\n\`\`\`\n`;
     },
-    link({ href, text }: any) { return lnk(href, text); },
     image({ text }: any) { return text ? `[${text}]` : ''; },
-    blockquote({ text }: any) { return bq(text); },
-    list(token: any) { return `${token.body || token.items?.map((i: any) => `• ${i.text || ''}\n`).join('') || ''}\n`; },
-    listitem({ text }: any) { return `• ${(text || '').trim()}\n`; },
+
+    // Structural tokens — return false to use default (marked aggregates listitem results)
+    list() { return false as any; },
     hr() { return '\n'; },
     table(token: any) { return `${token.header || ''}${token.body || ''}\n`; },
     tablerow({ text }: any) { return `${text}\n`; },
-    tablecell({ text }: any) { return `${text} | `; },
     br() { return '\n'; },
   };
 }
@@ -77,7 +84,10 @@ export function markdownToTelegramHtml(text: string): string {
 export function markdownToWhatsAppFmt(text: string): string {
   if (!text) return text;
   try {
-    return (whatsappMarked.parse(text) as string).trim();
+    let result = (whatsappMarked.parse(text) as string).trim();
+    // Strip HTML list wrappers from default list renderer
+    result = result.replace(/<\/?(?:ul|ol|li)>/g, '');
+    return result;
   } catch {
     return text;
   }
