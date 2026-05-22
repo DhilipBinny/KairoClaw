@@ -712,8 +712,9 @@
                           <div class="model-row-info">
                             <code class="model-row-name">{model.name || model.id}</code>
                             {#if model.capabilities}
+                              {@const hasRealCtx = model.capabilities.contextWindow && model.capabilities.contextWindow !== 128000}
                               <span class="model-row-caps">
-                                {formatTokens(model.capabilities.contextWindow || 0)} ctx
+                                {#if hasRealCtx}{formatTokens(model.capabilities.contextWindow)} ctx{/if}
                                 {#if model.capabilities.supportsVision}<span class="cap-icon" title="Vision">&#x1F441;</span>{/if}
                                 {#if model.capabilities.supportsToolCalling}<span class="cap-icon" title="Tools">&#x1F527;</span>{/if}
                                 {#if model.capabilities.costPer1M}&middot; {formatCost(model.capabilities.costPer1M)}/1M{/if}
