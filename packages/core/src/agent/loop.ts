@@ -78,7 +78,7 @@ export function appendDebugLog(workspace: string, entry: Record<string, unknown>
 
 const log = createModuleLogger('llm');
 
-/** Byte-length of a message content field (string or structured parts). */
+/** Approximate character-length of a message content field. */
 function contentLen(c: string | MessageContentPart[]): number {
   return typeof c === 'string' ? c.length : JSON.stringify(c).length;
 }
