@@ -12,9 +12,27 @@
 
 import { Marked } from 'marked';
 
-function escHtml(text: string): string {
+export function escHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+function toPlainText(s: string): string {
+  let t = s.replace(/<[^>]+>/g, '');
+  t = t.replace(/&amp;amp;/g, '&').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+  return t;
+}
+
+function decodeHtmlEntities(s: string): string {
+  return s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+function cleanLlmArtifacts(text: string): string {
+  let md = text;
+  md = md.replace(/&amp;amp;amp;/g, '&amp;').replace(/&amp;amp;/g, '&').replace(/&amp;quot;/g, '"').replace(/&amp;lt;/g, '<').replace(/&amp;gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+  return md;
+}
+
+const MAX_COL_WIDTH = 30;
 
 function makeRenderer(fmt: 'telegram' | 'whatsapp') {
   const b = (t: string) => fmt === 'telegram' ? `<b>${t}</b>` : `*${t}*`;
@@ -27,20 +45,26 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
     fmt === 'telegram' ? `<blockquote>${t.trim()}</blockquote>\n` : t.split('\n').map((l: string) => `> ${l}`).join('\n') + '\n';
 
   return {
-    // Block-level: use tokens + parser for child content
     heading(this: any, { tokens }: any) { return `\n${b(this.parser.parseInline(tokens))}\n\n`; },
     paragraph(this: any, { tokens }: any) { return `${this.parser.parseInline(tokens)}\n\n`; },
     blockquote(this: any, { tokens }: any) { return bq(this.parser.parse(tokens)); },
-    listitem(this: any, { tokens }: any) { return `• ${this.parser.parse(tokens).trim()}\n`; },
+    listitem(this: any, { tokens, task, checked }: any) {
+      const prefix = task ? (checked ? '☑ ' : '☐ ') : '• ';
+      return `${prefix}${this.parser.parse(tokens).trim()}\n`;
+    },
+    list(this: any, { items, ordered }: any) {
+      if (fmt === 'telegram' && ordered) {
+        return items.map((item: any, idx: number) => `${idx + 1}. ${this.parser.parse(item.tokens).trim()}\n`).join('') + '\n';
+      }
+      return false as any;
+    },
     tablecell(this: any, { tokens }: any) { return `${this.parser.parseInline(tokens)} | `; },
 
-    // Inline with children: use tokens + parser
     strong(this: any, { tokens }: any) { return b(this.parser.parseInline(tokens)); },
     em(this: any, { tokens }: any) { return i(this.parser.parseInline(tokens)); },
     del(this: any, { tokens }: any) { return s(this.parser.parseInline(tokens)); },
     link(this: any, { href, tokens }: any) { return lnk(href, this.parser.parseInline(tokens)); },
 
-    // Leaf tokens: use text directly (no children)
     codespan({ text }: any) { return cs(text); },
     code({ text, lang }: any) {
       if (fmt === 'telegram') {
@@ -50,12 +74,25 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
       }
       return `\`\`\`\n${text}\n\`\`\`\n`;
     },
-    image({ text }: any) { return text ? `[${text}]` : ''; },
+    image({ href, text }: any) {
+      if (fmt === 'telegram') {
+        return text ? `<a href="${escHtml(href)}">${escHtml(text)}</a>` : `<a href="${escHtml(href)}">${escHtml(href)}</a>`;
+      }
+      return text ? `[${text}]` : '';
+    },
 
-    // Structural tokens — return false to use default (marked aggregates listitem results)
-    list() { return false as any; },
-    hr() { return '\n'; },
+    hr() { return fmt === 'telegram' ? '━━━━━━━━━━━━\n' : '---\n'; },
     table(this: any, token: any) {
+      if (fmt === 'telegram') {
+        const hdr = token.header.map((c: any) => toPlainText(this.parser.parseInline(c.tokens)));
+        const rows = token.rows.map((row: any) => row.map((c: any) => toPlainText(this.parser.parseInline(c.tokens))));
+        const all = [hdr, ...rows];
+        const widths = hdr.map((_: string, ci: number) => Math.min(MAX_COL_WIDTH, Math.max(...all.map((r: string[]) => (r[ci] || '').length))));
+        const truncate = (str: string, w: number) => str.length > w ? str.slice(0, w - 1) + '…' : str.padEnd(w);
+        const fmtRow = (r: string[]) => widths.map((w: number, ci: number) => truncate(r[ci] || '', w)).join(' | ');
+        const sep = widths.map((w: number) => '-'.repeat(w)).join('-+-');
+        return `<pre>${[fmtRow(hdr), sep, ...rows.map(fmtRow)].map(escHtml).join('\n')}</pre>\n`;
+      }
       const headerCells = token.header.map((cell: any) => this.parser.parseInline(cell.tokens));
       let result = headerCells.join(' | ') + '\n';
       for (const row of token.rows) {
@@ -71,42 +108,33 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
 const telegramMarked = new Marked({ async: false, breaks: true, renderer: makeRenderer('telegram') });
 const whatsappMarked = new Marked({ async: false, breaks: true, renderer: makeRenderer('whatsapp') });
 
-/**
- * Convert standard Markdown to Telegram HTML format.
- * Use with parse_mode: 'HTML' in Grammy/Bot API calls.
- */
-// Telegram only supports: b, i, u, s, code, pre, a, blockquote, tg-spoiler
 const TG_ALLOWED_TAGS = new Set(['b', 'i', 'u', 's', 'code', 'pre', 'a', 'blockquote', 'tg-spoiler']);
-/** Pre-compiled regex for stripping unsupported HTML tags — hoisted to avoid recompilation per call. */
 const UNSUPPORTED_TAG_RE = /<\/?([a-z][a-z0-9]*)\b[^>]*>/gi;
 
 export function markdownToTelegramHtml(text: string): string {
   if (!text) return text;
   try {
-    let result = (telegramMarked.parse(text) as string).trim();
-    // Strip unsupported HTML tags (ul, ol, li, p, etc.) — Telegram rejects them
+    const cleaned = cleanLlmArtifacts(text);
+    let result = (telegramMarked.parse(cleaned) as string).trim();
     UNSUPPORTED_TAG_RE.lastIndex = 0;
     result = result.replace(UNSUPPORTED_TAG_RE, (match, tag) => {
       return TG_ALLOWED_TAGS.has(tag.toLowerCase()) ? match : '';
     });
-    // Collapse excessive blank lines
     result = result.replace(/\n{3,}/g, '\n\n');
+    result = result.replace(/&amp;amp;/g, '&amp;').replace(/&amp;lt;/g, '&lt;').replace(/&amp;gt;/g, '&gt;').replace(/&amp;quot;/g, '&quot;');
     return result;
   } catch {
     return text;
   }
 }
 
-/**
- * Convert standard Markdown to WhatsApp native formatting.
- * WhatsApp uses: *bold*  _italic_  ~strike~  ```code```
- */
 export function markdownToWhatsAppFmt(text: string): string {
   if (!text) return text;
   try {
-    let result = (whatsappMarked.parse(text) as string).trim();
-    // Strip HTML list wrappers from default list renderer
+    const cleaned = cleanLlmArtifacts(text);
+    let result = (whatsappMarked.parse(cleaned) as string).trim();
     result = result.replace(/<\/?(?:ul|ol|li)>/g, '');
+    result = decodeHtmlEntities(result);
     return result;
   } catch {
     return text;
