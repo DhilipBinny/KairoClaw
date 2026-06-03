@@ -21,7 +21,7 @@ function stripHtmlTags(s: string): string {
 }
 
 function decodeHtmlEntities(s: string): string {
-  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return s.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
 /**
@@ -78,7 +78,7 @@ function makeRenderer(fmt: 'telegram' | 'whatsapp') {
         const rows = token.rows.map((row: any) => row.map((c: any) => stripHtmlTags(this.parser.parseInline(c.tokens))));
         const all = [hdr, ...rows];
         const widths = hdr.map((_: string, ci: number) => Math.max(...all.map((r: string[]) => (r[ci] || '').length)));
-        const fmtRow = (r: string[]) => r.map((cell, ci) => cell.padEnd(widths[ci] || 0)).join(' │ ');
+        const fmtRow = (r: string[]) => widths.map((w: number, ci: number) => (r[ci] || '').padEnd(w)).join(' │ ');
         const sep = widths.map((w: number) => '─'.repeat(w)).join('─┼─');
         return `<pre>${escHtml([fmtRow(hdr), sep, ...rows.map(fmtRow)].join('\n'))}</pre>\n`;
       }

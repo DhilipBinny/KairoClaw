@@ -31,7 +31,7 @@ const log = createModuleLogger('channel.telegram');
 /**
  * Send a message with retry and exponential backoff for Telegram rate limits.
  */
-const TG_SAFE_TAGS = /(?:b|i|s|u|code|pre|a|blockquote)\b/;
+const TG_SAFE_TAGS = /^(?:b|i|s|u|code|pre|a|blockquote|tg-spoiler)$/;
 
 async function sendWithRetry(
   ctx: Context,
@@ -528,7 +528,7 @@ class TelegramChannel implements Channel {
               const remainingText = formattedCaption.slice(1024);
               const chunks = splitMessage(remainingText, 4000);
               for (const chunk of chunks) {
-                await sendWithRetry(ctx, chunk, { parse_mode: 'HTML' });
+                await sendWithRetry(ctx, chunk, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
               }
             }
             return;
@@ -688,9 +688,17 @@ class TelegramChannel implements Channel {
             await new Promise((r) => setTimeout(r, retryAfter * 1000));
             continue;
           }
-          if (attempt === 0 && opts.parse_mode && err.message?.includes("can't parse")) {
-            const { parse_mode: _, ...rest } = opts;
-            return sendWithBackoff(msg, rest, retries - 1);
+          if (attempt === 0 && opts.parse_mode && /can't parse|parse entities|find end of the entity/i.test(err.message || '')) {
+            const safeHtml = msg.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) =>
+              TG_SAFE_TAGS.test(tag.toLowerCase()) ? match : '');
+            try {
+              await this.bot!.api.sendMessage(targetChatId, safeHtml, opts);
+              return;
+            } catch {
+              const plain = msg.replace(/<[^>]+>/g, '');
+              const { parse_mode: _, ...rest } = opts;
+              return sendWithBackoff(plain, rest, retries - 1);
+            }
           }
           throw e;
         }

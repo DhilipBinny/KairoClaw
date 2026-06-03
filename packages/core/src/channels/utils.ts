@@ -150,6 +150,7 @@ export function splitMessage(text: string, maxLen: number): string[] {
         splitIdx = ampIdx;
       }
     }
+    if (splitIdx <= 0) splitIdx = maxLen;
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx);
   }
