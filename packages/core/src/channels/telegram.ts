@@ -31,6 +31,8 @@ const log = createModuleLogger('channel.telegram');
 /**
  * Send a message with retry and exponential backoff for Telegram rate limits.
  */
+const TG_SAFE_TAGS = /(?:b|i|s|u|code|pre|a|blockquote)\b/;
+
 async function sendWithRetry(
   ctx: Context,
   text: string,
@@ -48,10 +50,18 @@ async function sendWithRetry(
         await new Promise((r) => setTimeout(r, retryAfter * 1000));
         continue;
       }
-      // If parse_mode caused a failure on first attempt, retry without it
-      if (attempt === 0 && options.parse_mode && err.message?.includes("can't parse")) {
-        const { parse_mode: _, ...rest } = options;
-        return sendWithRetry(ctx, text, rest, maxRetries - 1);
+      if (attempt === 0 && options.parse_mode && /can't parse|parse entities|find end of the entity/i.test(err.message || '')) {
+        // Tier 2: strip unsupported tags, keep safe ones
+        const safeHtml = text.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) =>
+          TG_SAFE_TAGS.test(tag.toLowerCase()) ? match : '');
+        try {
+          return await ctx.reply(safeHtml, options);
+        } catch {
+          // Tier 3: strip all formatting, send plain text
+          const plain = text.replace(/<[^>]+>/g, '');
+          const { parse_mode: _, ...rest } = options;
+          return sendWithRetry(ctx, plain, rest, maxRetries - 1);
+        }
       }
       throw e;
     }
@@ -117,7 +127,7 @@ class TelegramChannel implements Channel {
 
     this.bot.command('help', async (ctx) => {
       await ctx.reply(
-        '*Commands*\n\n' +
+        '<b>Commands</b>\n\n' +
         '/start — Welcome message\n' +
         '/new — Start fresh session (clears history)\n' +
         '/status — Show session info\n' +
@@ -126,7 +136,7 @@ class TelegramChannel implements Channel {
         '/help — Show this list\n' +
         '/myid — Show your Telegram user ID\n\n' +
         'Or just send any message to chat.',
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -134,10 +144,10 @@ class TelegramChannel implements Channel {
       if (!ctx.from) return;
       const name = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ');
       await ctx.reply(
-        `Your Telegram user ID: \`${ctx.from.id}\`\n` +
+        `Your Telegram user ID: <code>${ctx.from.id}</code>\n` +
         (name ? `Name: ${name}\n` : '') +
-        `\nPaste this ID into *Allowed Users* on the admin Channels page to grant access.`,
-        { parse_mode: 'Markdown' },
+        `\nPaste this ID into <b>Allowed Users</b> on the admin Channels page to grant access.`,
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -148,9 +158,9 @@ class TelegramChannel implements Channel {
       }
       const title = ctx.chat.title || 'this group';
       await ctx.reply(
-        `Group ID: \`${ctx.chat.id}\`\nName: ${title}\n\n` +
-        `Paste this ID into *Allowed Groups* on the admin Channels page to grant access.`,
-        { parse_mode: 'Markdown' },
+        `Group ID: <code>${ctx.chat.id}</code>\nName: ${title}\n\n` +
+        `Paste this ID into <b>Allowed Groups</b> on the admin Channels page to grant access.`,
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -414,11 +424,11 @@ class TelegramChannel implements Channel {
         thinkingInterval = setInterval(async () => {
           if (!thinkingDirty || !thinkingText) return;
           thinkingDirty = false;
-          const display = `_Thinking..._\n\n${thinkingText.slice(-3000)}`;
+          const display = `<i>Thinking...</i>\n\n${thinkingText.slice(-3000)}`;
           try {
             if (!thinkingMsgId) {
               const sent = await ctx.reply(display, {
-                parse_mode: 'Markdown',
+                parse_mode: 'HTML',
                 reply_parameters:
                   chatType === 'group' && ctx.message
                     ? { message_id: ctx.message.message_id }
@@ -427,7 +437,7 @@ class TelegramChannel implements Channel {
               thinkingMsgId = sent.message_id;
             } else {
               await ctx.api.editMessageText(ctx.chat!.id, thinkingMsgId, display, {
-                parse_mode: 'Markdown',
+                parse_mode: 'HTML',
               });
             }
           } catch { /* rate limit or parse error — skip this update */ }
@@ -452,17 +462,17 @@ class TelegramChannel implements Channel {
       }
       if (showThinking && thinkingText && thinkingMsgId) {
         // Final edit with complete thinking
-        const finalThinking = `_Thinking:_\n\n${thinkingText.slice(-3000)}`;
+        const finalThinking = `<i>Thinking:</i>\n\n${thinkingText.slice(-3000)}`;
         try {
           await ctx.api.editMessageText(ctx.chat!.id, thinkingMsgId, finalThinking, {
-            parse_mode: 'Markdown',
+            parse_mode: 'HTML',
           });
         } catch { /* non-critical */ }
       } else if (showThinking && thinkingText && !thinkingMsgId) {
         // Thinking finished before first interval tick — send it now
         try {
-          await sendWithRetry(ctx, `_Thinking:_\n\n${thinkingText.slice(0, 3000)}`, {
-            parse_mode: 'Markdown',
+          await sendWithRetry(ctx, `<i>Thinking:</i>\n\n${thinkingText.slice(0, 3000)}`, {
+            parse_mode: 'HTML',
             reply_parameters:
               chatType === 'group' && ctx.message
                 ? { message_id: ctx.message.message_id }
@@ -539,6 +549,7 @@ class TelegramChannel implements Channel {
         for (const chunk of chunks) {
           await sendWithRetry(ctx, chunk, {
             parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
             reply_parameters:
               chatType === 'group' && ctx.message
                 ? { message_id: ctx.message.message_id }
@@ -689,11 +700,11 @@ class TelegramChannel implements Channel {
     const formatted = markdownToTelegramHtml(text);
     const MAX_LEN = 4000;
     if (formatted.length <= MAX_LEN) {
-      await sendWithBackoff(formatted, { parse_mode: 'HTML' });
+      await sendWithBackoff(formatted, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } });
     } else {
       const chunks = splitMessage(formatted, MAX_LEN);
       for (const chunk of chunks) {
-        await sendWithBackoff(chunk, { parse_mode: 'HTML' }).catch((e: unknown) => {
+        await sendWithBackoff(chunk, { parse_mode: 'HTML', link_preview_options: { is_disabled: true } }).catch((e: unknown) => {
           log.warn({ err: e instanceof Error ? e.message : String(e), chatId: targetChatId }, 'Telegram chunk send failed');
         });
       }
