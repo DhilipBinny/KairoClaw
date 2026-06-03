@@ -115,7 +115,8 @@ export function markdownToWhatsApp(text: string): string {
 
 /**
  * Split a long message into chunks that fit within a channel's character limit.
- * Prefers splitting at newlines when possible (threshold: 30% of maxLen).
+ * Prefers splitting at paragraph breaks > newlines > spaces.
+ * Avoids bisecting HTML entities (e.g. &amp;) at the split point.
  */
 export function splitMessage(text: string, maxLen: number): string[] {
   if (text.length <= maxLen) return [text];
@@ -126,8 +127,29 @@ export function splitMessage(text: string, maxLen: number): string[] {
       chunks.push(remaining);
       break;
     }
-    let splitIdx = remaining.lastIndexOf('\n', maxLen);
-    if (splitIdx < maxLen * 0.3) splitIdx = maxLen;
+    let splitIdx = -1;
+    // Prefer paragraph break
+    const paraBreak = remaining.lastIndexOf('\n\n', maxLen);
+    if (paraBreak > maxLen * 0.3) splitIdx = paraBreak + 2;
+    // Fall back to single newline
+    if (splitIdx === -1) {
+      const newline = remaining.lastIndexOf('\n', maxLen);
+      if (newline > maxLen * 0.3) splitIdx = newline + 1;
+    }
+    // Fall back to space
+    if (splitIdx === -1) {
+      const space = remaining.lastIndexOf(' ', maxLen);
+      if (space > maxLen * 0.3) splitIdx = space + 1;
+    }
+    if (splitIdx <= 0) splitIdx = maxLen;
+    // Avoid splitting inside an HTML entity (&...;)
+    const ampIdx = remaining.lastIndexOf('&', splitIdx);
+    if (ampIdx >= 0 && ampIdx > splitIdx - 10) {
+      const semiIdx = remaining.indexOf(';', ampIdx);
+      if (semiIdx >= splitIdx && semiIdx < splitIdx + 10) {
+        splitIdx = ampIdx;
+      }
+    }
     if (splitIdx <= 0) splitIdx = maxLen;
     chunks.push(remaining.slice(0, splitIdx));
     remaining = remaining.slice(splitIdx);
