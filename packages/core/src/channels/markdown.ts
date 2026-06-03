@@ -107,6 +107,8 @@ export function markdownToWhatsAppFmt(text: string): string {
     let result = (whatsappMarked.parse(text) as string).trim();
     // Strip HTML list wrappers from default list renderer
     result = result.replace(/<\/?(?:ul|ol|li)>/g, '');
+    // Decode HTML entities — marked escapes them but WhatsApp needs plain text
+    result = result.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
     return result;
   } catch {
     return text;
