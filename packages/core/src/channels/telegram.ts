@@ -20,7 +20,7 @@ import type { SecretsStore } from '../secrets/store.js';
 import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
-import { markdownToTelegramHtml } from './markdown.js';
+import { markdownToTelegramHtml, escHtml } from './markdown.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
@@ -424,7 +424,7 @@ class TelegramChannel implements Channel {
         thinkingInterval = setInterval(async () => {
           if (!thinkingDirty || !thinkingText) return;
           thinkingDirty = false;
-          const display = `<i>Thinking...</i>\n\n${thinkingText.slice(-3000)}`;
+          const display = `<i>Thinking...</i>\n\n${escHtml(thinkingText.slice(-3000))}`;
           try {
             if (!thinkingMsgId) {
               const sent = await ctx.reply(display, {
@@ -462,7 +462,7 @@ class TelegramChannel implements Channel {
       }
       if (showThinking && thinkingText && thinkingMsgId) {
         // Final edit with complete thinking
-        const finalThinking = `<i>Thinking:</i>\n\n${thinkingText.slice(-3000)}`;
+        const finalThinking = `<i>Thinking:</i>\n\n${escHtml(thinkingText.slice(-3000))}`;
         try {
           await ctx.api.editMessageText(ctx.chat!.id, thinkingMsgId, finalThinking, {
             parse_mode: 'HTML',
@@ -471,7 +471,7 @@ class TelegramChannel implements Channel {
       } else if (showThinking && thinkingText && !thinkingMsgId) {
         // Thinking finished before first interval tick — send it now
         try {
-          await sendWithRetry(ctx, `<i>Thinking:</i>\n\n${thinkingText.slice(0, 3000)}`, {
+          await sendWithRetry(ctx, `<i>Thinking:</i>\n\n${escHtml(thinkingText.slice(0, 3000))}`, {
             parse_mode: 'HTML',
             reply_parameters:
               chatType === 'group' && ctx.message
