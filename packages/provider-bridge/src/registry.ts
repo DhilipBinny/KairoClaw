@@ -202,14 +202,30 @@ export class ProviderRegistry {
     chatArgs: ChatArgs,
     maxRetries = 3,
   ): Promise<ProviderResponse> {
+    let hasStreamed = false;
+    const wrappedArgs: ChatArgs = {
+      ...chatArgs,
+      onDelta: chatArgs.onDelta
+        ? (delta: string) => { hasStreamed = true; chatArgs.onDelta!(delta); }
+        : undefined,
+      onThinkingDelta: chatArgs.onThinkingDelta
+        ? (delta: string) => { hasStreamed = true; chatArgs.onThinkingDelta!(delta); }
+        : undefined,
+    };
+
     let lastErr: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await provider.chat(chatArgs);
+        return await provider.chat(wrappedArgs);
       } catch (e: unknown) {
         lastErr = e;
         const classified = classifyError(e, attempt);
         logClassifiedError(classified, { provider: provider.name, attempt, maxRetries });
+
+        if (hasStreamed) {
+          this.log.warn({ provider: provider.name, attempt }, 'Mid-stream failure — skipping retry to prevent duplicate output');
+          throw e;
+        }
 
         if (classified.retriable && attempt < maxRetries) {
           if (classified.action === 'compact_and_retry') {
