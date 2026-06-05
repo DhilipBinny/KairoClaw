@@ -289,9 +289,19 @@ export async function searchLogs(opts: { q?: string; level?: string; from?: stri
   return request(`/admin/logs/search?${params.toString()}`);
 }
 
-export function getLogDownloadUrl(date: string): string {
-  const token = localStorage.getItem('agw_api_key') || '';
-  return `${API_BASE}/admin/logs/download/${date}?token=${encodeURIComponent(token)}`;
+export async function downloadLogFile(date: string): Promise<void> {
+  const apiKey = getApiKey();
+  const res = await fetch(`${API_BASE}/admin/logs/download/${date}`, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+  if (!res.ok) throw new Error(`Failed to download log: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `server-${date}.log`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function setLogLevel(level: string): Promise<{ success: boolean; level: string }> {
@@ -491,9 +501,19 @@ export async function rejectSender(id: number): Promise<{ success: boolean }> {
 }
 
 // ── Admin: Export/Import ──────────────────
-export function getExportUrl(): string {
-  const token = localStorage.getItem('agw_api_key') || '';
-  return `${API_BASE}/admin/export?token=${encodeURIComponent(token)}`;
+export async function downloadExport(): Promise<void> {
+  const apiKey = getApiKey();
+  const res = await fetch(`${API_BASE}/admin/export`, {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+  if (!res.ok) throw new Error(`Failed to download export: ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'kairoclaw-export.tar.gz';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function importState(file: File): Promise<{ success: boolean; message?: string }> {
