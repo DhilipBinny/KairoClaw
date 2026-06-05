@@ -112,6 +112,7 @@ export interface ToolRegistryDeps {
 
 export class ToolRegistry {
   private tools = new Map<string, ToolRegistration>();
+  private builtinNames = new Set<string>();
   private auditLogger?: AuditLogger;
   private toolCallRecorder?: ToolCallRecorder;
   private permissionChecker?: PermissionChecker;
@@ -169,8 +170,14 @@ export class ToolRegistry {
     this.hooks = hooks ?? {};
   }
 
-  register(tool: ToolRegistration): void {
-    this.tools.set(tool.definition.name, tool);
+  register(tool: ToolRegistration, opts?: { builtin?: boolean }): void {
+    const name = tool.definition.name;
+    if (this.builtinNames.has(name) && !opts?.builtin) {
+      console.warn(`[ToolRegistry] Rejected plugin tool "${name}" — conflicts with built-in tool`);
+      return;
+    }
+    this.tools.set(name, tool);
+    if (opts?.builtin) this.builtinNames.add(name);
   }
 
   unregister(name: string): boolean {
