@@ -14,11 +14,14 @@
 | Built-in tools | 35 (files, exec, web, browser, messaging, memory, email, agents, PDF, plugins, grep, glob, todo, sleep, plan mode) |
 | Channels | 4 (Telegram, WhatsApp, Web Chat, REST API) |
 | LLM providers | 4+ (Anthropic, OpenAI, Ollama, plus any OpenAI-compatible via baseUrl — NVIDIA, Azure, Together, vLLM) |
-| Known models | 9 built-in + unlimited custom |
-| Database tables | 12 |
+| Known models | Auto-discovered from providers + unlimited custom |
+| Database tables | 13 data + 1 schema_migrations |
 | Config options | 20+ across 8 sections |
-| Slash commands | 7 |
-| Log categories | 12 structured categories |
+| Slash commands | 8 (7 unique actions) |
+| Log categories | 15 structured categories |
+| Monorepo packages | 15 (@agw/* packages) |
+| SQLite migrations | 13 |
+| PostgreSQL migrations | 7 |
 
 ---
 
@@ -68,7 +71,7 @@ Built from workspace persona files, automatically loaded:
 ### Limitations
 - Token estimation is heuristic (not an actual tokenizer)
 - Hard compaction requires an LLM call (can fail, falls back to structured extraction)
-- No parallel tool execution (sequential only)
+- Parallel tool execution for safe tools (sequential for side-effect tools)
 - No multi-agent routing
 - No structured output / JSON mode enforcement
 
@@ -108,7 +111,7 @@ Built from workspace persona files, automatically loaded:
 | o3-mini | 200K | 100K | No | $1.1/$4.4 |
 
 ### Limitations
-- No multi-model routing (cheap for classification, expensive for reasoning)
+- Smart model routing: rule-based + optional LLM classifier routes messages to fast/standard/powerful tiers
 - No model switching mid-conversation (only via `/model` command)
 - Anthropic/OpenAI model APIs don't expose capabilities — relies on hardcoded + user overrides
 - No Google Gemini, Mistral, or other providers yet
@@ -138,7 +141,7 @@ Built from workspace persona files, automatically loaded:
 | `manage_plugins` | List/enable/disable plugins | Admin or elevated only |
 | `read_pdf` | Parse and extract PDF content | Path traversal protection |
 | `send_email` | Send email via configured SMTP | Requires SMTP config |
-| `browse` | Full browser automation (22 actions) | SSRF + ad blocking + per-user isolation |
+| `browse` | Full browser automation (19 actions) | SSRF + ad blocking + per-user isolation |
 | `spawn_agent` | Launch a sub-agent for parallel tasks | Inherits caller permissions |
 | `kill_agent` | Terminate a running sub-agent | Must own the agent |
 
@@ -165,7 +168,7 @@ Full headless Chromium browser for the AI agent — enables JavaScript-rendered 
 
 **Architecture:**
 - **Playwright-core** + system Chromium (bundled in Docker image)
-- Single tool with flat schema (22 actions) — compatible with all LLM providers
+- Single tool with flat schema (19 actions) — compatible with all LLM providers
 - Per-user isolated `BrowserContext` (cookies, storage, tabs never shared)
 - Numbered element refs for unambiguous targeting (no CSS selectors or coordinates)
 
@@ -260,7 +263,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 
 ### Limitations
 - No HTTP POST/PUT/PATCH tool (only GET via web_fetch)
-- No parallel tool execution
+- Parallel execution for safe tools, sequential for side-effect tools
 - Tool approval workflow UI not built (backend exists)
 - No custom tool registration via API (only MCP or built-in)
 - Browser sessions not encrypted at rest (file permission 0600 only)
@@ -296,7 +299,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 ### Limitations
 - WhatsApp bot IS your phone number (no separate bot identity)
 - WhatsApp uses unofficial Baileys protocol (can break on updates)
-- Voice messages saved but not transcribed
+- Voice messages transcribed via OpenAI-compatible whisper endpoint (configurable)
 - Documents saved but not parsed
 - No Slack, Discord, or SMS channels yet
 
@@ -492,8 +495,8 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 ### Stack
 - **Runtime**: Node.js + TypeScript
 - **Framework**: Fastify (HTTP) + SvelteKit (UI)
-- **Database**: SQLite (default) or PostgreSQL — 12 data tables, 10 SQLite + 4 Postgres migrations
-- **Monorepo**: pnpm workspaces — `@agw/types`, `@agw/core`, `@agw/ui`
+- **Database**: SQLite (default) or PostgreSQL — 13 data tables, 13 SQLite + 7 Postgres migrations
+- **Monorepo**: pnpm workspaces — 15 packages (`@agw/types`, `@agw/core`, `@agw/agent-core`, `@agw/provider-bridge`, `@agw/tool-platform`, `@agw/tools-common`, `@agw/database`, `@agw/logger`, `@agw/security`, `@agw/memory-engine`, `@agw/plugins`, `@agw/mcp-client`, `@agw/cron`, `@agw/schemas`, `@agw/ui`)
 
 ### Deployment
 - Single process, single `start.sh` command
