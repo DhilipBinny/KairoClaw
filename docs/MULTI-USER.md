@@ -44,6 +44,8 @@ KairoClaw supports multiple users on a single deployment. Each user gets their o
 | **Send messages** | Yes | Yes | Yes |
 | **Memory search** | All | Own scope + global | Own scope + global |
 
+> **Note:** A `viewer` role also exists in the database schema and permission system (read-only access, all other tools denied by default) but is not currently exposed in the admin UI.
+
 ### How to assign roles
 
 - **Admin**: Set `role: admin` when creating user. Full access to everything.

@@ -12,6 +12,7 @@ import { getDb, getConfig } from './utils.js';
 const MIGRATE_TABLES = [
   'tenants', 'users', 'sessions', 'messages', 'tool_calls',
   'usage_records', 'audit_log', 'tool_permissions', 'memory_chunks', 'pending_senders',
+  'sender_links', 'cron_jobs',
 ];
 
 export const registerDatabaseRoutes: FastifyPluginAsync = async (app) => {
