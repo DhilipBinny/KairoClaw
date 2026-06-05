@@ -641,7 +641,7 @@ API Request with Bearer token
 | Decision | Rationale |
 |----------|-----------|
 | Single org per deployment | Simple. Multi-org = redeploy Docker. |
-| Two roles (admin/user) + elevated flag | Viewer role dropped (unnecessary). Power user via toggle, not a third role. |
+| Two roles (admin/user) + elevated flag | Viewer role exists in DB schema, auth, and permissions but is not exposed in the admin UI. Can be enabled by directly inserting a user with role='viewer'. Power user via toggle, not a third role. |
 | Scope by user UUID, not channel:sender | One person = one memory across all channels. No split brain. |
 | Groups get shared scope, not per-sender | Group memory is shared context. Individual permissions still enforced per sender. |
 | Unlinked senders get user role (restricted) | Safe default. No admin escalation for unknown people in approved groups. |

@@ -1,6 +1,6 @@
 # Channels — Features & Constraints
 
-KairoClaw supports three messaging channels: **Web Chat**, **Telegram**, and **WhatsApp**. Each channel connects to the same AI agent — same tools, same memory, same persona.
+KairoClaw supports four messaging channels: **Web Chat**, **Telegram**, **WhatsApp**, and **REST API**. Each channel connects to the same AI agent — same tools, same memory, same persona.
 
 ---
 
@@ -148,7 +148,8 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 - But allowed numbers will see bot responses as coming from "you"
 
 **Option C: Group-only mode**
-- Set `allowFrom: []` (empty — blocks all DMs since nobody matches)
+- Set `allowFrom: ["0"]` (a dummy value no real sender matches — blocks all DMs)
+- **Do NOT use `allowFrom: []`** — an empty array means allow ALL, not block all
 - Set `Groups Enabled: On`
 - Bot only responds in groups when @mentioned
 - Your DMs remain untouched
@@ -162,27 +163,59 @@ No setup needed. Available at `http://localhost:18181` after starting the server
 
 ---
 
+## REST API
+
+**Type:** HTTP endpoints for programmatic access
+**Protocol:** REST (JSON over HTTP)
+**File:** `packages/core/src/channels/api.ts`
+
+### Endpoints
+
+| Endpoint | Method | Response | Description |
+|----------|--------|----------|-------------|
+| `/api/v1/chat` | POST | SSE stream | Streaming chat — tokens sent as Server-Sent Events |
+| `/api/v1/chat/sync` | POST | JSON | Blocking chat — waits for full response, returns JSON |
+
+### Auth
+
+All requests require a Bearer token (API key) in the `Authorization` header:
+
+```
+Authorization: Bearer <your-api-key>
+```
+
+### Features
+- Streaming responses (SSE) and synchronous responses (blocking JSON)
+- Tool calls (agent tools are available through the API)
+- File attachments (base64-encoded in request body)
+
+### Constraints
+- No group chat concept — each API key maps to a single user/session context
+- No push notifications — client must poll or hold an SSE connection open
+
+---
+
 ## Channel Comparison
 
-| Feature | Web Chat | Telegram | WhatsApp |
-|---------|----------|----------|----------|
-| Setup complexity | None | Easy (BotFather) | Medium (QR pairing) |
-| Separate bot account | N/A | Yes | No (uses your number) |
-| Group support | No | Yes | Yes |
-| Image input | Yes | Yes | Yes |
-| Image output | Markdown | Yes (native photo) | Yes (native photo) |
-| Voice messages | No | No | Yes (saved to disk) |
-| Documents | Yes (file upload) | Yes | Yes (saved to disk) |
-| PDF analysis | Yes (via read_pdf) | Yes (via read_pdf) | Yes (via read_pdf) |
-| Allow-list (users) | No (API key auth) | By user ID | By phone number |
-| Allow-list (groups) | N/A | By group chat ID | By group JID |
-| Per-user memory | Yes (scoped by user account) | Yes (scoped) | Yes (scoped) |
-| Hot-reload | N/A | Yes | Yes |
-| Read receipts | N/A | N/A | Configurable |
-| Mention in groups | N/A | @botname or reply | @phone or reply |
-| Protocol | WebSocket | Official Bot API | Unofficial (Baileys) |
-| Reliability | High | High | Medium (protocol changes) |
-| Rate limits | None (self-hosted) | Telegram limits | Aggressive WhatsApp limits |
+| Feature | Web Chat | Telegram | WhatsApp | API |
+|---------|----------|----------|----------|-----|
+| Setup complexity | None | Easy (BotFather) | Medium (QR pairing) | None (built-in) |
+| Separate bot account | N/A | Yes | No (uses your number) | N/A |
+| Group support | No | Yes | Yes | No |
+| Image input | Yes | Yes | Yes | Yes (base64) |
+| Image output | Markdown | Yes (native photo) | Yes (native photo) | Base64/URL |
+| Voice messages | No | Yes | Yes (saved to disk) | No |
+| Documents | Yes (file upload) | Yes | Yes (saved to disk) | Yes (attachment) |
+| PDF analysis | Yes (via read_pdf) | Yes (via read_pdf) | Yes (via read_pdf) | Yes (via read_pdf) |
+| Allow-list (users) | No (API key auth) | By user ID | By phone number | API key auth |
+| Allow-list (groups) | N/A | By group chat ID | By group JID | N/A |
+| Per-user memory | Yes (scoped by user account) | Yes (scoped) | Yes (scoped) | Yes (scoped by key) |
+| Hot-reload | N/A | Yes | Yes | N/A |
+| Read receipts | N/A | N/A | Configurable | N/A |
+| Mention in groups | N/A | @botname or reply | @phone or reply | N/A |
+| Protocol | WebSocket | Official Bot API | Unofficial (Baileys) | REST (HTTP) |
+| Reliability | High | High | Medium (protocol changes) | High |
+| Rate limits | None (self-hosted) | Telegram limits | Aggressive WhatsApp limits | Configurable |
 
 ---
 
@@ -235,12 +268,16 @@ The approve endpoint automatically detects groups vs individuals:
 
 ### Bot Commands (Telegram)
 
-| Command | Where | Description |
-|---------|-------|-------------|
-| `/start` | DM | Welcome message |
-| `/help` | DM | List commands |
-| `/myid` | DM | Show your user ID + allowlist instructions |
-| `/groupid` | Group | Show group chat ID + allowlist instructions |
+| Command | Where | Description | In setMyCommands? |
+|---------|-------|-------------|-------------------|
+| `/start` | DM | Welcome message | Yes |
+| `/new` | DM / Group | Start a new session | Yes |
+| `/status` | DM / Group | Show current session info | Yes |
+| `/compact` | DM / Group | Compact conversation history | Yes |
+| `/help` | DM | List commands | Yes |
+| `/myid` | DM | Show your user ID + allowlist instructions | Yes |
+| `/groupid` | Group | Show group chat ID + allowlist instructions | Yes |
+| `/model` | DM / Group | Show or switch the current model | No (not registered) |
 
 ### Abuse Scenario (1M bots hitting your endpoint)
 

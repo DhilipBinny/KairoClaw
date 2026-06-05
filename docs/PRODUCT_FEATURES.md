@@ -2,7 +2,7 @@
 
 > **KairoClaw** — A self-hosted personal AI gateway that connects LLMs to messaging channels, tools, and scheduled tasks. Multi-user, multi-channel, fully self-hosted.
 >
-> Version: 2.1 | Updated: 2026-03-25 | Audited from source code
+> Version: 2.2 | Updated: 2026-06-06 | Audited from source code
 
 ---
 
@@ -11,9 +11,9 @@
 | Metric | Value |
 |--------|-------|
 | API endpoints | 55+ REST + 1 WebSocket |
-| Built-in tools | 20 (files, exec, web, browser, messaging, memory, email, agents, PDF, plugins) |
-| Channels | 3 (Telegram, WhatsApp, Web Chat) |
-| LLM providers | 3 (Anthropic, OpenAI, Ollama) |
+| Built-in tools | 35 (files, exec, web, browser, messaging, memory, email, agents, PDF, plugins, grep, glob, todo, sleep, plan mode) |
+| Channels | 4 (Telegram, WhatsApp, Web Chat, REST API) |
+| LLM providers | 4+ (Anthropic, OpenAI, Ollama, plus any OpenAI-compatible via baseUrl — NVIDIA, Azure, Together, vLLM) |
 | Known models | 9 built-in + unlimited custom |
 | Database tables | 12 |
 | Config options | 20+ across 8 sections |
