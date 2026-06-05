@@ -10,7 +10,8 @@ import os from 'node:os';
 // Recreate the logic here to test the routing decisions.
 // The actual function is in files.ts — if it changes, these tests catch drift.
 
-import { PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHARED_DIR } from '../../../constants.js';
+import { PERSONA_FILES, DOCUMENTS_DIR } from '@agw/tools-common';
+import { SCOPE_DIR_NAME, SHARED_DIR } from '../../../constants.js';
 
 function enforceFileOrganization(
   filePath: string,
