@@ -1,6 +1,7 @@
 {
   "name": "@agw/types",
   "version": "0.1.0",
+  "description": "Shared TypeScript interfaces — config, messages, tools, providers, channels",
   "type": "module",
   "main": "dist/index.js",
   "files": [

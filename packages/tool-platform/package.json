@@ -1,6 +1,7 @@
 {
   "name": "@agw/tool-platform",
   "version": "0.1.0",
+  "description": "Tool registry, permission checking, hooks runner, progress bus, result budget",
   "type": "module",
   "main": "dist/index.js",
   "files": [

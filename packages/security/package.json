@@ -1,6 +1,7 @@
 {
   "name": "@agw/security",
   "version": "0.1.0",
+  "description": "Input sanitization, prompt injection detection, output redaction, outbound policy",
   "type": "module",
   "main": "dist/index.js",
   "files": [

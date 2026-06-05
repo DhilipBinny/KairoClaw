@@ -1,6 +1,7 @@
 {
   "name": "@agw/agent-core",
   "version": "0.1.0",
+  "description": "Extracted agent loop primitives — compaction, prompt building, message normalization, tool execution",
   "type": "module",
   "main": "dist/index.js",
   "files": [

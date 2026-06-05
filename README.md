@@ -27,9 +27,6 @@ One agent. Every channel. Full control.
   <a href="#docs">Docs</a>
 </p>
 
-<!-- TODO: Add demo GIF or screenshot -->
-<!-- <p align="center"><img src="assets/demo.gif" alt="KairoClaw demo" width="800" /></p> -->
-
 ---
 
 ## Why KairoClaw
@@ -63,7 +60,7 @@ cd KairoClaw
 ./scripts/setup-local.sh
 ```
 
-Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build` commands. Requires Node.js 22+.
+Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build`, `dev`, `status`, `run` commands. Requires Node.js 22+.
 
 ---
 
@@ -72,15 +69,15 @@ Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build` commands.
 | Feature | What it does |
 |---------|-------------|
 | **Multi-Channel** | Telegram, WhatsApp, Web Chat — unified conversation across all channels |
-| **Multi-Provider** | Anthropic (Claude), OpenAI (GPT-4o), Ollama (local) — auto-failover chain |
+| **Multi-Provider** | Anthropic (Claude), OpenAI (GPT-4o), Ollama, NVIDIA, Azure, Together, vLLM — auto-failover chain |
 | **Multi-User** | Admin, Power User, User roles — per-user workspace, memory, permissions |
 | **Smart Memory** | Auto-extracted user profile + session context. Cross-channel, per-user isolated |
 | **Model Router** | Auto-selects fast/balanced/powerful model per message complexity. Save costs on simple messages |
 | **Smart Compaction** | Two-stage context management — session notes as free compaction summary, eliminates redundant LLM calls |
-| **20+ Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader |
+| **35+ Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader |
 | **Plugin System** | MCP servers, CLI wrappers, HTTP APIs, OpenAPI auto-discovery — extend without code |
 | **Cron Scheduling** | Cron, interval, one-shot tasks with multi-channel delivery |
-| **Admin Dashboard** | 14 admin pages — providers, users, sessions, logs, usage, cron, plugins, settings |
+| **Admin Dashboard** | 19 admin pages — providers, models, users, sessions, logs, usage, cron, plugins, MCP, settings, and more |
 | **Encrypted Secrets** | AES-256-GCM envelope encryption for all API keys and tokens |
 | **Database** | SQLite (default) or PostgreSQL — auto-migration between them |
 | **Model Indicator** | See which model responded per message — configurable per channel and role |
@@ -142,15 +139,15 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 
 ## Admin Dashboard
 
-14 admin pages + 4 user portal pages.
+19 admin pages + 4 user portal pages.
 
 | Admin | User Portal (`/my/`) |
 |---|---|
-| Dashboard, Personas, Providers & Models | Dashboard |
-| Channels, Users, Settings | My Sessions |
-| MCP Servers, Plugins | My Usage |
-| Cron Jobs, Sessions, Scoped Channels | My Cron Jobs |
-| Logs, Usage, Database | |
+| Dashboard, Personas, Providers, Models | Dashboard |
+| Channels, Users, Scoped Channels, WhatsApp | My Sessions |
+| MCP Servers, Plugins, Extension | My Usage |
+| Cron Jobs, Sessions, Tasks, Progress | My Cron Jobs |
+| Logs, Usage, Database, Settings | |
 
 ---
 

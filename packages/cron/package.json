@@ -1,6 +1,7 @@
 {
   "name": "@agw/cron",
   "version": "0.1.0",
+  "description": "Cron job scheduler with cron/interval/one-shot support and multi-channel delivery",
   "type": "module",
   "main": "dist/index.js",
   "files": [
