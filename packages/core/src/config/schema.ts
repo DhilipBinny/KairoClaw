@@ -210,8 +210,8 @@ const contextInjectionSchema = z.object({
 const routingSchema = z.object({
   enabled: z.boolean().default(false),
   forceModel: z.string().default(''),
-  fastModel: z.string().default('anthropic/claude-haiku-4-5-20251001'),
-  powerfulModel: z.string().default('anthropic/claude-opus-4-6'),
+  fastModel: z.string().default(''),
+  powerfulModel: z.string().default(''),
   llmClassifier: z.boolean().default(true),
   shortMessageThreshold: z.number().int().min(0).default(50),
   opusPatterns: z.array(z.string()).default([]),
