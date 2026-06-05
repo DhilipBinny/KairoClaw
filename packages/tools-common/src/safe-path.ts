@@ -21,7 +21,7 @@ export function safePath(p: string | undefined, baseDir: string): string {
 
   const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(baseDir, p);
   const workspace = path.resolve(baseDir);
-  const allowed = [workspace, '/tmp'];
+  const allowed = [workspace];
 
   const isAllowed = allowed.some(root =>
     resolved === root || resolved.startsWith(root + path.sep)
@@ -86,6 +86,6 @@ export function scopedSafePath(
     throw new Error('Access denied: cannot access other users\' files');
   }
 
-  // Outside scopes/ — shared global files, documents/, media/, /tmp → allowed
+  // Outside scopes/ — shared global files, documents/, media/ → allowed
   return resolved;
 }
