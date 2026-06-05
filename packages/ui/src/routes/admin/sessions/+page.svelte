@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getSessions, getSession, getSessionToolCalls, deleteSession, getDebugPrompt, getConfig, type ToolCallInfo } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
+  import AuthImage from '$lib/components/AuthImage.svelte';
 
   interface SessionRow {
     id: string;
@@ -425,12 +426,7 @@
                   {#if getImageFilenames(entry.message.metadata).length > 0}
                     <div class="message-images">
                       {#each getImageFilenames(entry.message.metadata) as img}
-                        <img
-                          src="/api/v1/media/{encodeURIComponent(img)}?token={localStorage.getItem('agw_api_key') || ''}"
-                          alt="Attached image"
-                          class="message-thumb"
-                          loading="lazy"
-                        />
+                        <AuthImage fileName={img} alt="Attached image" className="message-thumb" />
                       {/each}
                     </div>
                   {/if}

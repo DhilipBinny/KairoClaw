@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, getExportUrl, importState, getToolList, getToolPermissions, saveToolPermissions } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, downloadExport, importState, getToolList, getToolPermissions, saveToolPermissions } from '$lib/api';
   import type { ToolMeta } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
@@ -1048,7 +1048,7 @@
             <span class="field-hint">Download all data (config, database, secrets, WhatsApp auth, workspace)</span>
           </div>
           <div class="field-control">
-            <a href={getExportUrl()} class="btn btn-sm" download>Download .tar.gz</a>
+            <button class="btn btn-sm" onclick={() => downloadExport()}>Download .tar.gz</button>
           </div>
         </div>
         <div class="field-row">
