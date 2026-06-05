@@ -604,7 +604,7 @@ async function main(): Promise<void> {
         if (value) {
           const tool = builtinTools.find(t => t.definition.name === toolName);
           if (tool && !toolRegistry.has(toolName)) {
-            toolRegistry.register(tool);
+            toolRegistry.register(tool, { builtin: true });
             server.log.info(`Tool ${toolName} enabled via Settings`);
           }
         } else {
