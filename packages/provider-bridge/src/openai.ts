@@ -87,7 +87,7 @@ export class OpenAIProvider implements ProviderInterface {
       model: modelId,
       messages: apiMessages,
       stream: true,
-      ...(this.name === 'openai' ? { stream_options: { include_usage: true } } : {}),
+      stream_options: { include_usage: true },
     };
     if (openaiTools.length > 0) {
       params.tools = openaiTools;
