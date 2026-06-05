@@ -137,16 +137,18 @@ export class PendingSenderRepository {
    * - If not, check cap, evict oldest if needed, insert new
    */
   async recordSighting(channel: string, senderId: string, senderName: string, status: string, cap: number): Promise<void> {
-    const existing = await this.findBySenderId(channel, senderId, [status]);
-    if (existing) {
-      await this.updateActivity(channel, senderId, senderName, [status]);
-    } else {
-      const count = await this.countByStatus(channel, status);
-      if (count >= cap) {
-        await this.evictOldest(channel, status);
+    await this.db.transaction(async () => {
+      const existing = await this.findBySenderId(channel, senderId, [status]);
+      if (existing) {
+        await this.updateActivity(channel, senderId, senderName, [status]);
+      } else {
+        const count = await this.countByStatus(channel, status);
+        if (count >= cap) {
+          await this.evictOldest(channel, status);
+        }
+        await this.upsert(channel, senderId, senderName, status);
       }
-      await this.insert(channel, senderId, senderName, status);
-    }
+    });
   }
 
   /**
