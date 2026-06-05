@@ -3,6 +3,7 @@
   import AuthImage from './AuthImage.svelte';
   import type { ChatMessage as ChatMessageType, ToolCall as ToolCallType, MediaAttachment } from '$lib/stores/chat.svelte';
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import hljs from 'highlight.js/lib/core';
   import javascript from 'highlight.js/lib/languages/javascript';
   import python from 'highlight.js/lib/languages/python';
@@ -43,7 +44,7 @@
 
   function renderMarkdown(text: string): string {
     if (!text) return '';
-    return marked.parse(text) as string;
+    return DOMPurify.sanitize(marked.parse(text) as string);
   }
 
   interface Props {
