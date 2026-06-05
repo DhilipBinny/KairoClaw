@@ -1,6 +1,7 @@
 {
   "name": "@agw/plugins",
   "version": "0.1.0",
+  "description": "Plugin coordinator — CLI wrappers, HTTP APIs, OpenAPI auto-discovery, media utils",
   "type": "module",
   "main": "dist/index.js",
   "files": ["dist"],

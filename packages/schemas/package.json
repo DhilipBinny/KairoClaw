@@ -1,6 +1,7 @@
 {
   "name": "@agw/schemas",
   "version": "0.1.0",
+  "description": "Shared Zod schemas for plugin and config validation",
   "type": "module",
   "main": "dist/index.js",
   "files": ["dist"],

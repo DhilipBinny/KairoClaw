@@ -1,6 +1,7 @@
 {
   "name": "@agw/logger",
   "version": "0.1.0",
+  "description": "Structured logging with pino — terminal, file rotation, in-memory ring buffer",
   "type": "module",
   "main": "dist/index.js",
   "files": [

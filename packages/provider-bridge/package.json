@@ -1,6 +1,7 @@
 {
   "name": "@agw/provider-bridge",
   "version": "0.1.0",
+  "description": "LLM provider abstraction — OpenAI, Anthropic, streaming, retry, failover",
   "type": "module",
   "main": "dist/index.js",
   "files": [

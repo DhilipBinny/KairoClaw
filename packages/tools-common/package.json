@@ -1,6 +1,7 @@
 {
   "name": "@agw/tools-common",
   "version": "0.1.0",
+  "description": "Built-in tool implementations — exec, files, web, email, memory, grep, glob",
   "type": "module",
   "main": "dist/index.js",
   "files": [

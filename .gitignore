@@ -60,6 +60,7 @@ Thumbs.db
 
 # ── Claude Code ──
 .claude/
+CLAUDE.md
 
 # ── Editor / IDE ──
 .vscode/

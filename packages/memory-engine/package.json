@@ -1,6 +1,7 @@
 {
   "name": "@agw/memory-engine",
   "version": "0.1.0",
+  "description": "Auto-memory extraction, session memory, scoped per-user memory, token estimation",
   "type": "module",
   "main": "dist/index.js",
   "files": [
