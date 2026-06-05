@@ -11,4 +11,5 @@ export {
   listLogFiles,
   searchLogFiles,
   getLogFilePath,
+  toAgwLogger,
 } from '@agw/logger';

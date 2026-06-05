@@ -46,13 +46,13 @@ import type { WhatsAppChannelInstance } from './channels/whatsapp.js';
 import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
-import { createModuleLogger } from './observability/logger.js';
+import { createModuleLogger, toAgwLogger } from './observability/logger.js';
 
 // Wire loggers for extracted packages that added setters in PR #120
 const _agentLog = createModuleLogger('agent');
-setMessagesLogger(_agentLog as any);
-setPromptLogger(_agentLog as any);
-setTokenEstimatorLogger(_agentLog as any);
+setMessagesLogger(toAgwLogger(_agentLog));
+setPromptLogger(toAgwLogger(_agentLog));
+setTokenEstimatorLogger(toAgwLogger(_agentLog));
 
 // Routes
 import { registerHealthRoutes } from './routes/health.js';
@@ -288,7 +288,7 @@ async function main(): Promise<void> {
   config.plugins = loadPlugins(stateDir);
 
   const pluginLogger = createModuleLogger('plugins');
-  const pluginTools = await registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+  const pluginTools = await registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger, mediaStore);
   if (pluginTools.length > 0) {
     console.log(`  Plugins: ${pluginTools.length} tools registered`);
   }
@@ -552,7 +552,7 @@ async function main(): Promise<void> {
           checkOutboundAllowed: (channel: 'whatsapp' | 'telegram', recipient: string) =>
             checkOutboundAllowed(channel, recipient, config, db),  // already returns Promise
           braveApiKey: secretsStore.get('tools.webSearch', 'apiKey') || config.tools?.webSearch?.apiKey || process.env.BRAVE_API_KEY || '',
-          pluginReloader: () => reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore),
+          pluginReloader: () => reloadPlugins(config, toolRegistry, secretsStore, pluginLogger, mediaStore),
           mediaStore,
         };
         return toolRegistry.execute(name, args, enrichedCtx as any);
@@ -618,7 +618,7 @@ async function main(): Promise<void> {
     // Plugin hot-reload
     if (dotPath.startsWith('plugins.') || dotPath === 'plugins') {
       try {
-        const reloaded = await reloadPlugins(config, toolRegistry, secretsStore, pluginLogger as any, mediaStore);
+        const reloaded = await reloadPlugins(config, toolRegistry, secretsStore, pluginLogger, mediaStore);
         server.log.info({ count: reloaded.length }, 'Plugins reloaded via Settings');
       } catch (e) {
         server.log.error(e, 'Failed to reload plugins');
