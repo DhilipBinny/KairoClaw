@@ -159,19 +159,20 @@ export class PendingSenderRepository {
   async recordWithResolutionCheck(
     channel: string, senderId: string, senderName: string, status: 'seen' | 'pending', cap: number,
   ): Promise<void> {
-    // Skip if already resolved
-    const resolved = await this.findBySenderId(channel, senderId, ['approved', 'rejected']);
-    if (resolved) return;
+    await this.db.transaction(async () => {
+      const resolved = await this.findBySenderId(channel, senderId, ['approved', 'rejected']);
+      if (resolved) return;
 
-    const existing = await this.findBySenderId(channel, senderId, ['seen', 'pending']);
-    if (existing) {
-      await this.updateActivity(channel, senderId, senderName, ['seen', 'pending']);
-    } else {
-      const count = await this.countByStatus(channel, status);
-      if (count >= cap) {
-        await this.evictOldest(channel, status);
+      const existing = await this.findBySenderId(channel, senderId, ['seen', 'pending']);
+      if (existing) {
+        await this.updateActivity(channel, senderId, senderName, ['seen', 'pending']);
+      } else {
+        const count = await this.countByStatus(channel, status);
+        if (count >= cap) {
+          await this.evictOldest(channel, status);
+        }
+        await this.upsert(channel, senderId, senderName, status);
       }
-      await this.insert(channel, senderId, senderName, status);
-    }
+    });
   }
 }
