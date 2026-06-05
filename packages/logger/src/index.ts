@@ -10,6 +10,7 @@ import path from 'node:path';
 import { pino, multistream } from 'pino';
 import type { Logger } from 'pino';
 import { Writable } from 'node:stream';
+import type { AgwLogger } from '@agw/types';
 import pinoPretty from 'pino-pretty';
 
 const DEFAULT_BUFFER_CAPACITY = 1_000;
@@ -189,6 +190,18 @@ export function createModuleLogger(category: LogCategory | string, level?: strin
       return typeof val === 'function' ? val.bind(inner) : val;
     },
   });
+}
+
+export function toAgwLogger(pinoLogger: Logger): AgwLogger {
+  return {
+    info: pinoLogger.info.bind(pinoLogger),
+    warn: pinoLogger.warn.bind(pinoLogger),
+    error: pinoLogger.error.bind(pinoLogger),
+    debug: pinoLogger.debug.bind(pinoLogger),
+    child(bindings: Record<string, unknown>): AgwLogger {
+      return toAgwLogger(pinoLogger.child(bindings));
+    },
+  };
 }
 
 export function createServerLogger(stateDir: string, level?: string): { stream: ReturnType<typeof multistream> } {
