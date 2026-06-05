@@ -48,9 +48,8 @@ describe('safePath', () => {
     expect(() => safePath('/etc/passwd', workspace)).toThrow('outside allowed');
   });
 
-  it('allows /tmp', () => {
-    const result = safePath('/tmp/test.txt', workspace);
-    expect(result).toBe('/tmp/test.txt');
+  it('blocks /tmp (no longer allowed)', () => {
+    expect(() => safePath('/tmp/test.txt', workspace)).toThrow('outside allowed');
   });
 
   it('allows workspace subdirectories', () => {

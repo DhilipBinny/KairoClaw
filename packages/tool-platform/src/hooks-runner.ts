@@ -17,9 +17,17 @@ async function runHookCommand(
   timeoutMs: number,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
+    const HOOK_ENV_KEYS = [
+      'PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'LC_CTYPE',
+      'NODE_ENV', 'TZ', 'TMPDIR', 'COLORTERM',
+    ];
+    const hookEnv: Record<string, string> = {};
+    for (const key of HOOK_ENV_KEYS) {
+      if (process.env[key]) hookEnv[key] = process.env[key]!;
+    }
     const child = spawn('/bin/sh', ['-c', command], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: process.env,
+      env: hookEnv,
     });
 
     let stdoutBytes = 0;

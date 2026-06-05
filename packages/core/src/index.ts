@@ -277,7 +277,7 @@ async function main(): Promise<void> {
   for (const tool of builtinTools) {
     const name = tool.definition.name;
     if (name in toolEnabledMap && !toolEnabledMap[name]) continue;
-    toolRegistry.register(tool);
+    toolRegistry.register(tool, { builtin: true });
   }
 
   // 7a. Initialize media store + load plugins from plugins.json
