@@ -60,7 +60,7 @@ export const registerWorkspaceRoutes: FastifyPluginAsync = async (app) => {
   // PUT /api/v1/workspace/files/:name — save a workspace file
   app.put(
     '/api/v1/workspace/files/:name',
-    { preHandler: [requireRole('admin', 'user')] },
+    { preHandler: [requireRole('admin')] },
     async (request, reply) => {
       const config = getConfig(request);
       const { name } = request.params as { name: string };

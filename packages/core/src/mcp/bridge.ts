@@ -8,7 +8,7 @@ import type {
   JSONSchemaProperty,
 } from '@agw/types';
 import { MCPClient } from '@agw/mcp-client';
-import { detectToolSetChange } from '@agw/mcp-client';
+import { detectToolSetChange, validateServerEnv } from '@agw/mcp-client';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
 
@@ -172,6 +172,14 @@ export class MCPBridge {
       const resolvedEnv = this._secretsStore
         ? this._secretsStore.resolveEnv(id, serverConfig.env || {})
         : serverConfig.env;
+
+      // Warn if resolved env vars contain gateway secrets
+      if (resolvedEnv) {
+        const envCheck = validateServerEnv(resolvedEnv);
+        if (!envCheck.safe) {
+          for (const w of envCheck.warnings) this.log.warn({ server: id }, w);
+        }
+      }
 
       // Validate: secrets must ONLY be passed via env vars, never via args
       const rawArgs = serverConfig.args || [];
