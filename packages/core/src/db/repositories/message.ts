@@ -41,10 +41,9 @@ export class MessageRepository {
       ],
     );
 
-    // Use RETURNING-compatible lookup: get the latest message we just inserted
     return (await this.db.get<MessageRow>(
-      'SELECT * FROM messages WHERE session_id = ? AND role = ? ORDER BY id DESC LIMIT 1',
-      [msg.sessionId, msg.role],
+      'SELECT * FROM messages WHERE session_id = ? AND role = ? AND created_at = ? ORDER BY id DESC LIMIT 1',
+      [msg.sessionId, msg.role, now],
     ))!;
   }
 
