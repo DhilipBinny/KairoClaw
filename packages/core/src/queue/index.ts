@@ -29,7 +29,7 @@ export class AgentQueue {
     // Chain onto the existing session promise (or start fresh)
     const prev = this.sessionQueues.get(sessionKey) ?? Promise.resolve();
 
-    const next = prev.then(async () => {
+    const next = prev.catch(() => {}).then(async () => {
       // Wait for a global concurrency slot (semaphore acquire)
       await this.acquire();
       try {
