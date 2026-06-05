@@ -570,7 +570,7 @@ export async function runAgent(
 
   // ── Build prompt + messages ─────────────────────────────
   const hasContextSummary = historyRows.some(
-    r => r.role === 'system' && typeof r.content === 'string' && r.content.startsWith('[Context Summary]'),
+    r => r.role === 'user' && typeof r.content === 'string' && r.content.startsWith('[Context Summary'),
   );
   const tools = context.tools ?? [];
   const caps = getModelCapabilities(model, config);
@@ -674,7 +674,7 @@ export async function runAgent(
             reqLog.info('Stage 2: Forcing hard compaction');
             await compactSession(session.id, tenantId, model, db, config, context.callLLM);
             const freshRows = await s.messageRepo.listBySession(session.id);
-            s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage), { role: 'user', content: s.userContent });
+            s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage));
             s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
           } catch (compactErr: unknown) {
             reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');

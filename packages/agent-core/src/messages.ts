@@ -55,7 +55,8 @@ export function normalizeMessages(
     if (typeof msg.content === 'string' && !msg.content.trim() && !msg.tool_calls?.length) continue;
     const last = result[result.length - 1];
     if (last && last.role === msg.role && msg.role === 'user' &&
-        typeof last.content === 'string' && typeof msg.content === 'string') {
+        typeof last.content === 'string' && typeof msg.content === 'string' &&
+        !last.content.startsWith('[Context Summary')) {
       last.content = last.content + '\n' + msg.content;
     } else {
       result.push({ ...msg });
