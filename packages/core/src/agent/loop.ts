@@ -364,7 +364,8 @@ async function executeToolCalls(
     if (typeof toolArgs !== 'object' || toolArgs === null) toolArgs = {};
 
     const argSummary = Object.entries(toolArgs).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
-    s.reqLog.info({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool called');
+    s.reqLog.info({ tool: toolName, category: 'tool' }, 'Tool called');
+    s.reqLog.debug({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool args');
 
     const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
     const callCount = (s.toolCallCounts.get(toolHash) ?? 0) + 1;
