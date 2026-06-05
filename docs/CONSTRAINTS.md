@@ -53,7 +53,7 @@ broadcastToWeb     -->  WebSocket push (no restriction — internal only)
 
 ### Key Files
 
-- `packages/core/src/security/outbound.ts` — validation logic
+- `packages/core/src/security/outbound.ts` — re-export shim. Main implementation: `packages/security/src/outbound.ts`
 - `packages/core/src/index.ts` (sharedServices + deliverer) — enforcement
 - `packages/core/src/tools/builtin/messaging.ts` — cron creation validation
 - `packages/types/src/config.ts` — `outboundPolicy` + `outboundAllowlist` types

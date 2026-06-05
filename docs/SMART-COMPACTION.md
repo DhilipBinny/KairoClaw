@@ -2,7 +2,7 @@
 
 > Structured, two-stage compaction that prevents cross-topic pollution and reduces token waste.
 >
-> Branch: `feature/smart-compaction` | Status: Implemented
+> Status: Implemented (merged to main)
 
 ---
 
@@ -132,6 +132,10 @@ Before the LLM summarizes, we strip old tool results down to one line:
 - Uses the structured prompt from Change 1
 - Deletes old messages, inserts structured summary as system message
 
+**Session-memory-first compaction:** When session memory exists for the current session (i.e., a session summary has already been written to disk), it is used as the compaction summary **without making an LLM call**. The LLM summarization path is only used as a fallback when no session memory is available. This saves both latency and cost for sessions that already have a memory file.
+
+**Post-compact file restoration:** After hard compaction, recently-touched file paths are extracted from `tool_calls` in the compacted messages and their content is re-injected into the context. This ensures the agent retains awareness of files it was actively working on. Limits: up to 5 files, 5000 chars each.
+
 ---
 
 ## System Prompt Guidance
@@ -203,8 +207,8 @@ All thresholds are configurable in `config.agent`:
 
 | File | Change |
 |------|--------|
-| `packages/core/src/agent/compaction.ts` | All three changes + new `softCompact()` + `evictToolResults()` functions |
-| `packages/core/src/agent/prompt.ts` | Add compacted-context guidance to system prompt |
+| `packages/core/src/agent/compaction.ts` | Re-export shim. Real implementation: `packages/agent-core/src/compaction.ts` |
+| `packages/core/src/agent/prompt.ts` | Re-export shim. Moved to `packages/agent-core/src/prompt.ts` |
 | `packages/core/src/agent/slash-commands.ts` | `/compact` output shows method label |
 | `packages/core/src/db/repositories/message.ts` | New `updateContent()` method for soft compaction |
 | `packages/types/src/config.ts` | `softCompactionThreshold` field in AgentConfig |
