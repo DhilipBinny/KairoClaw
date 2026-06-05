@@ -1,6 +1,7 @@
 {
   "name": "@agw/core",
   "version": "0.1.0",
+  "description": "KairoClaw server — routes, channels, agent wiring, config, auth, media",
   "type": "module",
   "main": "dist/index.js",
   "files": [

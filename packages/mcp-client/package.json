@@ -1,6 +1,7 @@
 {
   "name": "@agw/mcp-client",
   "version": "0.1.0",
+  "description": "Model Context Protocol client — stdio and SSE transports, tool pinning, catalog",
   "type": "module",
   "main": "dist/index.js",
   "files": [
