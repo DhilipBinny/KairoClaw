@@ -34,7 +34,7 @@ export async function createServer(context: ServerContext): Promise<FastifyInsta
   if (allowedOrigins && allowedOrigins.length > 0) {
     corsOrigin = allowedOrigins;
   } else if (host === '0.0.0.0' || host === '::') {
-    corsOrigin = true;
+    corsOrigin = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
   } else {
     corsOrigin = [`http://${host}:${port}`, `http://localhost:${port}`];
   }
