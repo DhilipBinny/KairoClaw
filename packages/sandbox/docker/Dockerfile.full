@@ -28,8 +28,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# pnpm via corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# pnpm via corepack (pinned version for reproducibility)
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 # Python 3.12 (already in bookworm repos as python3)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,8 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user (uid 1000 to match container --user flag)
 RUN groupadd -g 1000 sandbox && useradd -m -u 1000 -g sandbox sandbox
 
-# Create workspace directory
-RUN mkdir -p /workspace /shared /persona && chown -R sandbox:sandbox /workspace
+# Create workspace directories (all owned by sandbox user)
+RUN mkdir -p /workspace /shared /persona && chown -R sandbox:sandbox /workspace /shared /persona
 
 # Set working directory
 WORKDIR /workspace

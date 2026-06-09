@@ -1,10 +1,9 @@
+import { createHash } from 'node:crypto';
 import type {
   SandboxToolConfig,
   SandboxContainer,
   SandboxExecResult,
   SandboxCapabilities,
-  SandboxNetworkTier,
-  SandboxMountMode,
 } from '@agw/types';
 import {
   createContainer,
@@ -15,7 +14,7 @@ import {
   imageExists,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
-import { resolveNetworkMode, buildAllowlistScript } from './network-policy.js';
+import { resolveNetworkMode, buildAllowlistScript, needsIptables } from './network-policy.js';
 import { resolveCapabilities } from './config.js';
 import {
   CONTAINER_PREFIX,
@@ -29,6 +28,7 @@ export class ContainerManager {
   private config: SandboxToolConfig;
   private containers = new Map<string, SandboxContainer>();
   private lifetimeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private pendingCreations = new Map<string, Promise<SandboxContainer>>();
 
   constructor(config: SandboxToolConfig) {
     this.config = config;
@@ -38,9 +38,6 @@ export class ContainerManager {
     this.config = config;
   }
 
-  /**
-   * Check if the sandbox system is ready (Docker daemon reachable + image available).
-   */
   async isReady(): Promise<{ ready: boolean; reason?: string }> {
     if (!this.config.enabled) {
       return { ready: false, reason: 'Sandbox is disabled in config' };
@@ -61,6 +58,8 @@ export class ContainerManager {
 
   /**
    * Get or create a sandbox container for a user+session.
+   * Uses a per-key promise lock to prevent duplicate container creation
+   * from concurrent requests.
    */
   async getOrCreate(opts: {
     userId: string;
@@ -71,9 +70,30 @@ export class ContainerManager {
     isAdmin: boolean;
   }): Promise<SandboxContainer> {
     const key = this.containerKey(opts.userId, opts.sessionId);
+
     const existing = this.containers.get(key);
     if (existing) return existing;
 
+    const pending = this.pendingCreations.get(key);
+    if (pending) return pending;
+
+    const promise = this._doCreate(key, opts);
+    this.pendingCreations.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.pendingCreations.delete(key);
+    }
+  }
+
+  private async _doCreate(key: string, opts: {
+    userId: string;
+    sessionId: string;
+    role: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+  }): Promise<SandboxContainer> {
     const caps = resolveCapabilities(this.config, opts.role, opts.userId);
     const mounts = resolveMounts({
       workspacePath: opts.workspacePath,
@@ -84,6 +104,7 @@ export class ContainerManager {
 
     const networkMode = resolveNetworkMode(caps.network);
     const containerName = `${CONTAINER_PREFIX}-${sanitize(opts.userId)}-${sanitize(opts.sessionId)}`;
+    const wantsIptables = needsIptables(caps.network, this.config.networkAllowlist);
 
     const containerId = await createContainer({
       socketPath: this.config.dockerSocket,
@@ -100,22 +121,24 @@ export class ContainerManager {
       cpu: caps.cpu ?? this.config.defaults.cpu,
       memoryMb: caps.memoryMb ?? this.config.defaults.memoryMb,
       pidsLimit: this.config.defaults.pidsLimit,
+      addNetAdmin: wantsIptables,
     });
 
-    // Apply balanced-tier network allowlist if needed
-    if (caps.network === 'balanced') {
+    let effectiveNetwork = caps.network;
+
+    if (wantsIptables) {
       const script = buildAllowlistScript('balanced', this.config.networkAllowlist);
       if (script) {
-        try {
-          await execInContainer(
-            this.config.dockerSocket,
-            containerId,
-            script,
-            '/',
-            10000,
-          );
-        } catch {
-          // iptables may not be available in the container — continue without allowlist enforcement
+        const result = await execInContainer(
+          this.config.dockerSocket,
+          containerId,
+          script,
+          '/',
+          10000,
+        );
+        if (result.exitCode !== 0) {
+          console.warn(`[sandbox] iptables allowlist failed (exit ${result.exitCode}) — container has unrestricted network`);
+          effectiveNetwork = 'open';
         }
       }
     }
@@ -126,7 +149,7 @@ export class ContainerManager {
       userId: opts.userId,
       sessionId: opts.sessionId,
       image: this.config.image,
-      network: caps.network,
+      network: effectiveNetwork,
       workspace: caps.workspace,
       createdAt: Date.now(),
       maxLifetimeMs,
@@ -134,18 +157,15 @@ export class ContainerManager {
 
     this.containers.set(key, entry);
 
-    // Auto-cleanup after max lifetime
     const timer = setTimeout(() => {
       this.destroyContainer(key).catch(() => {});
     }, maxLifetimeMs);
+    timer.unref();
     this.lifetimeTimers.set(key, timer);
 
     return entry;
   }
 
-  /**
-   * Execute a command in the user's sandbox container.
-   */
   async exec(opts: {
     userId: string;
     sessionId: string;
@@ -171,16 +191,10 @@ export class ContainerManager {
     );
   }
 
-  /**
-   * Get the capabilities that would apply for a user+role.
-   */
   getCapabilities(role: string, userId?: string): SandboxCapabilities {
     return resolveCapabilities(this.config, role, userId);
   }
 
-  /**
-   * Destroy a specific container by user+session key.
-   */
   async destroyContainer(key: string): Promise<void> {
     const entry = this.containers.get(key);
     if (!entry) return;
@@ -193,50 +207,34 @@ export class ContainerManager {
     await removeContainer(this.config.dockerSocket, entry.containerId);
   }
 
-  /**
-   * Destroy the sandbox for a specific session (called on session end).
-   */
   async destroyForSession(userId: string, sessionId: string): Promise<void> {
     const key = this.containerKey(userId, sessionId);
     await this.destroyContainer(key);
   }
 
-  /**
-   * Destroy all sandboxes for a user (called when user is removed).
-   */
   async destroyForUser(userId: string): Promise<void> {
     const keysToRemove = [...this.containers.keys()].filter(k => k.startsWith(`${userId}:`));
     await Promise.allSettled(keysToRemove.map(k => this.destroyContainer(k)));
   }
 
-  /**
-   * Destroy all managed containers (called on server shutdown).
-   */
   async destroyAll(): Promise<void> {
     const keys = [...this.containers.keys()];
     await Promise.allSettled(keys.map(k => this.destroyContainer(k)));
 
-    // Also clean up any orphaned containers from previous runs
     try {
       const orphans = await listSandboxContainers(this.config.dockerSocket);
       await Promise.allSettled(
         orphans.map(c => removeContainer(this.config.dockerSocket, c.id)),
       );
     } catch {
-      // Docker not available — nothing to clean up
+      // Docker not available
     }
   }
 
-  /**
-   * List all active sandbox containers.
-   */
   listActive(): SandboxContainer[] {
     return [...this.containers.values()];
   }
 
-  /**
-   * Check if a container exists for a user+session.
-   */
   hasContainer(userId: string, sessionId: string): boolean {
     return this.containers.has(this.containerKey(userId, sessionId));
   }
@@ -247,5 +245,9 @@ export class ContainerManager {
 }
 
 function sanitize(s: string): string {
-  return s.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+  const cleaned = s.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+  if (!cleaned) {
+    return 'h' + createHash('sha256').update(s).digest('hex').slice(0, 11);
+  }
+  return cleaned;
 }

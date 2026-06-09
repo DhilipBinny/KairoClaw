@@ -3,22 +3,21 @@ import { PassThrough } from 'node:stream';
 import { CONTAINER_LABEL_KEY, MAX_STDOUT, MAX_STDERR } from './constants.js';
 import type { SandboxExecResult } from '@agw/types';
 
-let dockerInstance: Docker | null = null;
+const dockerInstances = new Map<string, Docker>();
 
 export function getDocker(socketPath: string): Docker {
-  if (!dockerInstance) {
-    dockerInstance = new Docker({ socketPath });
+  let instance = dockerInstances.get(socketPath);
+  if (!instance) {
+    instance = new Docker({ socketPath });
+    dockerInstances.set(socketPath, instance);
   }
-  return dockerInstance;
+  return instance;
 }
 
 export function resetDocker(): void {
-  dockerInstance = null;
+  dockerInstances.clear();
 }
 
-/**
- * Check if Docker daemon is reachable.
- */
 export async function isDockerAvailable(socketPath: string): Promise<boolean> {
   try {
     const docker = getDocker(socketPath);
@@ -29,9 +28,6 @@ export async function isDockerAvailable(socketPath: string): Promise<boolean> {
   }
 }
 
-/**
- * Check if an image exists locally.
- */
 export async function imageExists(socketPath: string, imageName: string): Promise<boolean> {
   try {
     const docker = getDocker(socketPath);
@@ -53,13 +49,19 @@ export interface CreateContainerOpts {
   cpu: number;
   memoryMb: number;
   pidsLimit: number;
+  addNetAdmin?: boolean;
 }
 
-/**
- * Create and start a sandbox container.
- */
 export async function createContainer(opts: CreateContainerOpts): Promise<string> {
   const docker = getDocker(opts.socketPath);
+
+  // Minimal capabilities — only add NET_ADMIN/NET_RAW for balanced tier iptables
+  const capAdd: string[] = [];
+  if (opts.addNetAdmin) {
+    capAdd.push('NET_ADMIN', 'NET_RAW');
+  }
+
+  const memBytes = opts.memoryMb * 1024 * 1024;
 
   const container = await docker.createContainer({
     name: opts.name,
@@ -69,17 +71,35 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
     Labels: opts.labels,
     Tty: false,
     OpenStdin: false,
+    Env: [
+      'HOME=/home/sandbox',
+      'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+      'LANG=C.UTF-8',
+      'NODE_ENV=production',
+      'TERM=xterm',
+    ],
     HostConfig: {
+      Init: true,
       Binds: opts.binds,
       NetworkMode: opts.networkMode,
       NanoCpus: Math.floor(opts.cpu * 1e9),
-      Memory: opts.memoryMb * 1024 * 1024,
+      Memory: memBytes,
+      MemorySwap: memBytes,
       PidsLimit: opts.pidsLimit,
       SecurityOpt: ['no-new-privileges'],
       CapDrop: ['ALL'],
-      CapAdd: ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'SETGID', 'SETUID', 'NET_BIND_SERVICE'],
-      Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=268435456' },
+      CapAdd: capAdd,
+      Tmpfs: {
+        '/tmp': 'rw,noexec,nosuid,size=268435456',
+        '/var/tmp': 'rw,noexec,nosuid,size=134217728',
+      },
       ReadonlyRootfs: false,
+      OomScoreAdj: 500,
+      Ulimits: [
+        { Name: 'nofile', Soft: 1024, Hard: 4096 },
+        { Name: 'nproc', Soft: 256, Hard: 512 },
+        { Name: 'core', Soft: 0, Hard: 0 },
+      ],
     },
     User: '1000:1000',
   });
@@ -88,9 +108,6 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
   return container.id;
 }
 
-/**
- * Execute a command inside a running container.
- */
 export async function execInContainer(
   socketPath: string,
   containerId: string,
@@ -128,9 +145,22 @@ export async function execInContainer(
     const stderrStream = new PassThrough();
     const stdoutBuf: Buffer[] = [];
     const stderrBuf: Buffer[] = [];
+    let stdoutSize = 0;
+    let stderrSize = 0;
+    const bufferCap = MAX_STDOUT * 2;
 
-    stdoutStream.on('data', (chunk: Buffer) => stdoutBuf.push(chunk));
-    stderrStream.on('data', (chunk: Buffer) => stderrBuf.push(chunk));
+    stdoutStream.on('data', (chunk: Buffer) => {
+      if (stdoutSize < bufferCap) {
+        stdoutBuf.push(chunk);
+        stdoutSize += chunk.length;
+      }
+    });
+    stderrStream.on('data', (chunk: Buffer) => {
+      if (stderrSize < bufferCap) {
+        stderrBuf.push(chunk);
+        stderrSize += chunk.length;
+      }
+    });
 
     docker.modem.demuxStream(stream, stdoutStream, stderrStream);
 
@@ -167,9 +197,6 @@ export async function execInContainer(
   });
 }
 
-/**
- * Stop and remove a container.
- */
 export async function removeContainer(socketPath: string, containerId: string): Promise<void> {
   try {
     const docker = getDocker(socketPath);
@@ -185,9 +212,6 @@ export async function removeContainer(socketPath: string, containerId: string): 
   }
 }
 
-/**
- * List all sandbox containers managed by KairoClaw.
- */
 export async function listSandboxContainers(
   socketPath: string,
 ): Promise<Array<{ id: string; name: string; state: string; labels: Record<string, string> }>> {
@@ -203,4 +227,3 @@ export async function listSandboxContainers(
     labels: c.Labels,
   }));
 }
-

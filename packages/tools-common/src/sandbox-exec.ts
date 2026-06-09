@@ -77,8 +77,8 @@ export const sandboxExecTools: ToolRegistration[] = [
     },
     source: 'builtin',
     category: 'execute',
-    isDestructive: false,
-    maxResultSizeChars: 128 * 1024,
+    isDestructive: true,
+    maxResultSizeChars: 16 * 1024,
     getActivityDescription: (input) => {
       const cmd = (input as { command?: string })?.command ?? '';
       return `Sandbox: ${cmd.slice(0, 80)}${cmd.length > 80 ? '…' : ''}`;

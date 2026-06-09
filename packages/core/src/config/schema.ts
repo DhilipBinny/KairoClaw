@@ -133,11 +133,13 @@ const sandboxCapabilitiesSchema = z.object({
   cpu: z.number().min(0.5).max(16).optional(),
   memoryMb: z.number().int().min(128).max(32768).optional(),
   timeoutSeconds: z.number().int().min(10).max(600).optional(),
-}).partial();
+});
+
+const safeDomainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
 
 const sandboxToolSchema = z.object({
   enabled: z.boolean().default(false),
-  image: z.string().default('kairoclaw-sandbox:full'),
+  image: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*$/).default('kairoclaw-sandbox:full'),
   dockerSocket: z.string().default('/var/run/docker.sock'),
   defaults: withObjectDefault(z.object({
     network: z.enum(['open', 'balanced', 'locked']).default('balanced'),
@@ -149,7 +151,7 @@ const sandboxToolSchema = z.object({
     maxLifetimeMinutes: z.number().int().min(10).max(1440).default(240),
     pidsLimit: z.number().int().min(32).max(4096).default(256),
   })),
-  networkAllowlist: z.array(z.string()).default([
+  networkAllowlist: z.array(z.string().regex(safeDomainRegex)).default([
     'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org',
     'deb.debian.org', 'security.debian.org',
     'github.com', 'gitlab.com',

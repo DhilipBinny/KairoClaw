@@ -49,9 +49,14 @@ export function resolveMounts(opts: {
   } else {
     if (scopeKey) {
       const scopeDir = path.join(workspacePath, 'scopes', scopeKey);
-      ensureDirExists(scopeDir);
+      const resolved = path.resolve(scopeDir);
+      const scopesRoot = path.resolve(path.join(workspacePath, 'scopes'));
+      if (!resolved.startsWith(scopesRoot + path.sep) && resolved !== scopesRoot) {
+        throw new Error('Invalid scope key: path traversal detected');
+      }
+      ensureDirExists(resolved);
       binds.push({
-        hostPath: scopeDir,
+        hostPath: resolved,
         containerPath: CONTAINER_WORKSPACE_PATH,
         readOnly: isReadOnly,
       });

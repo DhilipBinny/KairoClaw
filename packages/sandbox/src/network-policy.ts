@@ -1,10 +1,16 @@
 import type { SandboxNetworkTier } from '@agw/types';
 
+const SAFE_DOMAIN = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+
+export function isValidDomain(domain: string): boolean {
+  return SAFE_DOMAIN.test(domain) && domain.length <= 253;
+}
+
 /**
  * Resolve the Docker network mode for a given tier.
  *
  * - open: default bridge networking (unrestricted outbound)
- * - balanced: bridge networking (allowlist enforced via separate mechanism)
+ * - balanced: bridge networking (allowlist enforced via iptables inside container)
  * - locked: no networking at all
  */
 export function resolveNetworkMode(tier: SandboxNetworkTier): string {
@@ -16,21 +22,25 @@ export function resolveNetworkMode(tier: SandboxNetworkTier): string {
 }
 
 /**
- * For "balanced" tier, produce an iptables script that restricts
- * outbound to only the allowed domains.
- *
- * This runs inside the container as an init command. Since DNS resolves
- * at connection time and container networking goes through Docker's NAT,
- * we use a DNS-based approach: resolve each domain to IPs, then allow
- * only those IPs via iptables.
- *
- * Returns null for 'open' and 'locked' tiers (no script needed).
+ * Whether the given tier requires iptables capabilities (NET_ADMIN + NET_RAW).
+ */
+export function needsIptables(tier: SandboxNetworkTier, allowlist: string[]): boolean {
+  return tier === 'balanced' && allowlist.length > 0;
+}
+
+/**
+ * Produce an iptables script that restricts outbound to allowed domains only.
+ * Domains are validated against a strict regex to prevent shell injection.
+ * Returns null for 'open'/'locked' tiers or empty allowlist.
  */
 export function buildAllowlistScript(
   tier: SandboxNetworkTier,
   allowlist: string[],
 ): string | null {
   if (tier !== 'balanced' || allowlist.length === 0) return null;
+
+  const safeDomains = allowlist.filter(d => isValidDomain(d));
+  if (safeDomains.length === 0) return null;
 
   const lines: string[] = [
     '#!/bin/sh',
@@ -48,7 +58,7 @@ export function buildAllowlistScript(
     '',
   ];
 
-  for (const domain of allowlist) {
+  for (const domain of safeDomains) {
     lines.push(`# Allow ${domain}`);
     lines.push(`for ip in $(getent hosts ${domain} 2>/dev/null | awk '{print $1}'); do`);
     lines.push(`  iptables -A OUTPUT -d "$ip" -j ACCEPT`);
