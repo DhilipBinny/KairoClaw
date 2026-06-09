@@ -1,0 +1,58 @@
+# kairoclaw-sandbox:full
+# Debian bookworm-slim + Node.js 22 + Python 3.12 + common dev tools
+# Target size: ~800MB
+# Non-root user (uid 1000) for security
+
+FROM debian:bookworm-slim
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System packages: core utilities + build essentials for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    jq \
+    ca-certificates \
+    gnupg \
+    build-essential \
+    procps \
+    iptables \
+    dnsutils \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 LTS via NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Python 3.12 (already in bookworm repos as python3)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+# Create non-root user (uid 1000 to match container --user flag)
+RUN groupadd -g 1000 sandbox && useradd -m -u 1000 -g sandbox sandbox
+
+# Create workspace directory
+RUN mkdir -p /workspace /shared /persona && chown -R sandbox:sandbox /workspace
+
+# Set working directory
+WORKDIR /workspace
+
+# Default shell
+SHELL ["/bin/sh", "-c"]
+
+# Run as non-root
+USER sandbox
+
+# Keep container alive (ContainerManager uses docker exec to run commands)
+CMD ["sleep", "infinity"]

@@ -25,6 +25,7 @@ export { planModeTools } from './plan-mode.js';
 export { toolSearchTools, scoreTool } from './tool-search.js';
 export { memoryTools, setMemorySystem } from './memory.js';
 export { memoryWriteTools, appendProfileEntry, readPinned, writePinned, forgetById } from './memory-write.js';
+export { sandboxExecTools, setSandboxManager } from './sandbox-exec.js';
 
 // Combined registration array for convenience
 import type { ToolRegistration } from '@agw/tool-platform';
@@ -42,6 +43,7 @@ import { planModeTools } from './plan-mode.js';
 import { toolSearchTools } from './tool-search.js';
 import { memoryTools } from './memory.js';
 import { memoryWriteTools } from './memory-write.js';
+import { sandboxExecTools } from './sandbox-exec.js';
 
 export const commonTools: ToolRegistration[] = [
   ...fileTools,
@@ -58,4 +60,5 @@ export const commonTools: ToolRegistration[] = [
   ...toolSearchTools,
   ...memoryTools,
   ...memoryWriteTools,
+  ...sandboxExecTools,
 ];
