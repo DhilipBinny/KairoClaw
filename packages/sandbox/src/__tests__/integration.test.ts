@@ -424,3 +424,183 @@ describe('integration: security hardening', () => {
     expect(result.stdout + result.stderr).toMatch(/Killed|MemoryError|exit:137|exit:1/);
   });
 });
+
+// ═══════════════════════════════════════════════
+// File tools (read, write, list)
+// ═══════════════════════════════════════════════
+describe('integration: sandbox file tools', () => {
+  let cm: ContainerManager;
+
+  afterEach(async () => {
+    if (cm) await cm.destroyAll();
+  });
+
+  dockerIt('writeFile + readFile round-trip', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    // Create container first
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'echo init',
+    });
+
+    // Write a file
+    const writeResult = await cm.writeFile({
+      userId: 'file-user', sessionId: 'file-sess', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/test-roundtrip.txt',
+      content: 'hello from writeFile\nline two\nline three',
+    });
+    expect(writeResult.exitCode).toBe(0);
+
+    // Read it back
+    const readResult = await cm.readFile({
+      userId: 'file-user', sessionId: 'file-sess', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/test-roundtrip.txt',
+    });
+    expect(readResult.exitCode).toBe(0);
+    expect(readResult.stdout).toContain('hello from writeFile');
+    expect(readResult.stdout).toContain('line two');
+    expect(readResult.stdout).toContain('line three');
+  });
+
+  dockerIt('writeFile creates parent directories', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess2', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'echo init',
+    });
+
+    const result = await cm.writeFile({
+      userId: 'file-user', sessionId: 'file-sess2', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/deep/nested/dir/file.txt',
+      content: 'nested content',
+    });
+    expect(result.exitCode).toBe(0);
+
+    const read = await cm.readFile({
+      userId: 'file-user', sessionId: 'file-sess2', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/deep/nested/dir/file.txt',
+    });
+    expect(read.stdout).toContain('nested content');
+  });
+
+  dockerIt('writeFile handles special characters in content', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess3', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'echo init',
+    });
+
+    const content = "#!/bin/bash\necho \"hello $USER\"\necho 'single quotes'\necho `backticks`\nif [ -f /tmp/x ]; then\n  echo 'found'\nfi";
+    const result = await cm.writeFile({
+      userId: 'file-user', sessionId: 'file-sess3', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/script.sh',
+      content,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const read = await cm.readFile({
+      userId: 'file-user', sessionId: 'file-sess3', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/script.sh',
+    });
+    expect(read.stdout).toContain('#!/bin/bash');
+    expect(read.stdout).toContain("echo 'single quotes'");
+  });
+
+  dockerIt('readFile with offset and limit', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess4', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'seq 1 100 > /workspace/numbers.txt',
+    });
+
+    // Read lines 5-10 (offset=4, limit=6)
+    const result = await cm.readFile({
+      userId: 'file-user', sessionId: 'file-sess4', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/numbers.txt',
+      offset: 4,
+      limit: 6,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('100'); // total line count
+    expect(result.stdout).toContain('5');
+    expect(result.stdout).toContain('10');
+    expect(result.stdout).not.toContain('\n4\n');
+    expect(result.stdout).not.toContain('\n11\n');
+  });
+
+  dockerIt('readFile returns error for non-existent file', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess5', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'echo init',
+    });
+
+    const result = await cm.readFile({
+      userId: 'file-user', sessionId: 'file-sess5', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace/does-not-exist.txt',
+    });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  dockerIt('listFiles shows directory contents', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess6', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'touch /workspace/a.txt /workspace/b.txt /workspace/c.txt',
+    });
+
+    const result = await cm.listFiles({
+      userId: 'file-user', sessionId: 'file-sess6', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/workspace',
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('a.txt');
+    expect(result.stdout).toContain('b.txt');
+    expect(result.stdout).toContain('c.txt');
+  });
+
+  dockerIt('listFiles returns error for non-existent dir', async () => {
+    cm = new ContainerManager(makeConfig({
+      defaults: { ...getDefaults().defaults, network: 'open' },
+    }));
+    await cm.exec({
+      userId: 'file-user', sessionId: 'file-sess7', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      command: 'echo init',
+    });
+
+    const result = await cm.listFiles({
+      userId: 'file-user', sessionId: 'file-sess7', role: 'admin',
+      workspacePath: tmpDir, scopeKey: null, isAdmin: true,
+      path: '/nonexistent',
+    });
+    expect(result.exitCode).not.toBe(0);
+  });
+});
