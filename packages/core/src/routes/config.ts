@@ -71,6 +71,12 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.browse.enabled', 'tools.browse.remoteAccess',
       'providers.kairoPremium.enabled', 'providers.kairoPremium.mode', 'providers.kairoPremium.defaultModel',
       'agent.debug.recordPrompt',
+      'tools.sandbox.enabled', 'tools.sandbox.image', 'tools.sandbox.dockerSocket',
+      'tools.sandbox.defaults.network', 'tools.sandbox.defaults.workspace', 'tools.sandbox.defaults.escalation',
+      'tools.sandbox.defaults.cpu', 'tools.sandbox.defaults.memoryMb', 'tools.sandbox.defaults.timeoutSeconds',
+      'tools.sandbox.defaults.maxLifetimeMinutes', 'tools.sandbox.defaults.pidsLimit',
+      'tools.sandbox.networkAllowlist',
+      'tools.sandbox.roles', 'tools.sandbox.userOverrides',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });

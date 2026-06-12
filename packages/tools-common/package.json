@@ -22,7 +22,8 @@
     "@agw/types": "workspace:*",
     "@agw/tool-platform": "workspace:*",
     "nodemailer": "^7.0.3",
-    "@agw/memory-engine": "workspace:*"
+    "@agw/memory-engine": "workspace:*",
+    "@agw/sandbox": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

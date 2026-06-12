@@ -74,6 +74,7 @@ Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build`, `dev`, `
 | **Smart Memory** | Auto-extracted user profile + session context. Cross-channel, per-user isolated |
 | **Model Router** | Auto-selects fast/balanced/powerful model per message complexity. Save costs on simple messages |
 | **Smart Compaction** | Two-stage context management — session notes as free compaction summary, eliminates redundant LLM calls |
+| **Sandbox Execution** | Docker-based isolated code execution — Node.js, Python, git pre-installed. Per-session persistent containers with network tiers and workspace isolation |
 | **35+ Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader |
 | **Plugin System** | MCP servers, CLI wrappers, HTTP APIs, OpenAPI auto-discovery — extend without code |
 | **Cron Scheduling** | Cron, interval, one-shot tasks with multi-channel delivery |
@@ -91,8 +92,8 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 | Role | Access |
 |------|--------|
 | **Admin** | Full dashboard, all tools unrestricted, manage users |
-| **Power User** | All tools (sandboxed) — exec, file writes, cron with scoped access |
-| **User** | Safe tools only — read files, search web, chat. No exec, no file writes |
+| **Power User** | All tools — host exec, file writes, cron with scoped access |
+| **User** | Safe tools + sandbox — code runs in isolated Docker containers. No host exec |
 
 **One person, all channels** — link Telegram + WhatsApp to the same user. One memory, one scope.
 
@@ -131,7 +132,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 | **Encryption at rest** | AES-256-GCM envelope encryption for all API keys and secrets |
 | **Scope isolation** | File tools, exec, and memory enforce per-user boundaries |
 | **Tool RBAC** | DB-driven, admin-configurable, double-enforced (prompt + execution) |
-| **Exec sandboxing** | Admin = unrestricted, Power User = sandboxed, User = denied |
+| **Sandbox Execution** | Docker containers with CapDrop ALL, non-root, PID/memory limits. Users get sandbox only, admin gets host exec |
 | **Output redaction** | API keys, tokens, secrets auto-stripped from agent responses |
 | **Audit trail** | Tamper-evident hash chain on all tool calls and admin actions |
 
@@ -160,6 +161,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 | [Channels](docs/CHANNELS.md) | Telegram, WhatsApp, Web Chat — setup, features, constraints |
 | [Database](docs/DATABASE.md) | SQLite vs PostgreSQL, migration, Docker Compose |
 | [Memory](docs/MEMORY.md) | Auto-memory system, per-user scoping, consolidation |
+| [Sandbox](docs/SANDBOX.md) | Docker sandbox setup, configuration, security, troubleshooting |
 | [Product Features](docs/PRODUCT_FEATURES.md) | Complete feature inventory with metrics |
 
 ---

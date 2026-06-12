@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, downloadExport, importState, getToolList, getToolPermissions, saveToolPermissions } from '$lib/api';
-  import type { ToolMeta } from '$lib/api';
+  import { getConfig, getSystemInfo, updateConfig, saveFullConfig, getToolsConfig, saveEmailCredentials, testEmailConnection, downloadExport, importState, getToolList, getToolPermissions, saveToolPermissions, getSandboxStatus, stopSandboxContainer, stopAllSandboxContainers } from '$lib/api';
+  import type { ToolMeta, SandboxStatus } from '$lib/api';
   import { logout } from '$lib/stores/auth.svelte';
   import { goto } from '$app/navigation';
   import { getTheme, setTheme } from '$lib/stores/theme.svelte';
@@ -89,6 +89,28 @@
   let emailCredsMsg = $state('');
   let emailTesting = $state(false);
   let emailTestResult = $state<{ success: boolean; error?: string } | null>(null);
+
+  // Sandbox
+  let sandboxStatus: SandboxStatus | null = $state(null);
+  let sandboxLoading = $state(false);
+
+  async function loadSandboxStatus() {
+    sandboxLoading = true;
+    try {
+      sandboxStatus = await getSandboxStatus();
+    } catch { sandboxStatus = null; }
+    finally { sandboxLoading = false; }
+  }
+
+  async function handleStopContainer(userId: string, sessionId: string) {
+    await stopSandboxContainer(userId, sessionId);
+    await loadSandboxStatus();
+  }
+
+  async function handleStopAll() {
+    await stopAllSandboxContainers();
+    await loadSandboxStatus();
+  }
 
   // Per-field feedback: key = dot path, value = { msg, ok }
   let feedback: Record<string, { msg: string; ok: boolean }> = $state({});
@@ -281,7 +303,7 @@
     goto('/login');
   }
 
-  onMount(loadData);
+  onMount(() => { loadData(); loadSandboxStatus(); });
 </script>
 
 <svelte:head>
@@ -1068,6 +1090,211 @@
             <div class="field-info"></div>
             <div class="field-control">
               <span class="field-feedback" class:ok={importMsg.includes('complete')} class:err={!importMsg.includes('complete')}>{importMsg}</span>
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Sandbox -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--orange, #f97316)">
+          <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+          <path d="M12 6V2"></path>
+          <path d="M6 6V4"></path>
+          <path d="M18 6V4"></path>
+        </svg>
+        Sandbox Execution
+      </h2>
+      <div class="card settings-card">
+        <!-- Enable toggle -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label">Enable Sandbox</label>
+            <span class="field-hint">Docker-based isolated code execution. Requires Docker daemon + sandbox image.</span>
+          </div>
+          <div class="field-control">
+            <button class="toggle" class:active={getVal('tools.sandbox.enabled') === true} onclick={() => saveToggle('tools.sandbox.enabled', getVal('tools.sandbox.enabled') === true)}>
+              {getVal('tools.sandbox.enabled') ? 'Enabled' : 'Disabled'}
+            </button>
+            {#if feedback['tools.sandbox.enabled']?.msg}
+              <span class="field-feedback" class:ok={feedback['tools.sandbox.enabled'].ok} class:err={!feedback['tools.sandbox.enabled'].ok}>{feedback['tools.sandbox.enabled'].msg}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Status indicator -->
+        {#if sandboxStatus}
+          <div class="field-row">
+            <div class="field-info">
+              <label class="field-label">Status</label>
+            </div>
+            <div class="field-control">
+              <span style="color: {sandboxStatus.ready ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)'}; font-weight: 500;">
+                {sandboxStatus.ready ? 'Ready' : sandboxStatus.reason || 'Not ready'}
+              </span>
+            </div>
+          </div>
+        {/if}
+
+        <!-- Image -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-image">Docker Image</label>
+            <span class="field-hint">Sandbox container image name</span>
+          </div>
+          <div class="field-control">
+            <div class="input-action">
+              <input id="sandbox-image" class="input" type="text" value={getVal('tools.sandbox.image') ?? 'kairoclaw-sandbox:full'}
+                onblur={(e) => saveField('tools.sandbox.image', (e.target as HTMLInputElement).value)}
+                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+            </div>
+            {#if feedback['tools.sandbox.image']?.msg}
+              <span class="field-feedback" class:ok={feedback['tools.sandbox.image'].ok} class:err={!feedback['tools.sandbox.image'].ok}>{feedback['tools.sandbox.image'].msg}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Default Network Tier -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-network">Default Network</label>
+            <span class="field-hint">Open = unrestricted, Balanced = allowlisted domains, Locked = no network</span>
+          </div>
+          <div class="field-control">
+            <select id="sandbox-network" class="select-input" value={getVal('tools.sandbox.defaults.network') || 'balanced'}
+              onchange={(e) => saveField('tools.sandbox.defaults.network', (e.target as HTMLSelectElement).value)}>
+              <option value="open">Open</option>
+              <option value="balanced">Balanced</option>
+              <option value="locked">Locked</option>
+            </select>
+            {#if feedback['tools.sandbox.defaults.network']?.msg}
+              <span class="field-feedback" class:ok={feedback['tools.sandbox.defaults.network'].ok} class:err={!feedback['tools.sandbox.defaults.network'].ok}>{feedback['tools.sandbox.defaults.network'].msg}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Default Workspace Mode -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-workspace">Default Workspace</label>
+            <span class="field-hint">Read-write = changes persist to host, Read-only = can see but not modify, None = isolated scratch</span>
+          </div>
+          <div class="field-control">
+            <select id="sandbox-workspace" class="select-input" value={getVal('tools.sandbox.defaults.workspace') || 'read-write'}
+              onchange={(e) => saveField('tools.sandbox.defaults.workspace', (e.target as HTMLSelectElement).value)}>
+              <option value="read-write">Read-write</option>
+              <option value="read-only">Read-only</option>
+              <option value="none">None (isolated)</option>
+            </select>
+            {#if feedback['tools.sandbox.defaults.workspace']?.msg}
+              <span class="field-feedback" class:ok={feedback['tools.sandbox.defaults.workspace'].ok} class:err={!feedback['tools.sandbox.defaults.workspace'].ok}>{feedback['tools.sandbox.defaults.workspace'].msg}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Default Escalation -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-escalation">Escalation Policy</label>
+            <span class="field-hint">Auto = agent can upgrade freely, Confirm = asks user, Deny = fixed</span>
+          </div>
+          <div class="field-control">
+            <select id="sandbox-escalation" class="select-input" value={getVal('tools.sandbox.defaults.escalation') || 'confirm'}
+              onchange={(e) => saveField('tools.sandbox.defaults.escalation', (e.target as HTMLSelectElement).value)}>
+              <option value="auto">Auto-grant</option>
+              <option value="confirm">Confirm</option>
+              <option value="deny">Deny</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Resource Limits -->
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-cpu">CPU Cores</label>
+          </div>
+          <div class="field-control">
+            <input id="sandbox-cpu" class="input input-narrow" type="number" min="0.5" max="16" step="0.5"
+              value={getVal('tools.sandbox.defaults.cpu') ?? 1}
+              onblur={(e) => saveNumberField('tools.sandbox.defaults.cpu', e)}
+              onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-memory">Memory (MB)</label>
+          </div>
+          <div class="field-control">
+            <input id="sandbox-memory" class="input input-narrow" type="number" min="128" max="32768" step="128"
+              value={getVal('tools.sandbox.defaults.memoryMb') ?? 512}
+              onblur={(e) => saveNumberField('tools.sandbox.defaults.memoryMb', e)}
+              onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-timeout">Command Timeout (sec)</label>
+          </div>
+          <div class="field-control">
+            <input id="sandbox-timeout" class="input input-narrow" type="number" min="10" max="600"
+              value={getVal('tools.sandbox.defaults.timeoutSeconds') ?? 120}
+              onblur={(e) => saveNumberField('tools.sandbox.defaults.timeoutSeconds', e)}
+              onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            />
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="sandbox-lifetime">Max Lifetime (min)</label>
+          </div>
+          <div class="field-control">
+            <input id="sandbox-lifetime" class="input input-narrow" type="number" min="10" max="1440"
+              value={getVal('tools.sandbox.defaults.maxLifetimeMinutes') ?? 240}
+              onblur={(e) => saveNumberField('tools.sandbox.defaults.maxLifetimeMinutes', e)}
+              onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            />
+          </div>
+        </div>
+
+        <!-- Active Containers -->
+        {#if sandboxStatus?.containers && sandboxStatus.containers.length > 0}
+          <div class="field-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+              <label class="field-label" style="margin: 0;">Active Containers ({sandboxStatus.containers.length})</label>
+              <button class="btn-sm btn-danger" onclick={() => handleStopAll()} style="margin-left: auto;">Stop All</button>
+            </div>
+            <div style="width: 100%; overflow-x: auto;">
+              <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+                <thead>
+                  <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                    <th style="padding: 4px 8px;">Container</th>
+                    <th style="padding: 4px 8px;">User</th>
+                    <th style="padding: 4px 8px;">Network</th>
+                    <th style="padding: 4px 8px;">Mount</th>
+                    <th style="padding: 4px 8px;">Uptime</th>
+                    <th style="padding: 4px 8px;"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each sandboxStatus.containers as c}
+                    <tr style="border-bottom: 1px solid var(--border-light, var(--border));">
+                      <td style="padding: 4px 8px; font-family: monospace;">{c.containerId}</td>
+                      <td style="padding: 4px 8px;">{c.userId.slice(0, 8)}...</td>
+                      <td style="padding: 4px 8px;">{c.network}</td>
+                      <td style="padding: 4px 8px;">{c.workspace}</td>
+                      <td style="padding: 4px 8px;">{Math.round(c.uptimeMs / 60000)}m</td>
+                      <td style="padding: 4px 8px;">
+                        <button class="btn-sm btn-danger" onclick={() => handleStopContainer(c.userId, c.sessionId)}>Stop</button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
           </div>
         {/if}

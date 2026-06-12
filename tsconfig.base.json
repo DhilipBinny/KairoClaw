@@ -24,7 +24,8 @@
       "@agw/database": ["./packages/database/src"],
       "@agw/tools-common": ["./packages/tools-common/src"],
       "@agw/plugins": ["./packages/plugins/src"],
-      "@agw/schemas": ["./packages/schemas/src"]
+      "@agw/schemas": ["./packages/schemas/src"],
+      "@agw/sandbox": ["./packages/sandbox/src"]
     }
   }
 }

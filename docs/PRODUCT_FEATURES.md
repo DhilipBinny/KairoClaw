@@ -120,7 +120,7 @@ Built from workspace persona files, automatically loaded:
 
 ## 3. Tool System
 
-### Built-in Tools (19)
+### Built-in Tools (23)
 
 | Tool | Description | Security |
 |------|-------------|----------|
@@ -144,6 +144,27 @@ Built from workspace persona files, automatically loaded:
 | `browse` | Full browser automation (19 actions) | SSRF + ad blocking + per-user isolation |
 | `spawn_agent` | Launch a sub-agent for parallel tasks | Inherits caller permissions |
 | `kill_agent` | Terminate a running sub-agent | Must own the agent |
+| `sandbox_exec` | Execute commands in Docker container | CapDrop ALL, non-root, PID/memory limits |
+| `sandbox_read_file` | Read files from sandbox container | Path validation |
+| `sandbox_write_file` | Write files into sandbox container | Base64 encoding, 512KB limit |
+| `sandbox_list_files` | List directory in sandbox container | Path validation |
+
+### Sandbox Execution
+
+Docker-based isolated code execution. Regular users run code in sandboxed containers instead of on the host.
+
+- **Persistent per-session containers** — installed packages and files survive across tool calls
+- **Pre-installed**: Debian bookworm-slim, Node.js 22, Python 3.12, npm, pnpm, pip, git, curl, jq
+- **Network tiers**: Open (unrestricted), Locked (no network) — per role
+- **Workspace mounts**: Read-write, Read-only, None — per role
+- **Container hardening**: CapDrop ALL, no-new-privileges, non-root (uid 1000), PID/memory limits, OOM score adjustment, ulimits, Init for zombie reaping
+- **Idle cleanup**: containers destroyed after 15 minutes of inactivity
+- **Per-user limits**: max 5 containers per user, 30 global
+- **Admin UI**: Settings page with enable/disable, image, network, workspace, resource limits, active container list
+- **File tools**: sandbox_read_file (with offset/limit), sandbox_write_file (base64 safe), sandbox_list_files
+- **Permission enforcement**: regular users get sandbox_exec only, exec denied. Admin gets both.
+
+See [docs/SANDBOX.md](SANDBOX.md) for setup and configuration.
 
 ### MCP (Model Context Protocol)
 - Install tool servers from curated catalog or custom config
@@ -406,7 +427,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 - API key authentication (Bearer token)
 - Role-based access: **admin**, **user** (+ optional `elevated` toggle per user)
   - admin: full access — all tools, config, user management
-  - user: safe tools only (no exec, cron, write_file, delete_file)
+  - user: safe tools + sandbox execution (no host exec, cron, write_file — sandbox_exec available)
   - user + elevated: all tools (admin grants per user)
 - Session ownership enforcement (non-admins see only their own sessions)
 - Deactivated users rejected with 403 on every request

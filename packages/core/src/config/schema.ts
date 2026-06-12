@@ -126,6 +126,41 @@ const browseToolSchema = z.object({
   remoteAccess: z.enum(['admin', 'all']).or(z.literal(false)).default('admin'),
 });
 
+const sandboxCapabilitiesSchema = z.object({
+  network: z.enum(['open', 'balanced', 'locked']).optional(),
+  workspace: z.enum(['read-write', 'read-only', 'none']).optional(),
+  escalation: z.enum(['auto', 'confirm', 'deny']).optional(),
+  cpu: z.number().min(0.5).max(16).optional(),
+  memoryMb: z.number().int().min(128).max(32768).optional(),
+  timeoutSeconds: z.number().int().min(10).max(600).optional(),
+});
+
+const safeDomainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
+
+const sandboxToolSchema = z.object({
+  enabled: z.boolean().default(false),
+  image: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*$/).default('kairoclaw-sandbox:full'),
+  dockerSocket: z.string().default('/var/run/docker.sock'),
+  defaults: withObjectDefault(z.object({
+    network: z.enum(['open', 'balanced', 'locked']).default('balanced'),
+    workspace: z.enum(['read-write', 'read-only', 'none']).default('read-write'),
+    escalation: z.enum(['auto', 'confirm', 'deny']).default('confirm'),
+    cpu: z.number().min(0.5).max(16).default(1),
+    memoryMb: z.number().int().min(128).max(32768).default(512),
+    timeoutSeconds: z.number().int().min(10).max(600).default(120),
+    maxLifetimeMinutes: z.number().int().min(10).max(1440).default(240),
+    pidsLimit: z.number().int().min(32).max(4096).default(256),
+  })),
+  networkAllowlist: z.array(z.string().regex(safeDomainRegex)).default([
+    'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org',
+    'deb.debian.org', 'security.debian.org',
+    'github.com', 'gitlab.com',
+    'api.openai.com', 'api.anthropic.com',
+  ]),
+  roles: z.record(z.string(), sandboxCapabilitiesSchema).default({}),
+  userOverrides: z.record(z.string(), sandboxCapabilitiesSchema).default({}),
+});
+
 const toolsSchema = z.object({
   exec: withObjectDefault(execToolSchema),
   webSearch: withObjectDefault(webSearchToolSchema),
@@ -133,6 +168,7 @@ const toolsSchema = z.object({
   email: withObjectDefault(emailToolSchema),
   transcription: withObjectDefault(transcriptionToolSchema),
   browse: withObjectDefault(browseToolSchema),
+  sandbox: withObjectDefault(sandboxToolSchema),
 });
 
 const telegramChannelSchema = z.object({
@@ -414,6 +450,29 @@ export const configDefaults: GatewayConfig = {
     browse: {
       enabled: true,
       remoteAccess: 'admin',
+    },
+    sandbox: {
+      enabled: false,
+      image: 'kairoclaw-sandbox:full',
+      dockerSocket: '/var/run/docker.sock',
+      defaults: {
+        network: 'balanced',
+        workspace: 'read-write',
+        escalation: 'confirm',
+        cpu: 1,
+        memoryMb: 512,
+        timeoutSeconds: 120,
+        maxLifetimeMinutes: 240,
+        pidsLimit: 256,
+      },
+      networkAllowlist: [
+        'registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org',
+        'deb.debian.org', 'security.debian.org',
+        'github.com', 'gitlab.com',
+        'api.openai.com', 'api.anthropic.com',
+      ],
+      roles: {},
+      userOverrides: {},
     },
   },
   agent: {
