@@ -390,13 +390,25 @@ IMPORTANT delivery rules:
           }
 
           const user = (ctx.user as { id?: string; role?: string } | undefined);
+          // SECURITY (#179): decide the stored owner carefully.
+          // - The genuine 'system' principal (a trusted scheduler/heartbeat
+          //   context) maps to null → a real ownerless system cron, dispatched
+          //   on the 'cron' channel and run as system admin.
+          // - Any OTHER principal — including the UNTRUSTED 'anonymous'
+          //   principal (an unlinked messaging-channel sender, role 'user') —
+          //   is stored AS-IS. It must NOT collapse to null: an ownerless cron
+          //   runs as system admin, so collapsing 'anonymous' would let an
+          //   unauthenticated sender schedule an elevated prompt. Stored as
+          //   'anonymous' (not a row in `users`), the executor's owner-active
+          //   guard finds no active account and self-disables the job.
+          const ownerId = user?.id && user.id !== 'system' ? user.id : null;
           const job = cronScheduler.add({
             name: args.name,
             schedule: args.schedule,
             prompt: args.prompt,
             delivery: delivery || 'none',
             enabled: args.enabled !== false,
-            userId: user?.id || null,
+            userId: ownerId,
           });
           return {
             success: true,

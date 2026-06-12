@@ -17,6 +17,7 @@ import { seedDatabase } from './db/seed.js';
 import { migrateV1Data, migrateDbMcpToConfig } from './db/migrate-v1.js';
 import { createServer } from './server.js';
 import { authPlugin, requireRole } from './auth/middleware.js';
+import { resolvePrincipal } from './auth/principal.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
 import { builtinTools } from './tools/builtin/index.js';
@@ -464,14 +465,38 @@ async function main(): Promise<void> {
       !deferEnvDisabled &&
       ((config.agent as unknown as { deferToolLoading?: boolean })?.deferToolLoading !== false);
 
-    const effectiveUserRole = resolvedUser?.role
-      || (['cron', 'internal', 'heartbeat'].includes(inbound.channel) ? 'admin' : 'user');
-    const effectiveElevated = !!resolvedUser?.elevated;
+    // Resolve the security principal for this turn (role + elevation). This is
+    // the single source of truth for both tool-loading and tool-execution.
+    //
+    // SECURITY (#179): a user-owned cron is dispatched on the 'internal'
+    // channel carrying its owner's id. If that owner is no longer an active
+    // account, resolvePrincipal returns null and we REFUSE the turn — never
+    // falling through to a system-admin principal, which would let a
+    // deactivated user's stored prompt run with full elevated privileges.
+    const claimedUserId = inbound.userId ? String(inbound.userId) : undefined;
+    const principal = resolvePrincipal(inbound.channel, claimedUserId, resolvedUser);
+    if (!principal) {
+      // Record the denied privileged turn in the tamper-evident audit trail —
+      // this refusal is exactly the event a security audit needs to see.
+      try {
+        await auditService.log({
+          tenantId,
+          userId: claimedUserId,
+          action: 'turn.refused',
+          resource: chatIdStr,
+          details: { channel: inbound.channel, reason: 'claimed user is not an active account' },
+        });
+      } catch { /* audit failure must not mask the refusal */ }
+      throw new Error(
+        `Refusing turn on channel "${inbound.channel}": claimed user "${claimedUserId}" is not an active account`,
+      );
+    }
+
     const toolOpts = {
-      userRole: effectiveUserRole,
+      userRole: principal.role,
       db,
       tenantId,
-      elevated: effectiveElevated,
+      elevated: principal.elevated,
     };
 
     const initialTools = deferToolLoading
@@ -488,15 +513,13 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
-      // User context for tool permissions + scope isolation:
+      // User context for tool permissions + scope isolation. Resolved above by
+      // resolvePrincipal (#179):
       // - Resolved user → their actual role from DB
-      // - Cron/internal/system → admin (needs all tools)
-      // - Unlinked real channel sender → restricted user (safe default)
-      user: resolvedUser
-        ? { id: resolvedUser.id, role: resolvedUser.role, elevated: !!resolvedUser.elevated }
-        : (['cron', 'internal', 'heartbeat'].includes(inbound.channel)
-          ? { id: 'system', role: 'admin', elevated: true }
-          : { id: 'anonymous', role: 'user', elevated: false }),
+      // - System channel with no specific user → system admin
+      // - Unlinked real channel sender → restricted anonymous user
+      // - System channel with an unresolved specific owner → refused above
+      user: principal,
       scopeKey,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       isProviderAvailable: (prefix) => providerRegistry.hasProviderSync(prefix),
@@ -666,6 +689,27 @@ async function main(): Promise<void> {
     tenantId,
     logger: (server.log as unknown as Logger).child({ category: 'cron' }),
     executor: async (job) => {
+      // SECURITY (#179): a user-owned cron must run as its owner. If a job
+      // carries an owner id that does not resolve to an active account —
+      // deactivated/deleted, or a forged 'system'/other id — DISABLE the job
+      // and skip. Otherwise createRunner would refuse it turn-after-turn (it
+      // never escalates a user-owned 'internal' turn to system admin).
+      // Genuine system crons carry no owner (job.userId is null) and are
+      // exempt; the `!owner` branch never fires for them.
+      if (job.userId) {
+        const owner = await db.get<{ id: string }>(
+          'SELECT id FROM users WHERE id = ? AND active = 1',
+          [job.userId],
+        );
+        if (!owner) {
+          scheduler.update(job.id, { enabled: false });
+          server.log.warn(
+            { jobId: job.id, userId: job.userId },
+            'Cron job owner is not an active user — job disabled',
+          );
+          return { text: undefined };
+        }
+      }
       // Use job owner's userId if set — cron runs with their permissions
       const cronUserId = job.userId || 'system';
       const inbound: InboundMessage = {

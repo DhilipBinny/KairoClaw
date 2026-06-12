@@ -617,8 +617,12 @@ export class CronScheduler {
   update(id: string, updates: Partial<CronJob>): CronJob | null {
     const job = this.jobs.get(id);
     if (!job) return null;
-    // Only allow updating safe fields -- reject internal/tracking fields
-    const safeFields = new Set(['schedule', 'prompt', 'channel', 'chatId', 'enabled', 'timezone', 'name', 'delivery', 'userId']);
+    // Only allow updating safe fields -- reject internal/tracking fields.
+    // SECURITY (#179): 'userId' (the job OWNER) is intentionally NOT updatable.
+    // Allowing it let any caller of the cron-update route reassign ownership —
+    // to 'system' (→ elevated system admin) or to another user (→ run-as-victim)
+    // — on the next scheduled tick. Ownership is fixed at creation time.
+    const safeFields = new Set(['schedule', 'prompt', 'channel', 'chatId', 'enabled', 'timezone', 'name', 'delivery']);
     const safeUpdates: Partial<CronJob> = {};
     for (const key of Object.keys(updates) as Array<keyof CronJob>) {
       if (safeFields.has(key)) {
