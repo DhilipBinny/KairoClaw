@@ -28,6 +28,42 @@ const log = createModuleLogger('channel.web');
 // ─── Connected client tracking ──────────────────────────────
 
 const clients = new Map<WebSocket, { sessionKey: string }>();
+
+// ─── Per-user session scoping (#178) ────────────────────────
+// A web session id is namespaced by the connected client's identity so two
+// users can never share the same conversation/context. `clientId` is the
+// authenticated user's UUID (API-key auth) or a unique per-connection id
+// (gateway-token / unauthenticated mode) — neither contains a colon, and
+// `sessionKey` is validated to contain no colon, so the three parts are
+// unambiguous.
+
+/** Build the user-scoped chat_id for a web session. */
+export function webChatId(clientId: string, sessionKey: string): string {
+  return `web:${clientId}:${sessionKey}`;
+}
+
+/** A session key must be a simple token (no colons — it is a chat_id segment). */
+export function isValidSessionKey(key: string): boolean {
+  return /^[A-Za-z0-9_-]{1,200}$/.test(key);
+}
+
+/**
+ * Whether `clientId`/`clientRole` may access a stored web session.
+ * - admin: any session.
+ * - user-owned session (session.user_id set): only its owner.
+ * - null-owner session (anonymous / gateway-token): only if its chat_id is in
+ *   this client's namespace. This closes the leak where null-owner sessions
+ *   were treated as world-readable.
+ */
+export function ownsWebSession(
+  session: { user_id?: string | null; chat_id?: string | null },
+  clientId: string,
+  clientRole: string,
+): boolean {
+  if (clientRole === 'admin') return true;
+  if (session.user_id) return session.user_id === clientId;
+  return !!session.chat_id && session.chat_id.startsWith(`web:${clientId}:`);
+}
 const MAX_WS_CONNECTIONS = 50;
 
 /**
@@ -112,7 +148,10 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
     if (!gatewayToken) {
       log.warn({ category: 'auth' }, 'No gateway token configured — WebChat is unauthenticated');
     }
-    let clientId = `web-${Date.now()}`;
+    // Unique per-connection id (collision-proof) used to namespace sessions in
+    // gateway-token / unauthenticated mode. Replaced by the user UUID when the
+    // client authenticates with a personal API key (#178).
+    let clientId = `web-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     let clientRole: 'admin' | 'user' = 'user'; // resolved during auth
     let authAttempts = 0;
     let lastActivity = Date.now();
@@ -241,15 +280,21 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             chatTimestamps.push(now);
 
             const sessionKey = (msg.sessionKey as string) || 'main';
-            if (typeof sessionKey !== 'string' || sessionKey.length > 200) {
+            if (typeof sessionKey !== 'string' || !isValidSessionKey(sessionKey)) {
               safeSend({ type: 'error', message: 'Invalid session key' });
               return;
             }
 
+            // The session is namespaced by the connected client's identity so
+            // two users never share a conversation (#178). This scoped key also
+            // drives broadcast routing so typing/stream events stay within the
+            // owning client's connections.
+            const scopedKey = `${clientId}:${sessionKey}`;
+
             // Bind this connection to the first sessionKey it uses
             if (!boundSessionKey) {
               boundSessionKey = sessionKey;
-              clients.set(socket, { sessionKey });
+              clients.set(socket, { sessionKey: scopedKey });
             } else if (boundSessionKey !== sessionKey) {
               safeSend({ type: 'error', message: 'Session key mismatch — reconnect to switch sessions' });
               return;
@@ -310,7 +355,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const inbound: InboundMessage = {
               text: fullText,
               channel: 'web',
-              chatId: `web:${sessionKey}`,
+              chatId: webChatId(clientId, sessionKey),
               chatType: 'private',
               userId: clientId,
               senderName: 'User',
@@ -320,8 +365,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const runId = crypto.randomUUID().slice(0, 8);
             safeSend({ type: 'chat.ack', runId, requestId });
 
-            // Broadcast typing to clients on the same session
-            broadcastToWeb({ type: 'chat.typing', sessionKey, requestId }, sessionKey);
+            // Broadcast typing only to THIS client's connections on the
+            // scoped session — never to another user sharing a sessionKey name.
+            broadcastToWeb({ type: 'chat.typing', sessionKey, requestId }, scopedKey);
 
             try {
               const showThinking = config.agent?.thinking?.showThinking?.web ?? true;
@@ -399,22 +445,21 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'chat.history': {
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
-            // Look up session by ID first, then by chatId pattern (web sessions only)
+            // Look up session by ID first, then by the user-scoped chatId.
             const webSessions = (await sessionRepo.listByTenant(tenantId, 500))
               .filter((s) => s.channel === 'web');
             let session = sessionId
               ? webSessions.find((s) => s.id === sessionId)
-              : webSessions.find((s) => s.chat_id === `web:${sessionKey}`);
-            // Also try matching by session ID as sessionKey
+              : webSessions.find((s) => s.chat_id === webChatId(clientId, sessionKey));
+            // Also try matching by session ID passed as sessionKey
             if (!session) {
               session = webSessions.find((s) => s.id === sessionKey);
             }
-            if (!session) {
-              safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
-              break;
-            }
-            // Ownership check: non-admin users can only access their own sessions
-            if (clientRole !== 'admin' && session.user_id && session.user_id !== clientId) {
+            // Ownership check: only return a session this client actually owns.
+            // Applied uniformly so a missing session and a forbidden session are
+            // indistinguishable (no existence oracle), and null-owner sessions
+            // are scoped by chatId namespace rather than treated as public.
+            if (!session || !ownsWebSession(session, clientId, clientRole)) {
               safeSend({ type: 'chat.history.result', sessionKey, messages: [], requestId });
               break;
             }
@@ -436,7 +481,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             // Non-admin users only see their own sessions
             const webSessions = sessions
               .filter((s) => s.turns > 0 && s.channel === 'web')
-              .filter((s) => clientRole === 'admin' || !s.user_id || s.user_id === clientId);
+              .filter((s) => ownsWebSession(s, clientId, clientRole));
 
             // Batch-fetch first user message for titles
             const sIds = webSessions.map(s => s.id);

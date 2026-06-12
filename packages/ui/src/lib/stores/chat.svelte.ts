@@ -282,7 +282,8 @@ export async function loadHistory(sessionId?: string): Promise<void> {
       const { getSessions } = await import('$lib/stores/sessions.svelte');
       const session = getSessions().find((s) => s.id === sessionId);
       if (session) {
-        _currentSessionKey = session.chatId ? session.chatId.replace(/^web:/, '') : `session-${sessionId}`;
+        const { sessionKeyFromChatId } = await import('$lib/session-key');
+        _currentSessionKey = session.chatId ? sessionKeyFromChatId(session.chatId) : `session-${sessionId}`;
       } else {
         _currentSessionKey = `session-${sessionId}`;
       }
