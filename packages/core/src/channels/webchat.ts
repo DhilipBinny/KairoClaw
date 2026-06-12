@@ -169,6 +169,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
     let authAttempts = 0;
     let lastActivity = Date.now();
     let boundSessionKey: string | null = null; // set on first chat.send, immutable after
+    // In-flight agent runs for THIS connection, keyed by runId, so a chat.stop
+    // (or disconnect) can cancel them (#181).
+    const activeRuns = new Map<string, AbortController>();
 
     // Per-connection chat rate limit (30 messages/minute)
     const CHAT_RATE_LIMIT = 30;
@@ -379,6 +382,8 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             };
 
             const runId = crypto.randomUUID().slice(0, 8);
+            const abort = new AbortController();
+            activeRuns.set(runId, abort);
             safeSend({ type: 'chat.ack', runId, requestId });
 
             // Broadcast typing only to THIS client's connections on the
@@ -391,6 +396,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
               // a sessionKey name (e.g. 'main') must not queue behind each other.
               const result = await queue.enqueue(scopedKey, () =>
                 runner(inbound, {
+                  signal: abort.signal,
                   onDelta: (delta: string) => {
                     safeSend({
                       type: 'chat.delta',
@@ -440,6 +446,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                 sessionKey,
                 text: result.text || '',
                 usage: result.usage,
+                ...(result.aborted ? { aborted: true } : {}),
                 ...(result.media && result.media.length > 0 ? { media: result.media.map((a: any) => ({ type: a.type, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption })) } : {}),
                 ...(shouldShowModelIndicator(config.agent?.showModelIndicator?.web, result.userRole) && result.model
                   ? { modelShortName: getModelShortName(result.model) }
@@ -455,7 +462,24 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
                 message: errMsg,
                 requestId,
               });
+            } finally {
+              activeRuns.delete(runId);
             }
+            break;
+          }
+
+          // ── Stop an in-flight run (#181) ─────
+          case 'chat.stop': {
+            const stopId = typeof msg.runId === 'string' ? msg.runId : undefined;
+            let stopped = 0;
+            if (stopId) {
+              const ac = activeRuns.get(stopId);
+              if (ac) { ac.abort(); stopped = 1; }
+            } else {
+              // No runId → stop everything in flight on this connection.
+              for (const ac of activeRuns.values()) { ac.abort(); stopped++; }
+            }
+            safeSend({ type: 'chat.stopped', runId: stopId, stopped, requestId });
             break;
           }
 
@@ -576,6 +600,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
     socket.on('close', () => {
       clearInterval(keepalive);
       clients.delete(socket);
+      // Cancel any in-flight runs so a disconnect doesn't keep burning tokens (#181).
+      for (const ac of activeRuns.values()) ac.abort();
+      activeRuns.clear();
       log.debug({ clientId }, 'WebChat client disconnected');
     });
 

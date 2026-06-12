@@ -102,6 +102,15 @@ export class SubAgentRegistry {
     return true;
   }
 
+  /** Kill every running sub-agent (e.g. when the parent turn is cancelled). */
+  abortAll(): number {
+    let killed = 0;
+    for (const childId of this.children.keys()) {
+      if (this.kill(childId)) killed++;
+    }
+    return killed;
+  }
+
   /** Check if there are any running children. */
   hasPending(): boolean {
     for (const entry of this.children.values()) {
@@ -121,12 +130,20 @@ export class SubAgentRegistry {
     return this.children;
   }
 
-  /** Wait for ALL promises (including killed) to prevent floating promises. */
+  /**
+   * Wait for ALL child promises (including killed ones) to settle, to prevent
+   * floating promises outliving the turn. We await on promise settlement, NOT
+   * on `completedAt`: kill() sets completedAt synchronously while the child's
+   * run promise is still unwinding (e.g. aborting its in-flight LLM call), so
+   * filtering by completedAt would skip exactly the just-killed children we
+   * most need to await (#181). The promises never reject (errors are caught
+   * internally), so allSettled is belt-and-suspenders.
+   */
   async drainAll(): Promise<void> {
-    const unresolved = [...this.children.values()].filter(e => !e.completedAt);
-    if (unresolved.length === 0) return;
-    log.info({ count: unresolved.length }, 'Draining all sub-agent promises');
-    await Promise.all(unresolved.map(e => e.promise));
+    const all = [...this.children.values()];
+    if (all.length === 0) return;
+    log.info({ count: all.length }, 'Draining all sub-agent promises');
+    await Promise.allSettled(all.map(e => e.promise));
   }
 
   /** Get all entries (for result injection). */

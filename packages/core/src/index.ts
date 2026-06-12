@@ -548,6 +548,9 @@ async function main(): Promise<void> {
       // - System channel with an unresolved specific owner → refused above
       user: principal,
       scopeKey,
+      // Cancellation: a channel (e.g. webchat chat.stop) passes an AbortSignal
+      // via callbacks; thread it so kill/stop actually halts the loop (#181).
+      signal: callbacks?.signal,
       callLLM: (args) => providerRegistry.callWithFailover(args),
       isProviderAvailable: (prefix) => providerRegistry.hasProviderSync(prefix),
       tools: initialTools,

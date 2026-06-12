@@ -9,6 +9,7 @@
     getThinkingLabel,
     clearError,
     sendMessage,
+    stopGeneration,
     removeMessage,
     initChatListeners,
     destroyChatListeners,
@@ -298,17 +299,30 @@
           rows="1"
           disabled={isStreaming}
         ></textarea>
-        <button
-          class="chat-send-btn"
-          onclick={handleSend}
-          disabled={(!inputText.trim() && pendingFiles.filter(f => f.path).length === 0) || isStreaming}
-          aria-label="Send message"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
+        {#if isStreaming}
+          <button
+            class="chat-send-btn chat-stop-btn"
+            onclick={stopGeneration}
+            aria-label="Stop generating"
+            title="Stop generating"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+          </button>
+        {:else}
+          <button
+            class="chat-send-btn"
+            onclick={handleSend}
+            disabled={(!inputText.trim() && pendingFiles.filter(f => f.path).length === 0)}
+            aria-label="Send message"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -624,6 +638,15 @@
   }
   .chat-send-btn:active:not(:disabled) {
     transform: scale(0.95);
+  }
+  .chat-stop-btn {
+    background: var(--danger, #ef4444);
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+  }
+  .chat-stop-btn:hover {
+    background: var(--danger-hover, #dc2626);
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
+    transform: scale(1.05);
   }
   .chat-send-btn:disabled {
     opacity: 0.3;

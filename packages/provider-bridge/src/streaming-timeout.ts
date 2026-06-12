@@ -36,7 +36,15 @@ export function createStreamingTimeout(opts: StreamingTimeoutOptions = {}): Stre
   const abortController = new AbortController();
 
   if (opts.signal) {
-    opts.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    // If the caller's signal already fired, abort immediately — addEventListener
+    // never fires for an already-aborted signal, which would otherwise let a
+    // cancelled request (or a failover retry carrying the same signal) run to
+    // completion (#181).
+    if (opts.signal.aborted) {
+      abortController.abort();
+    } else {
+      opts.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+    }
   }
 
   let timerId: ReturnType<typeof setTimeout> | null = null;

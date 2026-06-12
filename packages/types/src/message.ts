@@ -143,12 +143,20 @@ export interface AgentCallbacks {
   onToolEnd?: (toolName: string, resultPreview: string) => void;
   /** Called when a tool produces a media attachment. */
   onMedia?: (item: MediaAttachment) => void;
+  /**
+   * Cancellation signal. When it aborts, the agent loop stops at the next
+   * round/tool boundary and the in-flight LLM request is cancelled, returning
+   * whatever was produced so far (with `aborted: true`).
+   */
+  signal?: AbortSignal;
 }
 
 /**
  * The result returned by `runAgent()`.
  */
 export interface AgentResult {
+  /** `true` if the turn was cancelled via an abort signal. */
+  aborted?: boolean;
   /** Final assistant text. `null` if the agent chose NO_REPLY. */
   text: string | null;
   /** Accumulated thinking text from the final LLM round, if extended thinking was enabled. */

@@ -108,7 +108,7 @@ export const subagentTools: ToolRegistration[] = [
       // Shared child-run body — used by both in-turn and background paths.
       // Background-mode children receive an extra `taskId` so their stream
       // deltas can be piped into the registry's live partialOutput buffer.
-      const runChild = async (_signal: AbortSignal, bgTaskId?: string) => {
+      const runChild = async (signal: AbortSignal, bgTaskId?: string) => {
         // Lazy import to avoid circular dependency
         const { runAgent } = await import('../../agent/loop.js');
 
@@ -164,6 +164,7 @@ export const subagentTools: ToolRegistration[] = [
             subagentDepth: 1,
             scopeKey: (ctx.scopeKey as string | null) ?? null,
             ephemeral: true, // no DB persistence — in-memory only
+            signal, // honour kill_agent / task_stop (#181)
           },
         );
       };
@@ -335,7 +336,8 @@ export const subagentTools: ToolRegistration[] = [
       // hit the timeout. The registry caps wait at 5 min via the clamp
       // above, well under the agent loop's per-tool budget.
       if (block && t.status === 'running') {
-        const updated = await bgReg.waitFor(t.id, timeoutMs);
+        // Bail out of the blocking poll immediately if the turn is cancelled (#181).
+        const updated = await bgReg.waitFor(t.id, timeoutMs, (ctx.signal as AbortSignal | undefined));
         if (updated) t = updated;
       }
 

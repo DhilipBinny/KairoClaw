@@ -146,6 +146,9 @@ export class ProviderRegistry {
   async callWithFailover(chatArgs: ChatArgs): Promise<ProviderResponse> {
     await this.ensureInitialized();
 
+    // Don't start (or fail over) a request that's already been cancelled (#181).
+    if (chatArgs.signal?.aborted) throw new Error('Request aborted');
+
     const { providerName, modelId } = this.parseModelRef(chatArgs.model);
     const primary = this.providers[providerName];
     if (!primary) {
@@ -163,6 +166,10 @@ export class ProviderRegistry {
         this.log.info({ provider: providerName }, 'Context too long, needs compaction — skipping failover');
         throw primaryErr;
       }
+
+      // If the caller cancelled, surface that immediately rather than burning a
+      // full fallback generation that ignores the (already-fired) signal (#181).
+      if (chatArgs.signal?.aborted) throw primaryErr;
 
       const primaryError = primaryErr as Error;
       this.log.warn({ provider: providerName, err: primaryError.message }, 'Primary provider failed');

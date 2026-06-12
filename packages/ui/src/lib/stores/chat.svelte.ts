@@ -67,6 +67,7 @@ let _currentSessionKey: string = $state(getSavedSessionKey());
 let _error: string | null = $state(null);
 let _thinkingLabel: string | null = $state(null);
 let _currentSessionId: string | null = $state(null);
+let _currentRunId: string | null = $state(null);
 let _msgCounter = 0;
 
 export function getMessages(): ChatMessage[] { return _messages; }
@@ -98,6 +99,7 @@ export function initChatListeners(): void {
   _unsubscribers.push(
     ws.on('chat.ack', (_msg) => {
       _isStreaming = true;
+      _currentRunId = (_msg.runId as string) ?? null;
       _error = null;
       _thinkingLabel = 'Thinking...';
     })
@@ -196,6 +198,7 @@ export function initChatListeners(): void {
   _unsubscribers.push(
     ws.on('chat.done', (msg) => {
       _isStreaming = false;
+      _currentRunId = null;
       _thinkingLabel = null;
       const text = msg.text as string;
       const media = Array.isArray(msg.media) ? msg.media as MediaAttachment[] : undefined;
@@ -226,6 +229,7 @@ export function initChatListeners(): void {
   _unsubscribers.push(
     ws.on('chat.error', (msg) => {
       _isStreaming = false;
+      _currentRunId = null;
       _thinkingLabel = null;
       _error = msg.message as string;
     })
@@ -248,6 +252,14 @@ export function initChatListeners(): void {
 export function destroyChatListeners(): void {
   _unsubscribers.forEach((u) => u());
   _unsubscribers = [];
+}
+
+/** Cancel the in-flight agent run (#181). The server stops at the next
+ * round/tool boundary and aborts the LLM request, then sends chat.done. */
+export function stopGeneration(): void {
+  if (!_isStreaming) return;
+  ws.send({ type: 'chat.stop', ...(_currentRunId ? { runId: _currentRunId } : {}) });
+  _thinkingLabel = 'Stopping...';
 }
 
 export function sendMessage(text: string, files?: Array<{ path: string; name: string }>): void {
