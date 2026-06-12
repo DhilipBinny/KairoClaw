@@ -97,7 +97,6 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
       OomScoreAdj: 500,
       Ulimits: [
         { Name: 'nofile', Soft: 1024, Hard: 4096 },
-        { Name: 'nproc', Soft: 256, Hard: 512 },
         { Name: 'core', Soft: 0, Hard: 0 },
       ],
     },
