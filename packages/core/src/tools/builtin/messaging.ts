@@ -390,13 +390,22 @@ IMPORTANT delivery rules:
           }
 
           const user = (ctx.user as { id?: string; role?: string } | undefined);
+          // SECURITY (#179): only persist a REAL user id as the owner. The
+          // 'system'/'anonymous' synthetic principals are not rows in `users`,
+          // so storing them as an owner would make the job self-disable on its
+          // first tick (the executor's owner-active guard finds no row). A cron
+          // created by a system-context agent is a genuine ownerless system
+          // cron → store null so it dispatches on the 'cron' channel as system.
+          const ownerId = user?.id && user.id !== 'system' && user.id !== 'anonymous'
+            ? user.id
+            : null;
           const job = cronScheduler.add({
             name: args.name,
             schedule: args.schedule,
             prompt: args.prompt,
             delivery: delivery || 'none',
             enabled: args.enabled !== false,
-            userId: user?.id || null,
+            userId: ownerId,
           });
           return {
             success: true,
