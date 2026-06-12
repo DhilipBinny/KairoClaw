@@ -653,6 +653,13 @@ async function main(): Promise<void> {
               const sbLog = toAgwLogger(createModuleLogger('sandbox'));
               sandboxManager = new ContainerManager(sbConfig, sbLog);
               setSandboxManager(sandboxManager);
+              // Register sandbox tools
+              const sandboxToolNames = ['sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files'];
+              for (const tool of builtinTools) {
+                if (sandboxToolNames.includes(tool.definition.name) && !toolRegistry.has(tool.definition.name)) {
+                  toolRegistry.register(tool, { builtin: true });
+                }
+              }
               server.log.info('Sandbox enabled via Settings');
             } else {
               server.log.warn(`Sandbox image '${sbConfig.image}' not found`);
@@ -665,6 +672,10 @@ async function main(): Promise<void> {
         await sandboxManager.destroyAll();
         setSandboxManager(null);
         sandboxManager = null;
+        // Unregister sandbox tools
+        for (const name of ['sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files']) {
+          if (toolRegistry.has(name)) toolRegistry.unregister(name);
+        }
         server.log.info('Sandbox disabled via Settings');
       }
     } else if (dotPath.startsWith('tools.sandbox.') && sandboxManager) {
