@@ -52,7 +52,7 @@ bun.lockb
 dist/
 build/
 coverage/
-.tsbuildinfo
+*.tsbuildinfo
 
 # ── OS files ──
 .DS_Store
