@@ -96,6 +96,17 @@ HTTP plugin fields:
         deleteNamespace: (ns: string) => void;
       } | undefined;
 
+      // SECURITY (#180): registering/altering plugins is a privileged operation
+      // — a CLI plugin wraps an arbitrary binary as an agent tool. Gate every
+      // mutating action to admin (defense in depth alongside the per-call exec
+      // policy enforced in the CLI plugin executor). Listing stays open.
+      if (action !== 'list') {
+        const callerRole = (ctx.user as { role?: string } | undefined)?.role;
+        if (callerRole !== 'admin') {
+          return { error: 'Forbidden: only admins can add, update, or remove plugins.' };
+        }
+      }
+
       switch (action) {
         // ─── LIST ─────────────────────────────────────
         case 'list': {

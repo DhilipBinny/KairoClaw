@@ -155,6 +155,60 @@ function checkCommandSafety(
   return { action: 'allow' };
 }
 
+export interface ExecPolicyResult {
+  action: 'block' | 'confirm' | 'allow';
+  reason?: string;
+  /** Which layer produced a block, so callers can phrase messages. */
+  kind?: 'safety' | 'source' | 'scope';
+}
+
+/**
+ * The full command-execution policy: the command-safety classifier PLUS the
+ * non-admin source-code and cross-scope guards. This is the SINGLE source of
+ * truth shared by `exec`, `batch_exec`, AND CLI plugins (`cli_*`) so a plugin
+ * that wraps `bash`/`sh`/`python3` cannot bypass the sandbox that `exec`
+ * enforces (issue #180).
+ *
+ * @param command   the effective shell command to evaluate
+ * @param opts.role caller role ('admin' → unrestricted, else sandboxed)
+ * @param opts.workspace agent workspace root (for source-code path checks)
+ * @param opts.scopeKey caller's memory scope (for cross-scope checks)
+ */
+export function checkExecCommandPolicy(
+  command: string,
+  opts: { role?: string; workspace: string; scopeKey?: string | null },
+): ExecPolicyResult {
+  const isAdmin = opts.role === 'admin';
+  const mode = isAdmin ? 'unrestricted' : 'sandboxed';
+
+  const safety = checkCommandSafety(command, mode);
+  if (safety.action !== 'allow') {
+    return { action: safety.action, reason: safety.reason, kind: 'safety' };
+  }
+
+  // Non-admin: block access to the application's own source directory
+  // (parent of workspace), which works on any install path.
+  if (!isAdmin) {
+    const appRoot = path.resolve(opts.workspace, '..');
+    if (command.includes(path.join(appRoot, 'node_modules')) ||
+        command.includes(path.join(appRoot, 'packages'))) {
+      return { action: 'block', reason: 'access to application source code', kind: 'source' };
+    }
+  }
+
+  // Non-admin: block commands that reference other users' scopes.
+  if (!isAdmin && opts.scopeKey) {
+    const scopesRef = new RegExp(
+      `${SCOPE_DIR_NAME}/(?!${opts.scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`,
+    );
+    if (scopesRef.test(command)) {
+      return { action: 'block', reason: "cannot access other users' directories", kind: 'scope' };
+    }
+  }
+
+  return { action: 'allow' };
+}
+
 export const execTools: ToolRegistration[] = [
   {
     definition: {
@@ -181,41 +235,28 @@ export const execTools: ToolRegistration[] = [
         return { error: 'Command too long (max 10000 chars)' };
       }
 
-      // Safety check — admin gets unrestricted, others get sandboxed
-      const execMode = context.user?.role === 'admin' ? 'unrestricted' : 'sandboxed';
-      const safety = checkCommandSafety(command, execMode);
-      if (safety.action === 'block') {
-        return { error: `Blocked: ${safety.reason}. This command is too dangerous to execute. Ask the user to run it manually if needed.` };
-      }
-      if (safety.action === 'confirm') {
-        return {
-          _requiresConfirmation: true,
-          command,
-          reason: safety.reason,
-          message: `This command requires confirmation: "${command.slice(0, 200)}"\nReason: ${safety.reason}\n\nTell the user what you want to run and why, and ask them to confirm or run it themselves.`,
-        };
-      }
-
       const workspace = getWorkspace(context as Record<string, unknown>);
       const isAdmin = context.user?.role === 'admin';
       const scopeKey = context.scopeKey;
 
-      // For non-admin: dynamic source code protection (works on any install path)
-      if (!isAdmin) {
-        // Block access to the application's own source directory (parent of workspace)
-        const appRoot = path.resolve(workspace, '..');
-        const nodeModules = path.join(appRoot, 'node_modules');
-        if (command.includes(nodeModules) || command.includes(path.join(appRoot, 'packages'))) {
+      // Full execution policy — safety classifier + source/scope guards.
+      const policy = checkExecCommandPolicy(command, { role: context.user?.role, workspace, scopeKey });
+      if (policy.action === 'block') {
+        if (policy.kind === 'source') {
           return { error: 'Blocked: access to application source code. This is restricted for security.' };
         }
-      }
-
-      // For non-admin users, block commands that reference other users' scopes
-      if (!isAdmin && scopeKey) {
-        const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
-        if (scopesRef.test(command)) {
+        if (policy.kind === 'scope') {
           return { error: 'Access denied: cannot access other users\' directories via exec' };
         }
+        return { error: `Blocked: ${policy.reason}. This command is too dangerous to execute. Ask the user to run it manually if needed.` };
+      }
+      if (policy.action === 'confirm') {
+        return {
+          _requiresConfirmation: true,
+          command,
+          reason: policy.reason,
+          message: `This command requires confirmation: "${command.slice(0, 200)}"\nReason: ${policy.reason}\n\nTell the user what you want to run and why, and ask them to confirm or run it themselves.`,
+        };
       }
 
       const ctx = context as Record<string, unknown>;
@@ -329,33 +370,24 @@ export const execTools: ToolRegistration[] = [
       const workspace = getWorkspace(context as Record<string, unknown>);
       const isAdmin = context.user?.role === 'admin';
       const scopeKey = context.scopeKey;
-      const execMode = isAdmin ? 'unrestricted' : 'sandboxed';
 
-      // Pre-validate all commands BEFORE executing any
+      // Pre-validate all commands BEFORE executing any, via the shared policy.
       for (const cmd of commands) {
         if (cmd.length > 10000) {
           return { error: `Command too long (max 10000 chars): "${cmd.slice(0, 60)}..."` };
         }
-        const safety = checkCommandSafety(cmd, execMode);
-        if (safety.action === 'block') {
-          return { error: `Blocked command in batch: "${cmd.slice(0, 100)}". Reason: ${safety.reason}` };
-        }
-        if (safety.action === 'confirm') {
-          return { error: `Command requires confirmation (not supported in batch): "${cmd.slice(0, 100)}". Reason: ${safety.reason}. Use single exec instead.` };
-        }
-        // Non-admin: block cross-scope access
-        if (!isAdmin && scopeKey) {
-          const scopesRef = new RegExp(`${SCOPE_DIR_NAME}/(?!${scopeKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(/|$))`);
-          if (scopesRef.test(cmd)) {
+        const policy = checkExecCommandPolicy(cmd, { role: context.user?.role, workspace, scopeKey });
+        if (policy.action === 'block') {
+          if (policy.kind === 'scope') {
             return { error: 'Access denied: cannot access other users\' directories via batch_exec' };
           }
-        }
-        // Non-admin: block source code access
-        if (!isAdmin) {
-          const appRoot = path.resolve(workspace, '..');
-          if (cmd.includes(path.join(appRoot, 'node_modules')) || cmd.includes(path.join(appRoot, 'packages'))) {
+          if (policy.kind === 'source') {
             return { error: 'Blocked: access to application source code.' };
           }
+          return { error: `Blocked command in batch: "${cmd.slice(0, 100)}". Reason: ${policy.reason}` };
+        }
+        if (policy.action === 'confirm') {
+          return { error: `Command requires confirmation (not supported in batch): "${cmd.slice(0, 100)}". Reason: ${policy.reason}. Use single exec instead.` };
         }
       }
 

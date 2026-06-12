@@ -16,6 +16,7 @@
   "dependencies": {
     "@agw/types": "workspace:*",
     "@agw/tool-platform": "workspace:*",
+    "@agw/tools-common": "workspace:*",
     "@agw/schemas": "workspace:*"
   },
   "devDependencies": {
