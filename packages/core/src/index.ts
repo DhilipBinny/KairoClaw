@@ -636,6 +636,35 @@ async function main(): Promise<void> {
         }
       }
     }
+    // Sandbox hot-reload
+    if (dotPath === 'tools.sandbox.enabled') {
+      if (value && !sandboxManager) {
+        const sbConfig = config.tools?.sandbox;
+        if (sbConfig) {
+          const dockerOk = await isDockerAvailable(sbConfig.dockerSocket);
+          if (dockerOk) {
+            const imgOk = await imageExists(sbConfig.dockerSocket, sbConfig.image);
+            if (imgOk) {
+              sandboxManager = new ContainerManager(sbConfig);
+              setSandboxManager(sandboxManager);
+              server.log.info('Sandbox enabled via Settings');
+            } else {
+              server.log.warn(`Sandbox image '${sbConfig.image}' not found`);
+            }
+          } else {
+            server.log.warn('Docker not reachable — sandbox not started');
+          }
+        }
+      } else if (!value && sandboxManager) {
+        await sandboxManager.destroyAll();
+        setSandboxManager(null);
+        sandboxManager = null;
+        server.log.info('Sandbox disabled via Settings');
+      }
+    } else if (dotPath.startsWith('tools.sandbox.') && sandboxManager) {
+      const sbConfig = config.tools?.sandbox;
+      if (sbConfig) sandboxManager.updateConfig(sbConfig);
+    }
     // Plugin hot-reload
     if (dotPath.startsWith('plugins.') || dotPath === 'plugins') {
       try {

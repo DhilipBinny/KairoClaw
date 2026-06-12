@@ -127,19 +127,24 @@ export class ContainerManager {
     let effectiveNetwork = caps.network;
 
     if (wantsIptables) {
-      const script = buildAllowlistScript('balanced', this.config.networkAllowlist);
-      if (script) {
-        const result = await execInContainer(
-          this.config.dockerSocket,
-          containerId,
-          script,
-          '/',
-          10000,
-        );
-        if (result.exitCode !== 0) {
-          console.warn(`[sandbox] iptables allowlist failed (exit ${result.exitCode}) — container has unrestricted network`);
-          effectiveNetwork = 'open';
+      try {
+        const script = buildAllowlistScript(caps.network, this.config.networkAllowlist);
+        if (script) {
+          const result = await execInContainer(
+            this.config.dockerSocket,
+            containerId,
+            script,
+            '/',
+            10000,
+          );
+          if (result.exitCode !== 0) {
+            console.warn(`[sandbox] iptables allowlist failed (exit ${result.exitCode}) — container has unrestricted network`);
+            effectiveNetwork = 'open';
+          }
         }
+      } catch (err) {
+        await removeContainer(this.config.dockerSocket, containerId).catch(() => {});
+        throw err;
       }
     }
 
