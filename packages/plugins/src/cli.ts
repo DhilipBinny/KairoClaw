@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import type { GatewayConfig } from '@agw/types';
 import type { ToolRegistration } from '@agw/tool-platform';
 import type { PluginToolRegistry as ToolRegistry } from './interfaces.js';
+import { checkExecCommandPolicy } from '@agw/tools-common';
 import { SAFE_ENV_KEYS } from './constants.js';
 import { EXEC_MAX_STDOUT, EXEC_MAX_STDERR } from './constants.js';
 import type { AgwLogger } from '@agw/types';
@@ -146,6 +147,30 @@ export function registerCliPlugins(
         const workspace = (ctx.workspace as string) ||
           ((ctx.config as Record<string, Record<string, string>>)?.agent?.workspace) ||
           process.cwd();
+
+        // SECURITY (#180): a CLI plugin executes `plugin.command` directly,
+        // bypassing the `exec` tool. Enforce the SAME execution policy here so a
+        // plugin that wraps bash/sh/python/node cannot be used to escape the
+        // sandbox (credential theft, master.key/secrets.enc reads, persona-file
+        // edits, app-source or cross-scope access). Keyed to the CALLER's role,
+        // so an admin keeps unrestricted use while non-admins stay sandboxed.
+        const effectiveCommand = `${plugin.command} ${argsStr}`;
+        const policy = checkExecCommandPolicy(effectiveCommand, {
+          role: (ctx.user as { role?: string } | undefined)?.role,
+          workspace,
+          scopeKey: ctx.scopeKey as string | undefined,
+        });
+        if (policy.action === 'block') {
+          return { error: `Blocked: ${policy.reason}. This command is not permitted via the ${plugin.command} plugin.` };
+        }
+        if (policy.action === 'confirm') {
+          return {
+            _requiresConfirmation: true,
+            message: `This command requires confirmation: ${plugin.command} ${argsStr}\nReason: ${policy.reason}`,
+            command: plugin.command,
+            args: argsStr,
+          };
+        }
 
         const timeoutMs = Math.min(plugin.timeout, 120) * 1000;
 

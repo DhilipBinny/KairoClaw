@@ -12,7 +12,7 @@ export * from './constants.js';
 
 // Tool registrations
 export { fileTools, safePath as fileSafePath } from './files.js';
-export { execTools, SAFE_ENV_KEYS, formatExecResult } from './exec.js';
+export { execTools, SAFE_ENV_KEYS, formatExecResult, checkExecCommandPolicy, type ExecPolicyResult } from './exec.js';
 export { webTools, validateFetchUrl, validateResolvedIP, formatSearchResults } from './web.js';
 export { grepTools } from './grep.js';
 export { globTools } from './glob.js';
