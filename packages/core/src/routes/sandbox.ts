@@ -30,7 +30,9 @@ export const registerSandboxRoutes: FastifyPluginAsync<{
       network: c.network,
       workspace: c.workspace,
       createdAt: c.createdAt,
+      lastExecAt: c.lastExecAt,
       uptimeMs: Date.now() - c.createdAt,
+      idleMs: Date.now() - c.lastExecAt,
     }));
 
     return {

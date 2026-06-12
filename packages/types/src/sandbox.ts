@@ -65,6 +65,7 @@ export interface SandboxContainer {
   network: SandboxNetworkTier;
   workspace: SandboxMountMode;
   createdAt: number;
+  lastExecAt: number;
   maxLifetimeMs: number;
 }
 

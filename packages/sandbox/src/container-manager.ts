@@ -24,6 +24,10 @@ import {
   CONTAINER_USER_LABEL,
   CONTAINER_SESSION_LABEL,
   CONTAINER_WORKSPACE_PATH,
+  IDLE_CLEANUP_INTERVAL_MS,
+  IDLE_TIMEOUT_MS,
+  MAX_CONTAINERS_PER_USER,
+  MAX_CONTAINERS_TOTAL,
 } from './constants.js';
 
 export class ContainerManager {
@@ -32,12 +36,27 @@ export class ContainerManager {
   private containers = new Map<string, SandboxContainer>();
   private lifetimeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingCreations = new Map<string, Promise<SandboxContainer>>();
-  private maxContainersPerUser = 5;
-  private maxContainersTotal = 30;
+  private idleCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private maxContainersPerUser = MAX_CONTAINERS_PER_USER;
+  private maxContainersTotal = MAX_CONTAINERS_TOTAL;
 
   constructor(config: SandboxToolConfig, logger?: AgwLogger) {
     this.config = config;
     this.log = (logger ?? noopLogger).child({ category: 'sandbox' });
+    this.startIdleCleanup();
+  }
+
+  private startIdleCleanup(): void {
+    this.idleCleanupTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [key, entry] of this.containers) {
+        if (now - entry.lastExecAt > IDLE_TIMEOUT_MS) {
+          this.log.info({ userId: entry.userId, sessionId: entry.sessionId, idleMinutes: Math.round((now - entry.lastExecAt) / 60000) }, 'Destroying idle sandbox container');
+          this.destroyContainer(key).catch(() => {});
+        }
+      }
+    }, IDLE_CLEANUP_INTERVAL_MS);
+    this.idleCleanupTimer.unref();
   }
 
   updateConfig(config: SandboxToolConfig): void {
@@ -149,6 +168,7 @@ export class ContainerManager {
 
     this.log.debug({ containerId: containerId.slice(0, 12), containerName }, 'Container started');
 
+    const now = Date.now();
     const maxLifetimeMs = this.config.defaults.maxLifetimeMinutes * 60 * 1000;
     const entry: SandboxContainer = {
       containerId,
@@ -157,7 +177,8 @@ export class ContainerManager {
       image: this.config.image,
       network: effectiveNetwork,
       workspace: caps.workspace,
-      createdAt: Date.now(),
+      createdAt: now,
+      lastExecAt: now,
       maxLifetimeMs,
     };
 
@@ -189,6 +210,7 @@ export class ContainerManager {
     const workdir = opts.workdir ?? CONTAINER_WORKSPACE_PATH;
 
     this.log.debug({ userId: opts.userId, command: opts.command.slice(0, 100), timeoutMs }, 'Sandbox exec');
+    container.lastExecAt = Date.now();
 
     const result = await execInContainer(
       this.config.dockerSocket,
@@ -230,6 +252,10 @@ export class ContainerManager {
   }
 
   async destroyAll(): Promise<void> {
+    if (this.idleCleanupTimer) {
+      clearInterval(this.idleCleanupTimer);
+      this.idleCleanupTimer = null;
+    }
     const count = this.containers.size;
     if (count > 0) this.log.info({ count }, 'Destroying all sandbox containers');
     const keys = [...this.containers.keys()];
