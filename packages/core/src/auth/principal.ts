@@ -19,28 +19,39 @@ export interface Principal {
 }
 
 /**
- * Channels that originate from the system itself rather than a human on a
- * messaging surface. A user-owned cron is dispatched on the `internal` channel
- * carrying its owner's user id; a system-owned cron uses `cron` with no
- * specific user.
+ * Channels dispatched by the system itself (scheduler/heartbeat) with no human
+ * owner. These — and ONLY these — may run as the system-admin principal.
+ * A system-owned cron is dispatched here with no specific user (or the
+ * placeholder `'system'`).
  */
-const SYSTEM_CHANNELS = new Set(['cron', 'internal', 'heartbeat']);
+const SYSTEM_ADMIN_CHANNELS = new Set(['cron', 'heartbeat']);
+
+/**
+ * Channels that always represent a *user-owned* turn and therefore MUST resolve
+ * to a real active user. A user-owned cron is dispatched on `internal` carrying
+ * its owner's user id. Crucially, `internal` is NOT a system-admin channel:
+ * if its owner does not resolve (deactivated, deleted, or a forged `'system'`
+ * claim) the turn is refused — never escalated.
+ */
+const USER_OWNED_CHANNELS = new Set(['internal']);
 
 /**
  * Decide the security principal for a turn.
  *
  * SECURITY (issue #179 — cron privilege escalation):
- * System channels default to a system-admin principal ONLY when no *specific*
- * user is claimed. A user-owned cron carries its owner's id; if that owner no
- * longer resolves to an active account (deactivated or deleted), this function
- * returns `null` so the caller can REFUSE the turn. It must never fall through
- * to the system-admin principal, which would let a deactivated user's stored
- * prompt execute with full elevated privileges.
+ * A resolved active user always wins, so an active user-owned cron runs as its
+ * owner. Otherwise:
+ *  - `cron`/`heartbeat` (genuine system dispatch) → system admin, UNLESS a
+ *    *specific* real user was claimed but failed to resolve → refuse.
+ *  - `internal` (user-owned cron) → MUST have resolved to a real user above;
+ *    any unresolved case (deactivated owner, or a forged `'system'`/other
+ *    ownership claim injected via the cron-update route) → refuse. This channel
+ *    can never yield the system-admin principal.
+ *  - real messaging channels with an unlinked sender → restricted anonymous
+ *    user (NOT refused).
  *
- * Note the ordering: a `resolvedUser` always wins, so an active user-owned cron
- * runs as its owner. Only an *unresolved* specific claim on a system channel is
- * refused. Unauthenticated senders on real messaging channels (e.g. an unlinked
- * Telegram user) are NOT refused — they degrade to a restricted anonymous user.
+ * Returns `null` whenever the turn must be refused; the caller throws so no
+ * tools execute.
  *
  * @param channel        the inbound channel
  * @param claimedUserId  the user id asserted by the inbound message, if any
@@ -57,15 +68,20 @@ export function resolvePrincipal(
   }
 
   const claimedSpecificUser = !!claimedUserId && claimedUserId !== 'system';
-  const systemChannel = SYSTEM_CHANNELS.has(channel);
 
-  if (systemChannel) {
+  if (SYSTEM_ADMIN_CHANNELS.has(channel)) {
     if (claimedSpecificUser) {
       // A specific owner was claimed but did not resolve to an active user.
       // Refuse rather than escalate to system admin.
       return null;
     }
     return { id: 'system', role: 'admin', elevated: true };
+  }
+
+  if (USER_OWNED_CHANNELS.has(channel)) {
+    // Owner must have resolved above. An unresolved user-owned turn — including
+    // a forged `'system'` claim — is refused, never escalated.
+    return null;
   }
 
   // Real channel sender with no linked account → restricted anonymous user.

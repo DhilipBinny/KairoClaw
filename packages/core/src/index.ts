@@ -476,6 +476,17 @@ async function main(): Promise<void> {
     const claimedUserId = inbound.userId ? String(inbound.userId) : undefined;
     const principal = resolvePrincipal(inbound.channel, claimedUserId, resolvedUser);
     if (!principal) {
+      // Record the denied privileged turn in the tamper-evident audit trail —
+      // this refusal is exactly the event a security audit needs to see.
+      try {
+        await auditService.log({
+          tenantId,
+          userId: claimedUserId,
+          action: 'turn.refused',
+          resource: chatIdStr,
+          details: { channel: inbound.channel, reason: 'claimed user is not an active account' },
+        });
+      } catch { /* audit failure must not mask the refusal */ }
       throw new Error(
         `Refusing turn on channel "${inbound.channel}": claimed user "${claimedUserId}" is not an active account`,
       );
@@ -678,12 +689,14 @@ async function main(): Promise<void> {
     tenantId,
     logger: (server.log as unknown as Logger).child({ category: 'cron' }),
     executor: async (job) => {
-      // SECURITY (#179): a user-owned cron must run as its owner. If the owner
-      // is no longer an active account, DISABLE the job and skip — otherwise it
-      // would be refused turn-after-turn by createRunner (which never escalates
-      // it to system admin). This stops a deactivated user's stored prompt from
-      // ever executing.
-      if (job.userId && job.userId !== 'system') {
+      // SECURITY (#179): a user-owned cron must run as its owner. If a job
+      // carries an owner id that does not resolve to an active account —
+      // deactivated/deleted, or a forged 'system'/other id — DISABLE the job
+      // and skip. Otherwise createRunner would refuse it turn-after-turn (it
+      // never escalates a user-owned 'internal' turn to system admin).
+      // Genuine system crons carry no owner (job.userId is null) and are
+      // exempt; the `!owner` branch never fires for them.
+      if (job.userId) {
         const owner = await db.get<{ id: string }>(
           'SELECT id FROM users WHERE id = ? AND active = 1',
           [job.userId],

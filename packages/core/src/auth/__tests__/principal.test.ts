@@ -12,7 +12,7 @@ describe('resolvePrincipal (#179 cron privilege escalation)', () => {
     expect(p).toEqual({ id: 'user-9', role: 'admin', elevated: true });
   });
 
-  it('grants system admin to a system-owned cron (no specific user)', () => {
+  it('grants system admin to a system-owned cron on cron/heartbeat (no specific user)', () => {
     expect(resolvePrincipal('cron', 'system', undefined)).toEqual({ id: 'system', role: 'admin', elevated: true });
     expect(resolvePrincipal('cron', undefined, undefined)).toEqual({ id: 'system', role: 'admin', elevated: true });
     expect(resolvePrincipal('heartbeat', undefined, undefined)).toEqual({ id: 'system', role: 'admin', elevated: true });
@@ -24,6 +24,15 @@ describe('resolvePrincipal (#179 cron privilege escalation)', () => {
     expect(resolvePrincipal('internal', 'deactivated-user', undefined)).toBeNull();
     expect(resolvePrincipal('cron', 'deactivated-user', undefined)).toBeNull();
     expect(resolvePrincipal('heartbeat', 'deactivated-user', undefined)).toBeNull();
+  });
+
+  it('NEVER grants system admin on the internal channel — even a forged \'system\' claim is refused', () => {
+    // The 'internal' channel is for user-owned crons and must resolve to a real
+    // user. A forged ownership claim of 'system' (e.g. injected by reassigning a
+    // job's userId) must be refused, not escalated to elevated system admin.
+    expect(resolvePrincipal('internal', 'system', undefined)).toBeNull();
+    // ...and a forged claim of another user's id likewise does not escalate.
+    expect(resolvePrincipal('internal', 'victim-user', undefined)).toBeNull();
   });
 
   it('does NOT refuse — but restricts — an unlinked real channel sender', () => {

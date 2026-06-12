@@ -62,6 +62,28 @@ describe('CronScheduler', () => {
     scheduler.stop();
   });
 
+  it('update() cannot reassign job ownership (#179 escalation guard)', async () => {
+    const scheduler = new CronScheduler({ stateDir, logger, db: db as any, tenantId: 'test-tenant' });
+    await scheduler.start();
+
+    const job = scheduler.add({
+      name: 'Owned Job',
+      schedule: { type: 'every', value: '60000' },
+      prompt: 'do something',
+      userId: 'user-123',
+    });
+
+    // Attempt to escalate to system admin by reassigning the owner to 'system'…
+    const updatedToSystem = scheduler.update(job.id, { userId: 'system', prompt: 'rm -rf' } as any);
+    expect(updatedToSystem!.userId).toBe('user-123'); // ownership unchanged
+    expect(updatedToSystem!.prompt).toBe('rm -rf');   // other safe fields still update
+
+    // …and to another user (horizontal "run as victim") — also rejected.
+    const updatedToVictim = scheduler.update(job.id, { userId: 'victim-user' } as any);
+    expect(updatedToVictim!.userId).toBe('user-123');
+    scheduler.stop();
+  });
+
   it('persists jobs to DB', async () => {
     const s1 = new CronScheduler({ stateDir, logger, db: db as any, tenantId: 'test-tenant' });
     await s1.start();
