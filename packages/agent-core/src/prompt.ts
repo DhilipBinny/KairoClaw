@@ -117,6 +117,33 @@ export function buildSystemPrompt(
       cached.push(toolHints.join('\n'));
     }
 
+    // Sandbox exec guidance
+    if (toolNames.has('sandbox_exec')) {
+      const hasBothExec = toolNames.has('exec');
+      if (hasBothExec) {
+        cached.push(`### Sandbox vs Host Execution
+You have two execution tools:
+- **exec** — runs directly on the host machine (fast, full access). Use for trusted operations: reading system status, quick file operations within the workspace, running known-safe commands.
+- **sandbox_exec** — runs in an isolated Docker container (Node.js, Python, git, curl pre-installed). The container persists for this session, so installed packages and files survive across calls.
+
+**Prefer sandbox_exec when:**
+- Running user-provided code or scripts
+- Installing packages (npm install, pip install)
+- Building or compiling projects
+- Running untrusted or unfamiliar commands
+- Executing code that could have side effects
+
+**Use exec when:**
+- Reading system status (df, free, uptime, ps)
+- Quick file reads/writes within the workspace
+- Running trusted, well-known commands`);
+      } else {
+        cached.push(`### Sandboxed Execution
+**sandbox_exec** runs commands in an isolated Docker container with Node.js, Python, git, and curl pre-installed. The container persists for this session — installed packages and files survive across calls.
+Use it for: code execution, package installs, builds, scripts, or any command that should not affect the host.`);
+      }
+    }
+
     // Read-before-edit enforcement (Phase 6.3)
     if (toolNames.has('edit_file') && toolNames.has('read_file')) {
       cached.push(`### File editing

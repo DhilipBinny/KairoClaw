@@ -67,6 +67,7 @@ import { registerBackgroundTaskRoutes } from './routes/background-tasks.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
+import { registerSandboxRoutes } from './routes/sandbox.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
@@ -666,6 +667,7 @@ async function main(): Promise<void> {
   });
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
+  await server.register(registerSandboxRoutes, { containerManager: sandboxManager });
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
