@@ -93,6 +93,44 @@ describe('runAgent cancellation (#181)', () => {
     expect(result.text).toBe('final answer');
   });
 
+  it('promptly kills an in-turn sub-agent when aborted while parked in the drain', async () => {
+    // Round 1 spawns a slow in-turn child that only resolves when ITS signal
+    // fires. The loop then parks in drainSubAgents awaiting the child. The
+    // parent signal aborts mid-drain — the child must be killed at once (not
+    // run to completion), letting the turn finish promptly.
+    let childKilled = false;
+    const ac = new AbortController();
+    let round = 0;
+    const result = await runAgent(inbound, {}, baseContext({
+      signal: ac.signal,
+      callLLM: async () => {
+        round++;
+        if (round === 1) {
+          return {
+            text: '', usage: { inputTokens: 1, outputTokens: 1 },
+            toolCalls: [{ id: 's1', type: 'function', function: { name: 'spawn_agent', arguments: '{}' } }],
+          } as unknown as ProviderResponse;
+        }
+        return { text: 'done', usage: { inputTokens: 1, outputTokens: 1 } } as unknown as ProviderResponse;
+      },
+      executeTool: async (name: string, _args: unknown, ctx: any) => {
+        if (name === 'spawn_agent') {
+          ctx.subagentRegistry.register('child-1', 'slow task', (childSignal: AbortSignal) =>
+            new Promise((resolve) => {
+              // Only resolves on abort — simulates a long-running child.
+              childSignal.addEventListener('abort', () => { childKilled = true; resolve({ text: 'killed' }); });
+            }));
+          // Trigger the parent abort shortly after we're parked in the drain.
+          setTimeout(() => ac.abort(), 10);
+          return 'spawned';
+        }
+        return 'ok';
+      },
+    }));
+    expect(childKilled).toBe(true);
+    expect(result.aborted).toBe(true);
+  });
+
   it('preserves partial streamed text when cancelled mid-stream', async () => {
     const ac = new AbortController();
     const result = await runAgent(inbound, {}, baseContext({

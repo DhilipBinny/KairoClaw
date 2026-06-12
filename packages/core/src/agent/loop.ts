@@ -630,6 +630,15 @@ export async function runAgent(
     sessionRepo, messageRepo, usageRepo, toolCallRepo,
   };
 
+  // Kill in-turn sub-agents the instant the parent turn is cancelled — even
+  // while the loop is parked inside `await drainSubAgents`/`waitForAll`, which
+  // never reaches the next round-boundary signal check. Without this, a Stop
+  // during the sub-agent drain would let a slow child keep burning tokens to
+  // completion (#181). `{ once: true }` auto-removes after firing; we also
+  // remove it on the normal path below.
+  const onParentAbort = () => { s.aborted = true; s.subagentRegistry.abortAll(); };
+  context.signal?.addEventListener('abort', onParentAbort, { once: true });
+
   // ── ReAct loop ──────────────────────────────────────────
   const MAX_REACTIVE_COMPACT_FAILURES = 3;
   while (s.round < maxToolRounds) {
@@ -802,6 +811,7 @@ export async function runAgent(
   }
 
   // ── Post-loop finalization ──────────────────────────────
+  context.signal?.removeEventListener('abort', onParentAbort);
   // On cancellation, kill any in-flight sub-agents before draining so they
   // don't keep burning tokens after the parent turn was stopped.
   if (s.aborted && s.subagentRegistry.size > 0) {
