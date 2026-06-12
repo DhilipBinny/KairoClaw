@@ -336,7 +336,8 @@ export const subagentTools: ToolRegistration[] = [
       // hit the timeout. The registry caps wait at 5 min via the clamp
       // above, well under the agent loop's per-tool budget.
       if (block && t.status === 'running') {
-        const updated = await bgReg.waitFor(t.id, timeoutMs);
+        // Bail out of the blocking poll immediately if the turn is cancelled (#181).
+        const updated = await bgReg.waitFor(t.id, timeoutMs, (ctx.signal as AbortSignal | undefined));
         if (updated) t = updated;
       }
 

@@ -92,9 +92,24 @@ describe('runAgent cancellation (#181)', () => {
     expect(result.aborted).toBeUndefined();
     expect(result.text).toBe('final answer');
   });
+
+  it('preserves partial streamed text when cancelled mid-stream', async () => {
+    const ac = new AbortController();
+    const result = await runAgent(inbound, {}, baseContext({
+      signal: ac.signal,
+      callLLM: async (args: any) => {
+        args.onDelta?.('partial ');
+        args.onDelta?.('answer');
+        ac.abort();
+        throw new Error('Request aborted'); // provider surfaces abort
+      },
+    }));
+    expect(result.aborted).toBe(true);
+    expect(result.text).toBe('partial answer'); // not null
+  });
 });
 
-describe('SubAgentRegistry.abortAll (#181)', () => {
+describe('SubAgentRegistry.abortAll + drainAll (#181)', () => {
   it('aborts every running child so they stop work', async () => {
     const reg = new SubAgentRegistry();
     let childSawAbort = false;
@@ -105,5 +120,24 @@ describe('SubAgentRegistry.abortAll (#181)', () => {
     expect(killed).toBe(1);
     await reg.drainAll();
     expect(childSawAbort).toBe(true);
+  });
+
+  it('drainAll awaits a killed child whose promise is still pending', async () => {
+    // kill() sets completedAt synchronously while the run promise is still
+    // unwinding. drainAll must still await it (not skip by completedAt), or the
+    // child becomes a floating promise outliving the turn.
+    const reg = new SubAgentRegistry();
+    let settled = false;
+    reg.register('c1', 'task', (signal) => new Promise((resolve) => {
+      signal.addEventListener('abort', () => {
+        // Resolve asynchronously AFTER kill() returns — simulates the child
+        // loop unwinding its in-flight LLM abort.
+        setTimeout(() => { settled = true; resolve({ text: 'stopped' } as any); }, 20);
+      });
+    }));
+    reg.abortAll();
+    expect(settled).toBe(false); // not yet — still pending right after kill
+    await reg.drainAll();
+    expect(settled).toBe(true);  // drainAll waited for the pending promise
   });
 });

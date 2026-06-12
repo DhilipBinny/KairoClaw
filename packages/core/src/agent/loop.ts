@@ -278,6 +278,8 @@ async function executeSingleTool(
       result = await context.executeTool(p.toolName, p.toolArgs, {
         session: context.session, subagentRegistry: s.subagentRegistry,
         user: context.user, scopeKey: context.scopeKey,
+        // Let long-running tools (blocking task_output, etc.) bail on cancel (#181).
+        signal: context.signal,
       } as any);
     } else {
       result = { error: 'No tool executor configured' };
@@ -519,7 +521,11 @@ export async function runAgent(
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
-  const { onDelta, onThinkingDelta, onRoundStart, onRoundEnd } = callbacks;
+  const { onDelta: rawOnDelta, onThinkingDelta, onRoundStart, onRoundEnd } = callbacks;
+  // Capture streamed text so a turn cancelled mid-stream still returns the
+  // partial response instead of null (#181). Cheap array push + join.
+  const streamedParts: string[] = [];
+  const onDelta = (d: string) => { streamedParts.push(d); rawOnDelta?.(d); };
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
@@ -803,7 +809,12 @@ export async function runAgent(
     if (killed > 0) reqLog.info({ killed }, 'Cancelled in-flight sub-agents after abort');
   }
   if (s.subagentRegistry.size > 0) await s.subagentRegistry.drainAll();
-  if (s.aborted) reqLog.info({ round: s.round }, 'Agent turn cancelled');
+  if (s.aborted) {
+    // Preserve any partial text streamed before cancellation so the result
+    // isn't lossy for non-streaming consumers.
+    if (!s.fullText) s.fullText = streamedParts.join('');
+    reqLog.info({ round: s.round }, 'Agent turn cancelled');
+  }
   if (s.round >= maxToolRounds) s.fullText += '\n\nReached maximum tool call rounds.';
   if (s.fullText.trim() === 'NO_REPLY') s.fullText = '';
 
