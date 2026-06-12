@@ -23,7 +23,8 @@ export async function isDockerAvailable(socketPath: string): Promise<boolean> {
     const docker = getDocker(socketPath);
     await docker.ping();
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[sandbox] Docker ping failed:', (err as Error).message);
     return false;
   }
 }
