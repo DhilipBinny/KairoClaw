@@ -342,7 +342,8 @@ async function main(): Promise<void> {
     if (dockerOk) {
       const imgOk = await imageExists(sandboxConfig.dockerSocket, sandboxConfig.image);
       if (imgOk) {
-        sandboxManager = new ContainerManager(sandboxConfig);
+        const sandboxLog = toAgwLogger(createModuleLogger('sandbox'));
+        sandboxManager = new ContainerManager(sandboxConfig, sandboxLog);
         setSandboxManager(sandboxManager);
         console.log(`  Sandbox: enabled (image: ${sandboxConfig.image})`);
       } else {
@@ -645,7 +646,8 @@ async function main(): Promise<void> {
           if (dockerOk) {
             const imgOk = await imageExists(sbConfig.dockerSocket, sbConfig.image);
             if (imgOk) {
-              sandboxManager = new ContainerManager(sbConfig);
+              const sbLog = toAgwLogger(createModuleLogger('sandbox'));
+              sandboxManager = new ContainerManager(sbConfig, sbLog);
               setSandboxManager(sandboxManager);
               server.log.info('Sandbox enabled via Settings');
             } else {

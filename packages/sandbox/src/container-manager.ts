@@ -4,7 +4,9 @@ import type {
   SandboxContainer,
   SandboxExecResult,
   SandboxCapabilities,
+  AgwLogger,
 } from '@agw/types';
+import { noopLogger } from '@agw/types';
 import {
   createContainer,
   execInContainer,
@@ -26,12 +28,14 @@ import {
 
 export class ContainerManager {
   private config: SandboxToolConfig;
+  private log: AgwLogger;
   private containers = new Map<string, SandboxContainer>();
   private lifetimeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingCreations = new Map<string, Promise<SandboxContainer>>();
 
-  constructor(config: SandboxToolConfig) {
+  constructor(config: SandboxToolConfig, logger?: AgwLogger) {
     this.config = config;
+    this.log = (logger ?? noopLogger).child({ category: 'sandbox' });
   }
 
   updateConfig(config: SandboxToolConfig): void {
@@ -106,6 +110,8 @@ export class ContainerManager {
     const containerName = `${CONTAINER_PREFIX}-${sanitize(opts.userId)}-${sanitize(opts.sessionId)}`;
     const wantsIptables = needsIptables(caps.network, this.config.networkAllowlist);
 
+    this.log.info({ userId: opts.userId, sessionId: opts.sessionId, image: this.config.image, network: caps.network, workspace: caps.workspace }, 'Creating sandbox container');
+
     const containerId = await createContainer({
       socketPath: this.config.dockerSocket,
       name: containerName,
@@ -124,6 +130,8 @@ export class ContainerManager {
       addNetAdmin: wantsIptables,
     });
 
+    this.log.debug({ containerId: containerId.slice(0, 12), containerName }, 'Container started');
+
     let effectiveNetwork = caps.network;
 
     if (wantsIptables) {
@@ -138,11 +146,12 @@ export class ContainerManager {
             10000,
           );
           if (result.exitCode !== 0) {
-            console.warn(`[sandbox] iptables allowlist failed (exit ${result.exitCode}) — container has unrestricted network`);
+            this.log.warn({ exitCode: result.exitCode, containerId: containerId.slice(0, 12) }, 'iptables allowlist failed — container has unrestricted network');
             effectiveNetwork = 'open';
           }
         }
       } catch (err) {
+        this.log.error({ containerId: containerId.slice(0, 12), err: (err as Error).message }, 'iptables exec threw — removing orphan container');
         await removeContainer(this.config.dockerSocket, containerId).catch(() => {});
         throw err;
       }
@@ -187,13 +196,18 @@ export class ContainerManager {
     const timeoutMs = (opts.timeout ?? caps.timeoutSeconds ?? this.config.defaults.timeoutSeconds) * 1000;
     const workdir = opts.workdir ?? CONTAINER_WORKSPACE_PATH;
 
-    return execInContainer(
+    this.log.debug({ userId: opts.userId, command: opts.command.slice(0, 100), timeoutMs }, 'Sandbox exec');
+
+    const result = await execInContainer(
       this.config.dockerSocket,
       container.containerId,
       opts.command,
       workdir,
       timeoutMs,
     );
+
+    this.log.debug({ userId: opts.userId, exitCode: result.exitCode }, 'Sandbox exec complete');
+    return result;
   }
 
   getCapabilities(role: string, userId?: string): SandboxCapabilities {
@@ -209,6 +223,7 @@ export class ContainerManager {
     this.lifetimeTimers.delete(key);
     this.containers.delete(key);
 
+    this.log.info({ userId: entry.userId, sessionId: entry.sessionId, containerId: entry.containerId.slice(0, 12) }, 'Destroying sandbox container');
     await removeContainer(this.config.dockerSocket, entry.containerId);
   }
 
@@ -223,14 +238,19 @@ export class ContainerManager {
   }
 
   async destroyAll(): Promise<void> {
+    const count = this.containers.size;
+    if (count > 0) this.log.info({ count }, 'Destroying all sandbox containers');
     const keys = [...this.containers.keys()];
     await Promise.allSettled(keys.map(k => this.destroyContainer(k)));
 
     try {
       const orphans = await listSandboxContainers(this.config.dockerSocket);
-      await Promise.allSettled(
-        orphans.map(c => removeContainer(this.config.dockerSocket, c.id)),
-      );
+      if (orphans.length > 0) {
+        this.log.warn({ count: orphans.length }, 'Cleaning up orphan sandbox containers');
+        await Promise.allSettled(
+          orphans.map(c => removeContainer(this.config.dockerSocket, c.id)),
+        );
+      }
     } catch {
       // Docker not available
     }
