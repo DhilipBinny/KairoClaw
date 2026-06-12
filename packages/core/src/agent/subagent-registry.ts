@@ -102,6 +102,15 @@ export class SubAgentRegistry {
     return true;
   }
 
+  /** Kill every running sub-agent (e.g. when the parent turn is cancelled). */
+  abortAll(): number {
+    let killed = 0;
+    for (const childId of this.children.keys()) {
+      if (this.kill(childId)) killed++;
+    }
+    return killed;
+  }
+
   /** Check if there are any running children. */
   hasPending(): boolean {
     for (const entry of this.children.values()) {

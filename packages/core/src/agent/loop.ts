@@ -128,6 +128,12 @@ export interface AgentContext {
   scopeKey?: string | null;
   /** Ephemeral mode — skip all DB persistence (for sub-agents). */
   ephemeral?: boolean;
+  /**
+   * Cancellation signal. Checked between rounds and tool calls, and passed to
+   * the provider so the in-flight LLM request aborts. When it fires the loop
+   * stops promptly and returns the partial result with `aborted: true`.
+   */
+  signal?: AbortSignal;
 }
 
 /** Observability callbacks fired around each round. */
@@ -164,6 +170,7 @@ interface RunState {
   totalContentSize: number;
   reactiveCompactFailures: number;
   round: number;
+  aborted: boolean;
   hasContextSummary: boolean;
   userContent: string | MessageContentPart[];
   thinkingConfig?: { enabled: true; mode: string; budgetTokens?: number };
@@ -381,6 +388,9 @@ async function executeToolCalls(
   const isSafe = (name: string) => context.isToolConcurrencySafe?.(name) ?? false;
   let i = 0;
   while (i < parsed.length) {
+    // Stop launching further tool calls once cancellation is requested. Tools
+    // already in flight finish; the loop won't start another round.
+    if (context.signal?.aborted) { s.aborted = true; break; }
     if (!parsed[i].skipped && isSafe(parsed[i].toolName)) {
       const batch: ParsedToolCall[] = [];
       while (i < parsed.length && (parsed[i].skipped || isSafe(parsed[i].toolName))) {
@@ -608,7 +618,7 @@ export async function runAgent(
     subagentRegistry: new SubAgentRegistry(),
     sessionMemoryState, userMsgResult,
     totalContentSize: initialContentSize,
-    reactiveCompactFailures: 0, round: 0,
+    reactiveCompactFailures: 0, round: 0, aborted: false,
     hasContextSummary, userContent, thinkingConfig,
     sdkToolExecutor, reqLog,
     sessionRepo, messageRepo, usageRepo, toolCallRepo,
@@ -617,6 +627,8 @@ export async function runAgent(
   // ── ReAct loop ──────────────────────────────────────────
   const MAX_REACTIVE_COMPACT_FAILURES = 3;
   while (s.round < maxToolRounds) {
+    // Stop before doing any more work if cancellation was requested.
+    if (context.signal?.aborted) { s.aborted = true; break; }
     s.round++;
     if (onRoundStart) onRoundStart(s.round, maxToolRounds);
 
@@ -644,9 +656,13 @@ export async function runAgent(
       response = await context.callLLM({
         messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
         model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+        signal: context.signal,
         _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
       });
     } catch (e: unknown) {
+      // Cancellation surfaces as an abort error from the provider — treat it as
+      // a clean stop, not a failure, and keep whatever streamed so far.
+      if (context.signal?.aborted) { s.aborted = true; break; }
       const classified = classifyError(e);
       logClassifiedError(classified, { round: s.round, requestId, sessionId: session.id });
 
@@ -687,11 +703,13 @@ export async function runAgent(
           response = await context.callLLM({
             messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
             model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
+            signal: context.signal,
             _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
           });
           reqLog.info({ round: s.round, attempt: s.reactiveCompactFailures }, 'LLM call succeeded after reactive compact');
           s.reactiveCompactFailures = 0;
         } catch (retryErr: unknown) {
+          if (context.signal?.aborted) { s.aborted = true; break; }
           const retryClassified = classifyError(retryErr);
           if (retryClassified.type === 'prompt_too_long' && s.reactiveCompactFailures < MAX_REACTIVE_COMPACT_FAILURES) {
             reqLog.warn({ attempt: s.reactiveCompactFailures }, 'Still overflowing after compact — will retry');
@@ -765,10 +783,12 @@ export async function runAgent(
       break;
     }
 
-    // Append assistant message + execute tools
+    // Append assistant message + execute tools. If cancellation arrived during
+    // the LLM call, stop here rather than kicking off a new batch of tools.
     const assistantMsg: Message = { role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks };
     s.messages.push(assistantMsg);
     s.totalContentSize += contentLen(assistantMsg.content);
+    if (context.signal?.aborted) { s.aborted = true; if (onRoundEnd) onRoundEnd(s.round, maxToolRounds); break; }
     await executeToolCalls(response.toolCalls, s, context, callbacks);
     await drainSubAgents(s);
 
@@ -776,7 +796,14 @@ export async function runAgent(
   }
 
   // ── Post-loop finalization ──────────────────────────────
+  // On cancellation, kill any in-flight sub-agents before draining so they
+  // don't keep burning tokens after the parent turn was stopped.
+  if (s.aborted && s.subagentRegistry.size > 0) {
+    const killed = s.subagentRegistry.abortAll();
+    if (killed > 0) reqLog.info({ killed }, 'Cancelled in-flight sub-agents after abort');
+  }
   if (s.subagentRegistry.size > 0) await s.subagentRegistry.drainAll();
+  if (s.aborted) reqLog.info({ round: s.round }, 'Agent turn cancelled');
   if (s.round >= maxToolRounds) s.fullText += '\n\nReached maximum tool call rounds.';
   if (s.fullText.trim() === 'NO_REPLY') s.fullText = '';
 
@@ -800,6 +827,7 @@ export async function runAgent(
     thinkingText: s.finalThinkingText,
     usage: { inputTokens: s.totalInputTokens, outputTokens: s.totalOutputTokens },
     ...(s.collectedMedia.length > 0 ? { media: s.collectedMedia } : {}),
+    ...(s.aborted ? { aborted: true } : {}),
     model,
     userRole: context.user?.role,
   };
