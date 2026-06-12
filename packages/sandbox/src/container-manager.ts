@@ -224,6 +224,92 @@ export class ContainerManager {
     return result;
   }
 
+  /**
+   * Read a file from inside the sandbox container.
+   */
+  async readFile(opts: {
+    userId: string;
+    sessionId: string;
+    role: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+    path: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<SandboxExecResult> {
+    const container = await this.getOrCreate(opts);
+    container.lastExecAt = Date.now();
+    let cmd: string;
+    if (opts.offset != null || opts.limit != null) {
+      const start = (opts.offset ?? 0) + 1;
+      const count = opts.limit ?? 2000;
+      cmd = `sed -n '${start},${start + count - 1}p' ${escapeShellArg(opts.path)}`;
+    } else {
+      cmd = `head -n 2000 ${escapeShellArg(opts.path)}`;
+    }
+    // Prepend line count for context
+    const fullCmd = `wc -l < ${escapeShellArg(opts.path)} 2>/dev/null && echo '---' && ${cmd}`;
+    return execInContainer(
+      this.config.dockerSocket,
+      container.containerId,
+      fullCmd,
+      '/',
+      10000,
+    );
+  }
+
+  /**
+   * Write content to a file inside the sandbox container.
+   * Uses base64 encoding to safely transfer content without shell escaping issues.
+   */
+  async writeFile(opts: {
+    userId: string;
+    sessionId: string;
+    role: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+    path: string;
+    content: string;
+  }): Promise<SandboxExecResult> {
+    const container = await this.getOrCreate(opts);
+    container.lastExecAt = Date.now();
+    const dir = opts.path.substring(0, opts.path.lastIndexOf('/'));
+    const b64 = Buffer.from(opts.content, 'utf8').toString('base64');
+    const mkdirCmd = dir ? `mkdir -p ${escapeShellArg(dir)} && ` : '';
+    return execInContainer(
+      this.config.dockerSocket,
+      container.containerId,
+      `${mkdirCmd}echo '${b64}' | base64 -d > ${escapeShellArg(opts.path)}`,
+      '/',
+      10000,
+    );
+  }
+
+  /**
+   * List files in a directory inside the sandbox container.
+   */
+  async listFiles(opts: {
+    userId: string;
+    sessionId: string;
+    role: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+    path: string;
+  }): Promise<SandboxExecResult> {
+    const container = await this.getOrCreate(opts);
+    container.lastExecAt = Date.now();
+    return execInContainer(
+      this.config.dockerSocket,
+      container.containerId,
+      `ls -la ${escapeShellArg(opts.path)}`,
+      '/',
+      10000,
+    );
+  }
+
   getCapabilities(role: string, userId?: string): SandboxCapabilities {
     return resolveCapabilities(this.config, role, userId);
   }
@@ -285,6 +371,10 @@ export class ContainerManager {
   private containerKey(userId: string, sessionId: string): string {
     return `${userId}:${sessionId}`;
   }
+}
+
+function escapeShellArg(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 function sanitize(s: string): string {

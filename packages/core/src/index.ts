@@ -276,6 +276,9 @@ async function main(): Promise<void> {
     browse: (config.tools?.browse?.enabled !== false) && hasChromium,
     read_pdf: hasPdftotext,
     sandbox_exec: !!config.tools?.sandbox?.enabled,
+    sandbox_read_file: !!config.tools?.sandbox?.enabled,
+    sandbox_write_file: !!config.tools?.sandbox?.enabled,
+    sandbox_list_files: !!config.tools?.sandbox?.enabled,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
