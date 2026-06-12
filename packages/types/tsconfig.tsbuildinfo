@@ -1,1 +1,0 @@
-{"root":["./src/api.ts","./src/audit.ts","./src/channel.ts","./src/config.ts","./src/db.ts","./src/index.ts","./src/logger.ts","./src/mcp.ts","./src/message.ts","./src/provider.ts","./src/sandbox.ts","./src/session.ts","./src/tool.ts"],"version":"5.9.3"}
