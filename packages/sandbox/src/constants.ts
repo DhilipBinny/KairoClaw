@@ -19,8 +19,8 @@ export const CONTAINER_SHARED_PATH = '/shared';
 export const CONTAINER_PERSONA_PATH = '/persona';
 
 // ── Exec output limits ──────────────────────────
-export const MAX_STDOUT = 10 * 1024;
-export const MAX_STDERR = 5 * 1024;
+export const MAX_STDOUT = 32 * 1024;
+export const MAX_STDERR = 16 * 1024;
 
 // ── Lifecycle timers ────────────────────────────
 export const IDLE_CLEANUP_INTERVAL_MS = 60_000;

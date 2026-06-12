@@ -167,18 +167,25 @@ export async function execInContainer(
       stdout = Buffer.concat(stdoutBuf).toString('utf8');
       stderr = Buffer.concat(stderrBuf).toString('utf8');
 
+      const truncatedStdout = stdout.length > MAX_STDOUT
+        ? stdout.slice(0, MAX_STDOUT) + `\n[... output truncated, ${Math.round(stdout.length / 1024)}KB total]`
+        : stdout;
+      const truncatedStderr = stderr.length > MAX_STDERR
+        ? stderr.slice(0, MAX_STDERR) + `\n[... stderr truncated, ${Math.round(stderr.length / 1024)}KB total]`
+        : stderr;
+
       try {
         const info = await exec.inspect();
         resolve({
           exitCode: info.ExitCode ?? 1,
-          stdout: stdout.slice(0, MAX_STDOUT),
-          stderr: stderr.slice(0, MAX_STDERR),
+          stdout: truncatedStdout,
+          stderr: truncatedStderr,
         });
       } catch {
         resolve({
           exitCode: 1,
-          stdout: stdout.slice(0, MAX_STDOUT),
-          stderr: stderr.slice(0, MAX_STDERR),
+          stdout: truncatedStdout,
+          stderr: truncatedStderr,
         });
       }
     });

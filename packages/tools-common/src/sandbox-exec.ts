@@ -78,9 +78,16 @@ export const sandboxExecTools: ToolRegistration[] = [
           timeout,
         });
 
+        if (result.exitCode === 137) {
+          result.stderr = (result.stderr ? result.stderr + '\n' : '') +
+            '[Container killed — likely out of memory. Try a smaller operation or ask admin to increase memory limit.]';
+        }
         return textEnvelope(formatExecResult(result.stdout, result.stderr, result.exitCode));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('not running') || msg.includes('not found')) {
+          return { error: 'Sandbox container was stopped or expired. Try again — a new container will be created.' };
+        }
         return { error: `Sandbox exec failed: ${msg}` };
       }
     },
