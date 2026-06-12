@@ -3,6 +3,7 @@
  */
 
 import { getSessions as fetchSessions, getSession as fetchSession } from '$lib/api';
+import { sessionKeyFromChatId } from '$lib/session-key';
 
 export interface SessionInfo {
   id: string;
@@ -32,9 +33,9 @@ export async function loadSessions(): Promise<void> {
       .filter((s) => s.turns > 0 && s.channel === 'web')
       .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
       .map((s) => {
-        // Extract session key from chat_id (e.g., "web:main" → "main")
+        // Extract bare session key from chat_id (e.g. "web:<client>:main" → "main")
         const chatId = (s as any).chat_id || '';
-        const chatKey = chatId.startsWith('web:') ? chatId.slice(4) : chatId || s.id;
+        const chatKey = chatId ? sessionKeyFromChatId(chatId) : s.id;
         return {
           id: s.id,
           sessionKey: chatKey,
