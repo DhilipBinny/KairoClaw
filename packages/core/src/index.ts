@@ -258,6 +258,7 @@ async function main(): Promise<void> {
 
   // 7. Initialize tool registry with built-in tools (config-aware filtering)
   const toolRegistry = new ToolRegistry();
+  toolRegistry.setPermissionCheckerFromDb(db);
   toolRegistry.setAuditService(auditService);
   // Phase 12: load PreToolUse / PostToolUse / SessionStart / PostCompact
   // hooks from config. setHooks() can be called again on config reload
