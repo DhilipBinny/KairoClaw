@@ -9,6 +9,7 @@ export {
 export {
   filterOutput,
   checkOutputSafety,
+  neutralizeToolResultDelimiters,
 } from './output.js';
 
 export {
