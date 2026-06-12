@@ -13,7 +13,8 @@
     "lint": "eslint packages/core/src/ packages/types/src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "sandbox:build": "docker build -t kairoclaw-sandbox:full -f packages/sandbox/docker/Dockerfile.full ."
   },
   "pnpm": {
     "onlyBuiltDependencies": [
