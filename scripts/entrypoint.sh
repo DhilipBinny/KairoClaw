@@ -19,6 +19,15 @@ for f in IDENTITY.md SOUL.md RULES.md; do
   fi
 done
 
+# Allow Docker socket access for sandbox_exec (socket is root:docker, app runs as node)
+if [ -S /var/run/docker.sock ]; then
+  DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+  if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+    groupadd -g "$DOCKER_GID" docker 2>/dev/null || true
+  fi
+  usermod -aG "$DOCKER_GID" node 2>/dev/null || chmod 666 /var/run/docker.sock 2>/dev/null || true
+fi
+
 echo "Starting AGW..."
 if [ -f /app/dist/index.js ]; then
   exec gosu node node /app/dist/index.js
