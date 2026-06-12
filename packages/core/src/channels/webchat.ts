@@ -42,6 +42,19 @@ export function webChatId(clientId: string, sessionKey: string): string {
   return `web:${clientId}:${sessionKey}`;
 }
 
+/**
+ * Derive the bare session key from a web chat_id, mirroring the UI's
+ * sessionKeyFromChatId. Handles the scoped `web:<clientId>:<key>` form and the
+ * legacy `web:<key>` form. Used so list responses never surface the clientId
+ * segment as the session key.
+ */
+export function sessionKeyFromWebChatId(chatId: string | null | undefined): string {
+  if (!chatId || !chatId.startsWith('web:')) return chatId || '';
+  const rest = chatId.slice(4);
+  const colon = rest.indexOf(':');
+  return colon >= 0 ? rest.slice(colon + 1) : rest;
+}
+
 /** A session key must be a simple token (no colons — it is a chat_id segment). */
 export function isValidSessionKey(key: string): boolean {
   return /^[A-Za-z0-9_-]{1,200}$/.test(key);
@@ -294,11 +307,14 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             // Bind this connection to the first sessionKey it uses
             if (!boundSessionKey) {
               boundSessionKey = sessionKey;
-              clients.set(socket, { sessionKey: scopedKey });
             } else if (boundSessionKey !== sessionKey) {
               safeSend({ type: 'error', message: 'Session key mismatch — reconnect to switch sessions' });
               return;
             }
+            // Always refresh the broadcast-routing key from the LIVE clientId so
+            // it can't go stale (e.g. after a mid-connection API-key re-auth that
+            // upgrades the client identity).
+            clients.set(socket, { sessionKey: scopedKey });
             const rawText = typeof msg.text === 'string' ? msg.text.trim() : '';
             if (!rawText) {
               safeSend({ type: 'error', message: 'Empty message' });
@@ -508,7 +524,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             const list = webSessions
               .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
               .map((s) => {
-                const chatKey = s.chat_id?.startsWith('web:') ? s.chat_id.slice(4) : s.chat_id || s.id;
+                const chatKey = s.chat_id ? sessionKeyFromWebChatId(s.chat_id) : s.id;
                 const metadata = JSON.parse(s.metadata || '{}');
                 const title = metadata.title || titleMap.get(s.id) || '';
                 return {

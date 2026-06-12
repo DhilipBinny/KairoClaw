@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { webChatId, isValidSessionKey, ownsWebSession } from '../webchat.js';
+import { webChatId, isValidSessionKey, ownsWebSession, sessionKeyFromWebChatId } from '../webchat.js';
 
 const USER_A = 'uuid-aaaa';
 const USER_B = 'uuid-bbbb';
@@ -53,6 +53,23 @@ describe('web session scoping (#178)', () => {
 
     it('legacy unscoped "web:main" null-owner session is NOT world-readable', () => {
       expect(ownsWebSession({ user_id: null, chat_id: 'web:main' }, USER_A, 'user')).toBe(false);
+    });
+  });
+
+  describe('sessionKeyFromWebChatId — list responses surface the bare key only', () => {
+    it('strips the clientId segment from a scoped chat_id', () => {
+      expect(sessionKeyFromWebChatId(webChatId(USER_A, 'main'))).toBe('main');
+      expect(sessionKeyFromWebChatId('web:web-1-abcd:work_2')).toBe('work_2');
+    });
+    it('handles legacy and non-web chat_ids', () => {
+      expect(sessionKeyFromWebChatId('web:main')).toBe('main');
+      expect(sessionKeyFromWebChatId('telegram:1')).toBe('telegram:1');
+      expect(sessionKeyFromWebChatId(null)).toBe('');
+    });
+    it('round-trips with webChatId', () => {
+      for (const key of ['main', 'session-abc', 'work_2']) {
+        expect(sessionKeyFromWebChatId(webChatId(USER_A, key))).toBe(key);
+      }
     });
   });
 });
