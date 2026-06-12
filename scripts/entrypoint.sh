@@ -19,13 +19,18 @@ for f in IDENTITY.md SOUL.md RULES.md; do
   fi
 done
 
-# Allow Docker socket access for sandbox_exec (socket is root:docker, app runs as node)
-if [ -S /var/run/docker.sock ]; then
-  DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-  if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
-    groupadd -g "$DOCKER_GID" docker 2>/dev/null || true
+# Docker socket access for sandbox_exec (fallback if group_add not set in compose)
+# The preferred method is group_add in docker-compose.yml — this is a safety net.
+# See docs/SANDBOX.md for setup instructions.
+if [ "$(id -u)" = "0" ] && [ -S /var/run/docker.sock ]; then
+  if ! gosu node test -r /var/run/docker.sock -a -w /var/run/docker.sock 2>/dev/null; then
+    DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+      groupadd -g "$DOCKER_GID" dockerhost 2>/dev/null || true
+    fi
+    GROUP_NAME=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    usermod -aG "$GROUP_NAME" node 2>/dev/null || true
   fi
-  usermod -aG "$DOCKER_GID" node 2>/dev/null || chmod 666 /var/run/docker.sock 2>/dev/null || true
 fi
 
 echo "Starting AGW..."
