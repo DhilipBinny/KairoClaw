@@ -46,7 +46,8 @@ export const sandboxExecTools: ToolRegistration[] = [
       }
 
       const userId = context.user?.id;
-      const sessionId = context.session?.sessionId;
+      const session = context.session as Record<string, unknown> | undefined;
+      const sessionId = session?.sessionId as string ?? session?.id as string;
       if (!userId || !sessionId) {
         return { error: 'sandbox_exec requires an authenticated user with an active session' };
       }
@@ -131,7 +132,8 @@ export const sandboxExecTools: ToolRegistration[] = [
         return { error: 'Invalid path: must be an absolute path with safe characters' };
       }
       const userId = context.user?.id;
-      const sessionId = context.session?.sessionId;
+      const session = context.session as Record<string, unknown> | undefined;
+      const sessionId = session?.sessionId as string ?? session?.id as string;
       if (!userId || !sessionId) {
         return { error: 'Requires an authenticated user with an active session' };
       }
@@ -205,7 +207,8 @@ export const sandboxExecTools: ToolRegistration[] = [
         return { error: 'Content too large (max 512KB)' };
       }
       const userId = context.user?.id;
-      const sessionId = context.session?.sessionId;
+      const session = context.session as Record<string, unknown> | undefined;
+      const sessionId = session?.sessionId as string ?? session?.id as string;
       if (!userId || !sessionId) {
         return { error: 'Requires an authenticated user with an active session' };
       }
@@ -265,7 +268,8 @@ export const sandboxExecTools: ToolRegistration[] = [
         return { error: 'Invalid path: must be an absolute path with safe characters' };
       }
       const userId = context.user?.id;
-      const sessionId = context.session?.sessionId;
+      const session = context.session as Record<string, unknown> | undefined;
+      const sessionId = session?.sessionId as string ?? session?.id as string;
       if (!userId || !sessionId) {
         return { error: 'Requires an authenticated user with an active session' };
       }
