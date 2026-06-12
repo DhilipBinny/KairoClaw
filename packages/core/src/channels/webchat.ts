@@ -371,7 +371,9 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
 
             try {
               const showThinking = config.agent?.thinking?.showThinking?.web ?? true;
-              const result = await queue.enqueue(sessionKey, () =>
+              // Serialize per SCOPED session (#178): two different users sharing
+              // a sessionKey name (e.g. 'main') must not queue behind each other.
+              const result = await queue.enqueue(scopedKey, () =>
                 runner(inbound, {
                   onDelta: (delta: string) => {
                     safeSend({
