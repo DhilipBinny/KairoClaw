@@ -275,6 +275,7 @@ async function main(): Promise<void> {
     send_email: !!config.tools?.email?.enabled,
     browse: (config.tools?.browse?.enabled !== false) && hasChromium,
     read_pdf: hasPdftotext,
+    sandbox_exec: !!config.tools?.sandbox?.enabled,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
@@ -698,7 +699,7 @@ async function main(): Promise<void> {
   });
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
-  await server.register(registerSandboxRoutes, { containerManager: sandboxManager });
+  await server.register(registerSandboxRoutes, { getContainerManager: () => sandboxManager });
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);

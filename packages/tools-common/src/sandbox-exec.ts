@@ -21,7 +21,7 @@ export const sandboxExecTools: ToolRegistration[] = [
         'Pre-installed: Node.js 22, Python 3.12, npm, pnpm, pip, git, curl, jq. ' +
         'Use this for code execution, package installs, builds, or any command that should not affect the host.',
       searchHint: 'sandbox docker container isolated execute run safe',
-      alwaysLoad: true,
+      alwaysLoad: false,
       parameters: {
         type: 'object',
         properties: {
@@ -56,6 +56,15 @@ export const sandboxExecTools: ToolRegistration[] = [
       const isAdmin = role === 'admin';
       const scopeKey = context.scopeKey ?? null;
 
+      const workdir = args.workdir as string | undefined;
+      if (workdir && !/^\/[\w./-]*$/.test(workdir)) {
+        return { error: 'Invalid workdir: must be an absolute path with safe characters' };
+      }
+      const timeout = args.timeout as number | undefined;
+      if (timeout !== undefined && (typeof timeout !== 'number' || timeout < 1 || timeout > 600)) {
+        return { error: 'timeout must be a number between 1 and 600 seconds' };
+      }
+
       try {
         const result = await containerManager.exec({
           userId,
@@ -65,8 +74,8 @@ export const sandboxExecTools: ToolRegistration[] = [
           scopeKey,
           isAdmin,
           command,
-          workdir: args.workdir as string | undefined,
-          timeout: args.timeout as number | undefined,
+          workdir,
+          timeout,
         });
 
         return textEnvelope(formatExecResult(result.stdout, result.stderr, result.exitCode));

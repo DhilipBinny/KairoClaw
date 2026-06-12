@@ -49,17 +49,10 @@ export interface CreateContainerOpts {
   cpu: number;
   memoryMb: number;
   pidsLimit: number;
-  addNetAdmin?: boolean;
 }
 
 export async function createContainer(opts: CreateContainerOpts): Promise<string> {
   const docker = getDocker(opts.socketPath);
-
-  // Minimal capabilities — only add NET_ADMIN/NET_RAW for balanced tier iptables
-  const capAdd: string[] = [];
-  if (opts.addNetAdmin) {
-    capAdd.push('NET_ADMIN', 'NET_RAW');
-  }
 
   const memBytes = opts.memoryMb * 1024 * 1024;
 
@@ -88,7 +81,7 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
       PidsLimit: opts.pidsLimit,
       SecurityOpt: ['no-new-privileges'],
       CapDrop: ['ALL'],
-      CapAdd: capAdd,
+      CapAdd: [],
       Tmpfs: {
         '/tmp': 'rw,noexec,nosuid,size=268435456',
         '/var/tmp': 'rw,noexec,nosuid,size=134217728',
@@ -132,10 +125,13 @@ export async function execInContainer(
     let stderr = '';
     let done = false;
 
+    const cleanup = () => { stdoutStream.destroy(); stderrStream.destroy(); };
+
     const timer = setTimeout(() => {
       if (!done) {
         done = true;
         stream.destroy();
+        cleanup();
         resolve({ exitCode: 124, stdout: stdout.slice(0, MAX_STDOUT), stderr: 'Command timed out' });
       }
     }, timeoutMs);
@@ -191,6 +187,7 @@ export async function execInContainer(
       if (done) return;
       done = true;
       clearTimeout(timer);
+      cleanup();
       reject(err);
     });
   });

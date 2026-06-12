@@ -47,7 +47,6 @@ afterEach(() => {
 });
 
 describe('ContainerManager', () => {
-  // balanced network tier fires an extra execInContainer for the iptables allowlist script
   it('creates a container on first exec', async () => {
     const cm = new ContainerManager(makeConfig());
     const result = await cm.exec({
@@ -57,8 +56,7 @@ describe('ContainerManager', () => {
     });
 
     expect(mockCreateContainer).toHaveBeenCalledOnce();
-    // 1 allowlist exec + 1 command exec = 2
-    expect(mockExecInContainer).toHaveBeenCalledTimes(2);
+    expect(mockExecInContainer).toHaveBeenCalledOnce();
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('hello');
   });
@@ -77,8 +75,7 @@ describe('ContainerManager', () => {
     });
 
     expect(mockCreateContainer).toHaveBeenCalledOnce();
-    // 1 allowlist + 2 commands = 3
-    expect(mockExecInContainer).toHaveBeenCalledTimes(3);
+    expect(mockExecInContainer).toHaveBeenCalledTimes(2);
   });
 
   it('creates separate containers for different sessions', async () => {
@@ -260,10 +257,8 @@ describe('ContainerManager', () => {
       timeout: 60,
     });
 
-    // Last call is the actual command (first is allowlist script)
-    const calls = mockExecInContainer.mock.calls;
-    const lastCall = calls[calls.length - 1];
-    expect(lastCall[4]).toBe(60000);
+    const callArgs = mockExecInContainer.mock.calls[0];
+    expect(callArgs[4]).toBe(60000);
   });
 
   it('uses custom workdir from exec args', async () => {
@@ -275,8 +270,7 @@ describe('ContainerManager', () => {
       workdir: '/tmp',
     });
 
-    const calls = mockExecInContainer.mock.calls;
-    const lastCall = calls[calls.length - 1];
-    expect(lastCall[3]).toBe('/tmp');
+    const callArgs = mockExecInContainer.mock.calls[0];
+    expect(callArgs[3]).toBe('/tmp');
   });
 });

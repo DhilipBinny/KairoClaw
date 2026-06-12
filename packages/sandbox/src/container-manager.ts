@@ -16,7 +16,7 @@ import {
   imageExists,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
-import { resolveNetworkMode, buildAllowlistScript, needsIptables } from './network-policy.js';
+import { resolveNetworkMode } from './network-policy.js';
 import { resolveCapabilities } from './config.js';
 import {
   CONTAINER_PREFIX,
@@ -32,6 +32,8 @@ export class ContainerManager {
   private containers = new Map<string, SandboxContainer>();
   private lifetimeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private pendingCreations = new Map<string, Promise<SandboxContainer>>();
+  private maxContainersPerUser = 5;
+  private maxContainersTotal = 30;
 
   constructor(config: SandboxToolConfig, logger?: AgwLogger) {
     this.config = config;
@@ -106,11 +108,27 @@ export class ContainerManager {
       mountMode: caps.workspace,
     });
 
-    const networkMode = resolveNetworkMode(caps.network);
+    // Balanced tier: no in-container iptables (NET_ADMIN is a security risk — users
+    // can flush rules). Balanced falls back to locked (--network none) until a proxy
+    // sidecar is implemented for proper domain allowlisting.
+    const effectiveNetwork = caps.network === 'balanced' ? 'locked' : caps.network;
+    const networkMode = resolveNetworkMode(effectiveNetwork);
     const containerName = `${CONTAINER_PREFIX}-${sanitize(opts.userId)}-${sanitize(opts.sessionId)}`;
-    const wantsIptables = needsIptables(caps.network, this.config.networkAllowlist);
 
-    this.log.info({ userId: opts.userId, sessionId: opts.sessionId, image: this.config.image, network: caps.network, workspace: caps.workspace }, 'Creating sandbox container');
+    if (caps.network === 'balanced') {
+      this.log.info({ userId: opts.userId }, 'Balanced network tier not yet implemented — falling back to locked (no network)');
+    }
+
+    this.log.info({ userId: opts.userId, sessionId: opts.sessionId, image: this.config.image, network: effectiveNetwork, workspace: caps.workspace }, 'Creating sandbox container');
+
+    // Check per-user container limit
+    const userContainers = [...this.containers.values()].filter(c => c.userId === opts.userId);
+    if (userContainers.length >= this.maxContainersPerUser) {
+      throw new Error(`Container limit reached (${this.maxContainersPerUser} per user). Destroy an existing session first.`);
+    }
+    if (this.containers.size >= this.maxContainersTotal) {
+      throw new Error(`Global container limit reached (${this.maxContainersTotal}). Wait for containers to expire or ask an admin to stop some.`);
+    }
 
     const containerId = await createContainer({
       socketPath: this.config.dockerSocket,
@@ -127,35 +145,9 @@ export class ContainerManager {
       cpu: caps.cpu ?? this.config.defaults.cpu,
       memoryMb: caps.memoryMb ?? this.config.defaults.memoryMb,
       pidsLimit: this.config.defaults.pidsLimit,
-      addNetAdmin: wantsIptables,
     });
 
     this.log.debug({ containerId: containerId.slice(0, 12), containerName }, 'Container started');
-
-    let effectiveNetwork = caps.network;
-
-    if (wantsIptables) {
-      try {
-        const script = buildAllowlistScript(caps.network, this.config.networkAllowlist);
-        if (script) {
-          const result = await execInContainer(
-            this.config.dockerSocket,
-            containerId,
-            script,
-            '/',
-            10000,
-          );
-          if (result.exitCode !== 0) {
-            this.log.warn({ exitCode: result.exitCode, containerId: containerId.slice(0, 12) }, 'iptables allowlist failed — container has unrestricted network');
-            effectiveNetwork = 'open';
-          }
-        }
-      } catch (err) {
-        this.log.error({ containerId: containerId.slice(0, 12), err: (err as Error).message }, 'iptables exec threw — removing orphan container');
-        await removeContainer(this.config.dockerSocket, containerId).catch(() => {});
-        throw err;
-      }
-    }
 
     const maxLifetimeMs = this.config.defaults.maxLifetimeMinutes * 60 * 1000;
     const entry: SandboxContainer = {

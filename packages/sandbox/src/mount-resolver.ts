@@ -47,11 +47,11 @@ export function resolveMounts(opts: {
       readOnly: isReadOnly,
     });
   } else {
-    if (scopeKey) {
+    if (scopeKey && scopeKey !== '.' && scopeKey !== '..') {
       const scopeDir = path.join(workspacePath, 'scopes', scopeKey);
       const resolved = path.resolve(scopeDir);
       const scopesRoot = path.resolve(path.join(workspacePath, 'scopes'));
-      if (!resolved.startsWith(scopesRoot + path.sep) && resolved !== scopesRoot) {
+      if (!resolved.startsWith(scopesRoot + path.sep)) {
         throw new Error('Invalid scope key: path traversal detected');
       }
       ensureDirExists(resolved);
