@@ -722,3 +722,34 @@ export async function stopBackgroundTask(id: string): Promise<{ ok?: boolean; er
 export async function clearCompletedTasks(): Promise<{ ok: boolean; cleared: number }> {
   return request('/admin/background-tasks/clear', { method: 'POST', body: {} });
 }
+
+// ── Sandbox ─────────────────────────────────────────────
+export interface SandboxStatus {
+  enabled: boolean;
+  ready: boolean;
+  reason?: string;
+  image?: string;
+  defaults?: Record<string, unknown>;
+  containers: Array<{
+    containerId: string;
+    userId: string;
+    sessionId: string;
+    image: string;
+    network: string;
+    workspace: string;
+    createdAt: number;
+    uptimeMs: number;
+  }>;
+}
+
+export async function getSandboxStatus(): Promise<SandboxStatus> {
+  return request('/admin/sandbox/status');
+}
+
+export async function stopSandboxContainer(userId: string, sessionId: string): Promise<{ ok: boolean }> {
+  return request(`/admin/sandbox/stop/${userId}/${sessionId}`, { method: 'POST', body: {} });
+}
+
+export async function stopAllSandboxContainers(): Promise<{ ok: boolean; message: string }> {
+  return request('/admin/sandbox/stop-all', { method: 'POST', body: {} });
+}

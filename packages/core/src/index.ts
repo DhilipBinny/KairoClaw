@@ -20,7 +20,8 @@ import { authPlugin, requireRole } from './auth/middleware.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
 import { builtinTools } from './tools/builtin/index.js';
-import { setMemorySystem } from '@agw/tools-common';
+import { setMemorySystem, setSandboxManager } from '@agw/tools-common';
+import { ContainerManager, isDockerAvailable, imageExists } from '@agw/sandbox';
 import { MemorySystem } from './memory/index.js';
 import { MCPBridge } from './mcp/bridge.js';
 import { registerAllPlugins, reloadPlugins, loadPlugins } from './plugins/index.js';
@@ -66,6 +67,7 @@ import { registerBackgroundTaskRoutes } from './routes/background-tasks.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
+import { registerSandboxRoutes } from './routes/sandbox.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
@@ -273,6 +275,10 @@ async function main(): Promise<void> {
     send_email: !!config.tools?.email?.enabled,
     browse: (config.tools?.browse?.enabled !== false) && hasChromium,
     read_pdf: hasPdftotext,
+    sandbox_exec: !!config.tools?.sandbox?.enabled,
+    sandbox_read_file: !!config.tools?.sandbox?.enabled,
+    sandbox_write_file: !!config.tools?.sandbox?.enabled,
+    sandbox_list_files: !!config.tools?.sandbox?.enabled,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
@@ -331,6 +337,26 @@ async function main(): Promise<void> {
   const memorySystem = new MemorySystem(db, config.agent.workspace, config);
   await memorySystem.init();
   setMemorySystem(memorySystem);
+
+  // 7d. Initialize sandbox container manager (if enabled + Docker available)
+  let sandboxManager: ContainerManager | null = null;
+  const sandboxConfig = config.tools?.sandbox;
+  if (sandboxConfig?.enabled) {
+    const dockerOk = await isDockerAvailable(sandboxConfig.dockerSocket);
+    if (dockerOk) {
+      const imgOk = await imageExists(sandboxConfig.dockerSocket, sandboxConfig.image);
+      if (imgOk) {
+        const sandboxLog = toAgwLogger(createModuleLogger('sandbox'));
+        sandboxManager = new ContainerManager(sandboxConfig, sandboxLog);
+        setSandboxManager(sandboxManager);
+        console.log(`  Sandbox: enabled (image: ${sandboxConfig.image})`);
+      } else {
+        console.warn(`  Sandbox: image '${sandboxConfig.image}' not found — sandbox_exec disabled`);
+      }
+    } else {
+      console.warn(`  Sandbox: Docker not reachable at ${sandboxConfig.dockerSocket} — sandbox_exec disabled`);
+    }
+  }
 
   // 8. Create Fastify server (needed before MCP bridge for server.log)
   const server = await createServer({ db, config });
@@ -615,6 +641,36 @@ async function main(): Promise<void> {
         }
       }
     }
+    // Sandbox hot-reload
+    if (dotPath === 'tools.sandbox.enabled') {
+      if (value && !sandboxManager) {
+        const sbConfig = config.tools?.sandbox;
+        if (sbConfig) {
+          const dockerOk = await isDockerAvailable(sbConfig.dockerSocket);
+          if (dockerOk) {
+            const imgOk = await imageExists(sbConfig.dockerSocket, sbConfig.image);
+            if (imgOk) {
+              const sbLog = toAgwLogger(createModuleLogger('sandbox'));
+              sandboxManager = new ContainerManager(sbConfig, sbLog);
+              setSandboxManager(sandboxManager);
+              server.log.info('Sandbox enabled via Settings');
+            } else {
+              server.log.warn(`Sandbox image '${sbConfig.image}' not found`);
+            }
+          } else {
+            server.log.warn('Docker not reachable — sandbox not started');
+          }
+        }
+      } else if (!value && sandboxManager) {
+        await sandboxManager.destroyAll();
+        setSandboxManager(null);
+        sandboxManager = null;
+        server.log.info('Sandbox disabled via Settings');
+      }
+    } else if (dotPath.startsWith('tools.sandbox.') && sandboxManager) {
+      const sbConfig = config.tools?.sandbox;
+      if (sbConfig) sandboxManager.updateConfig(sbConfig);
+    }
     // Plugin hot-reload
     if (dotPath.startsWith('plugins.') || dotPath === 'plugins') {
       try {
@@ -646,6 +702,7 @@ async function main(): Promise<void> {
   });
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
+  await server.register(registerSandboxRoutes, { getContainerManager: () => sandboxManager });
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);
@@ -919,6 +976,11 @@ async function main(): Promise<void> {
     // Shutdown browser sessions
     if (sharedServices.browserManager?.shutdown) {
       await sharedServices.browserManager.shutdown();
+    }
+
+    // Stop sandbox containers
+    if (sandboxManager) {
+      await sandboxManager.destroyAll();
     }
 
     // Stop media cleanup

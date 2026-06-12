@@ -225,6 +225,7 @@ export interface ToolsConfig {
   email: EmailToolConfig;
   transcription: TranscriptionToolConfig;
   browse: BrowseToolConfig;
+  sandbox?: import('./sandbox.js').SandboxToolConfig;
 }
 
 

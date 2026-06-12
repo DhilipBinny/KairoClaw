@@ -22,6 +22,7 @@
     "@agw/mcp-client": "workspace:*",
     "@agw/memory-engine": "workspace:*",
     "@agw/plugins": "workspace:*",
+    "@agw/sandbox": "workspace:*",
     "@agw/provider-bridge": "workspace:*",
     "@agw/schemas": "workspace:*",
     "@agw/security": "workspace:*",
