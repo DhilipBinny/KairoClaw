@@ -13,6 +13,43 @@ describe('checkExecCommandPolicy (#180 shared exec policy)', () => {
       expect(r.kind).toBe('safety');
     });
 
+    it('blocks master.key access regardless of the command verb (#189)', () => {
+      for (const cmd of [
+        'od -c master.key',
+        'dd if=master.key of=/tmp/x',
+        'cp master.key /tmp/x',
+        'gzip -c master.key',
+        'tar cf - master.key',
+        'python3 -c "print(open(\'master.key\').read())"',
+        'node -e "require(\'fs\').readFileSync(\'master.key\')"',
+        'awk "1" master.key',
+      ]) {
+        expect(checkExecCommandPolicy(cmd, opts).action, cmd).toBe('block');
+      }
+    });
+
+    it('blocks secrets.enc / secrets.json / ssh keys regardless of verb (#189)', () => {
+      expect(checkExecCommandPolicy('od secrets.enc', opts).action).toBe('block');
+      expect(checkExecCommandPolicy('cp secrets.json /tmp', opts).action).toBe('block');
+      expect(checkExecCommandPolicy('tar czf k.tgz ~/.ssh/id_rsa', opts).action).toBe('block');
+    });
+
+    it('blocks parent-traversal glob/quote bypasses that dodge the literal filename (#189)', () => {
+      for (const cmd of [
+        'cat ../../../mast*.key',
+        'cat ../../../"mast""er.key"',
+        'od ../../../*.enc',
+        'head -c 1000 ../../../m*',
+      ]) {
+        expect(checkExecCommandPolicy(cmd, opts).action, cmd).toBe('block');
+      }
+    });
+
+    it('still allows ordinary in-scope commands (no traversal)', () => {
+      expect(checkExecCommandPolicy('ls -la ./build', opts).action).toBe('allow');
+      expect(checkExecCommandPolicy('cat notes/today.md', opts).action).toBe('allow');
+    });
+
     it('blocks reading encrypted secrets', () => {
       expect(checkExecCommandPolicy('strings secrets.enc', opts).action).toBe('block');
     });
