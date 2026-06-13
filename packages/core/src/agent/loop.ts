@@ -642,10 +642,13 @@ export async function runAgent(
   const forwardDelta = (chunk: string) => { if (!s.injectionDetected) rawOnDelta?.(chunk); };
   const streamRedactor = rawOnDelta ? createStreamingRedactor(forwardDelta) : null;
   const onDelta = (d: string) => { streamedParts.push(d); streamRedactor?.push(d); };
-  // Suppress the extended-thinking stream the same way, so injected content
-  // can't leak live via thinking deltas once an injection is detected (#182).
+  // Redact the extended-thinking stream the same way (#185), and suppress it
+  // entirely once an injection is detected (#182). The thinking trace is
+  // client-facing too, so secrets the model echoes into it must not leak live.
+  const forwardThinking = (chunk: string) => { if (!s.injectionDetected) rawOnThinkingDelta?.(chunk); };
+  const thinkingRedactor = rawOnThinkingDelta ? createStreamingRedactor(forwardThinking) : null;
   const onThinkingDelta = rawOnThinkingDelta
-    ? (d: string) => { if (!s.injectionDetected) rawOnThinkingDelta(d); }
+    ? (d: string) => { thinkingRedactor?.push(d); }
     : undefined;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
@@ -907,6 +910,15 @@ export async function runAgent(
       } catch (e: unknown) { reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)'); }
     }
 
+    // Release this round's streamed narration/thinking now that the round's
+    // stream is complete, so it reaches the client with the same timing as
+    // before (the redactor otherwise holds its tail until more text arrives or
+    // end-of-turn). Resets the buffer for the next round (#185).
+    if (!s.aborted) {
+      streamRedactor?.flush();
+      thinkingRedactor?.flush();
+    }
+
     // No tool calls → done
     if (!response.toolCalls) {
       s.fullText = response.text || '';
@@ -932,10 +944,13 @@ export async function runAgent(
   }
 
   // ── Post-loop finalization ──────────────────────────────
-  // Release the redactor's held-back tail so the live stream shows the complete
-  // reply. Skipped on abort (the partial text is returned via streamedParts) and
+  // Release any held-back tail so the live stream shows the complete reply.
+  // Skipped on abort (the partial text is returned via streamedParts) and
   // suppressed by the emit guard if an injection was detected mid-turn (#185).
-  if (streamRedactor && !s.aborted) streamRedactor.flush();
+  if (!s.aborted) {
+    streamRedactor?.flush();
+    thinkingRedactor?.flush();
+  }
   context.signal?.removeEventListener('abort', onParentAbort);
   // On cancellation, kill any in-flight sub-agents before draining so they
   // don't keep burning tokens after the parent turn was stopped.
@@ -973,6 +988,10 @@ export async function runAgent(
       }
     }
   }
+
+  // Filter the thinking trace returned to non-streaming consumers too — it is
+  // raw provider output and can echo secrets the model read this turn (#185).
+  if (s.finalThinkingText) s.finalThinkingText = filterOutput(s.finalThinkingText);
 
   reqLog.info({
     totalRounds: s.round, totalInputTokens: s.totalInputTokens, totalOutputTokens: s.totalOutputTokens,

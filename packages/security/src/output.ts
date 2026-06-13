@@ -26,18 +26,23 @@ export function filterOutput(text: string): string {
   filtered = filtered.replace(/xox[bporas]-[0-9a-zA-Z-]{10,}/g, '***SLACK_TOKEN_REDACTED***');
   filtered = filtered.replace(/sk_live_[0-9a-zA-Z]{24,}/g, '***STRIPE_KEY_REDACTED***');
   filtered = filtered.replace(/pk_live_[0-9a-zA-Z]{24,}/g, '***STRIPE_KEY_REDACTED***');
-  // Telegram bot token: "<bot id digits>:<35-char base64url secret>".
-  filtered = filtered.replace(/\b\d{6,12}:[A-Za-z0-9_-]{30,}/g, '***TELEGRAM_TOKEN_REDACTED***');
-  // Brave Search API key (used by the web_search tool).
-  filtered = filtered.replace(/\bBSA[A-Za-z0-9_-]{20,}\b/g, '***BRAVE_KEY_REDACTED***');
+  // Telegram bot token: "<8-10 digit bot id>:<35-char base64url secret>". Kept
+  // tight (exact lengths, word-bounded) so it doesn't swallow ordinary
+  // "<digits>:<hash>" text such as git output or build IDs in user-facing replies.
+  filtered = filtered.replace(/\b\d{8,10}:[A-Za-z0-9_-]{35}\b/g, '***TELEGRAM_TOKEN_REDACTED***');
+  // Brave Search API key (used by the web_search tool). Requires a digit in the
+  // body so it doesn't match ordinary all-letter identifiers that begin with
+  // "BSA" (e.g. class names).
+  filtered = filtered.replace(/\bBSA(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{24,}\b/g, '***BRAVE_KEY_REDACTED***');
   // Master encryption key (KEK), only when it appears next to its env-var/file
   // name. We deliberately don't match a bare 32-byte base64 blob: that would
   // false-positive on legitimate base64 in normal replies (filterOutput also
-  // runs on user-facing output, not just logs).
-  filtered = filtered.replace(/\b(?:AGW_MASTER_KEY|master[_.]?key)\b\s*[=:]\s*["']?[A-Za-z0-9+/]{20,}={0,2}/gi, (m) => `${m.split(/[=:]/)[0]}=***REDACTED***`);
+  // runs on user-facing output, not just logs). The original separator is
+  // preserved so the surrounding text isn't reformatted.
+  filtered = filtered.replace(/\b(AGW_MASTER_KEY|master[_.]?key)\b(\s*[=:]\s*)["']?[A-Za-z0-9+/]{20,}={0,2}/gi, (_m, name, sep) => `${name}${sep}***REDACTED***`);
   filtered = filtered.replace(/-----BEGIN\s(?:RSA\s)?PRIVATE\sKEY-----[\s\S]*?-----END\s(?:RSA\s)?PRIVATE\sKEY-----/g, '***PRIVATE_KEY_REDACTED***');
   filtered = filtered.replace(
-    /(?:password|secret|token|apikey|api_key|private_key|auth_token)\s*[=:]\s*["']?[^\s"']{8,}/gi,
+    /(?:password|passwd|pwd|secret|client_secret|token|access_token|refresh_token|apikey|api_key|private_key|auth_token|credential)\s*[=:]\s*["']?[^\s"']{8,}/gi,
     (match) => {
       const parts = match.split(/[=:]/);
       return parts[0] + '=***REDACTED***';
@@ -48,33 +53,70 @@ export function filterOutput(text: string): string {
 }
 
 /**
+ * Object keys whose value should be redacted wholesale, regardless of whether
+ * the value itself looks like a recognized secret. This catches short or opaque
+ * credentials (e.g. a plain password, an HTTP `Authorization` header value) that
+ * the pattern-based {@link filterOutput} can't recognize on their own. Matched
+ * case-insensitively against the full key, so it also covers HTTP header casing
+ * (`Authorization`, `Cookie`) that key-name allow-lists would miss.
+ */
+const SECRET_KEY_RE = /(?:password|passwd|pwd|secret|token|api[_-]?key|authorization|auth_token|credential|private[_-]?key|access[_-]?token|refresh[_-]?token|bot[_-]?token|master[_-]?key|client[_-]?secret|cookie|set-cookie)$/i;
+
+/**
  * Recursively redact secrets from an arbitrary value, preserving its shape.
- * Strings are run through {@link filterOutput}; objects and arrays are walked.
- * Used to scrub data before it is persisted or logged (e.g. tool-call arguments
- * recorded to the database), where secrets can be nested inside the structure.
- * Errors and other non-plain objects are returned untouched so their special
- * serialization (e.g. an Error's stack) is preserved.
+ * Strings are run through {@link filterOutput}; a value whose key name looks like
+ * a credential is redacted wholesale (see {@link SECRET_KEY_RE}); objects and
+ * arrays are walked. Used to scrub data before it is persisted or logged (e.g.
+ * tool-call arguments recorded to the database, or objects passed to the logger),
+ * where secrets can be nested inside the structure or stored under an opaque key.
+ * Errors, Dates, and other non-plain objects (Buffer, Map, Set, typed arrays,
+ * class instances) are returned untouched so their special serialization and
+ * shape are preserved.
  */
 export function redactSecrets<T>(value: T): T {
-  return redactSecretsInner(value, 0, new WeakSet<object>()) as T;
+  return redactSecretsInner(value, false, 0, new WeakSet<object>()) as T;
 }
 
-function redactSecretsInner(value: unknown, depth: number, seen: WeakSet<object>): unknown {
+function redactSecretsInner(value: unknown, keyIsSecret: boolean, depth: number, seen: WeakSet<object>): unknown {
+  // A credential-named key: redact its whole value (any primitive, or a nested
+  // structure) so opaque/short secrets are caught regardless of their content.
+  if (keyIsSecret && value != null && typeof value !== 'function') return '***REDACTED***';
   if (typeof value === 'string') return filterOutput(value);
   if (value === null || typeof value !== 'object') return value;
-  // Don't transform values with special serialization semantics; redacting them
-  // structurally would drop an Error's stack or a Date's value.
-  if (value instanceof Error || value instanceof Date) return value;
+  // Leave values with special serialization/shape untouched: redacting them
+  // structurally would drop an Error's stack or turn a Buffer/Map/Set/typed
+  // array/class instance into a corrupted plain object.
+  if (!isPlainObjectOrArray(value)) return value;
   // Bound recursion and break cycles so logging an arbitrary object can't hang.
   if (depth >= 8 || seen.has(value)) return value;
   seen.add(value);
-  if (Array.isArray(value)) return value.map((v) => redactSecretsInner(v, depth + 1, seen));
+  if (Array.isArray(value)) return value.map((v) => redactSecretsInner(v, false, depth + 1, seen));
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = redactSecretsInner(v, depth + 1, seen);
+    out[k] = redactSecretsInner(v, SECRET_KEY_RE.test(k), depth + 1, seen);
   }
   return out;
 }
+
+/** True only for arrays and plain `{}` objects — never Error/Date/Buffer/Map/Set/typed arrays/class instances. */
+function isPlainObjectOrArray(value: object): boolean {
+  if (Array.isArray(value)) return true;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+// Longer than any single contiguous secret pattern recognized by filterOutput
+// (the longest fixed-shape token is ~70 chars). Multi-segment / unbounded
+// secrets (PEM private-key blocks, JWTs) are handled separately below.
+const STREAM_HOLDBACK = 128;
+const PEM_BEGIN = /-----BEGIN (?:RSA )?PRIVATE KEY-----/;
+const PEM_END = /-----END (?:RSA )?PRIVATE KEY-----/;
+// A JWT only matches once all three dot-separated segments are present, but the
+// header+payload alone can far exceed the holdback. This matches an in-progress
+// JWT (header, optionally one or two more segments) anchored to the buffer end,
+// so we can refuse to release it until it completes (and is redacted) or proves
+// not to be a JWT at flush.
+const JWT_INPROGRESS = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/;
 
 /**
  * A streaming-safe secret redactor. Live token streams can't be redacted by
@@ -83,35 +125,39 @@ function redactSecretsInner(value: unknown, depth: number, seen: WeakSet<object>
  * text once enough following characters have arrived that a secret straddling
  * the boundary would already have been recognized (and redacted) as a whole.
  *
- * Invariant: the filtered output is monotonic — once a region has been emitted
- * it never changes, because we only release text that is `HOLDBACK` characters
- * back from the buffer's end (longer than any single contiguous secret), and we
- * never release into an unterminated PEM private-key block (which can exceed the
- * window). The held-back tail is released by {@link flush} at end of stream.
+ * Correctness: release decisions are made in FILTERED coordinates, never raw, so
+ * a completed redaction is always atomic in the emitted stream. We hold back the
+ * last STREAM_HOLDBACK chars (longer than any single contiguous secret) and
+ * never release into an unterminated PEM block or in-progress JWT (which can
+ * exceed the window). The held-back tail is released by {@link flush}.
+ *
+ * Cost: the raw buffer is trimmed once it grows past a bound, but only at a
+ * point verified to be free of any in-progress match, so trimming can't split a
+ * secret. This keeps per-delta work O(buffer-bound) instead of O(total-length),
+ * avoiding O(n^2) cost on long replies.
  */
 export function createStreamingRedactor(
   emit: (chunk: string) => void,
 ): { push(delta: string): void; flush(): void } {
-  // Longer than any single contiguous secret pattern recognized by filterOutput
-  // (the longest fixed-shape token is ~70 chars; private-key blocks are handled
-  // separately below).
-  const HOLDBACK = 96;
-  const BEGIN_KEY = /-----BEGIN (?:RSA )?PRIVATE KEY-----/;
-  const END_KEY = /-----END (?:RSA )?PRIVATE KEY-----/;
+  const TRIM_THRESHOLD = STREAM_HOLDBACK * 4;
+  const RETAIN = STREAM_HOLDBACK * 2;
   let buf = '';
-  let emitted = 0;
+  let emitted = 0; // filtered chars already emitted from the current buffer
+
+  function inMultipartSecret(): boolean {
+    const m = PEM_BEGIN.exec(buf);
+    if (m && !PEM_END.test(buf.slice(m.index))) return true;
+    return JWT_INPROGRESS.test(buf);
+  }
 
   function pump(final: boolean): void {
     const filtered = filterOutput(buf);
-    let safeLen = final ? filtered.length : Math.max(0, filtered.length - HOLDBACK);
+    let safeLen = final ? filtered.length : Math.max(0, filtered.length - STREAM_HOLDBACK);
     if (!final) {
-      // A private-key block can be longer than HOLDBACK, so its opening lines
-      // would otherwise escape the window before the END marker arrives. Never
-      // release past the start of an unterminated key block.
-      const m = BEGIN_KEY.exec(filtered);
-      if (m && !END_KEY.test(filtered.slice(m.index))) {
-        safeLen = Math.min(safeLen, m.index);
-      }
+      const m = PEM_BEGIN.exec(filtered);
+      if (m && !PEM_END.test(filtered.slice(m.index))) safeLen = Math.min(safeLen, m.index);
+      const j = JWT_INPROGRESS.exec(filtered);
+      if (j) safeLen = Math.min(safeLen, j.index);
     }
     if (safeLen > emitted) {
       emit(filtered.slice(emitted, safeLen));
@@ -119,8 +165,25 @@ export function createStreamingRedactor(
     }
   }
 
+  function maybeTrim(): void {
+    if (buf.length <= TRIM_THRESHOLD) return;
+    // Never drop the start of a multi-part secret still being streamed.
+    if (inMultipartSecret()) return;
+    const cut = buf.length - RETAIN;
+    // Only trim where a window around the cut is provably match-free, so no
+    // secret (and no completed redaction's source range) straddles it.
+    const lo = Math.max(0, cut - STREAM_HOLDBACK);
+    const hi = Math.min(buf.length, cut + STREAM_HOLDBACK);
+    const nbhd = buf.slice(lo, hi);
+    if (filterOutput(nbhd) !== nbhd) return;
+    const dropped = buf.slice(0, cut);
+    emitted -= filterOutput(dropped).length;
+    if (emitted < 0) emitted = 0;
+    buf = buf.slice(cut);
+  }
+
   return {
-    push(delta: string): void { buf += delta; pump(false); },
+    push(delta: string): void { buf += delta; pump(false); maybeTrim(); },
     flush(): void { pump(true); buf = ''; emitted = 0; },
   };
 }

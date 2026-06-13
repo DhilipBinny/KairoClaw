@@ -19,20 +19,27 @@ const DEFAULT_RETENTION_DAYS = 7;
 
 // ── Redaction ──────────────────────────────────────
 // Secrets can reach the logs two ways: embedded in a free-text message, or as a
-// structured field. We defend both. `redact` censors well-known credential keys
-// by name (catching values that don't match a pattern, e.g. a short password).
-// The `logMethod` hook scrubs pattern-matchable secrets anywhere in the message
-// string or merged object. As a backstop, the file and ring-buffer streams (the
-// persisted and admin-visible destinations) run filterOutput over every line,
-// which also covers serialized Error messages/stacks the hook leaves intact.
+// structured field. We defend both, on all three destinations:
+//   - `redact` censors well-known credential keys by name (catching values that
+//     don't match a pattern, e.g. a short password). It also covers `.child()`
+//     bindings, which never pass through the logMethod hook.
+//   - The `logMethod` hook scrubs pattern-matchable secrets anywhere in the
+//     message string or merged object, and (via redactSecrets) redacts values
+//     under credential-looking keys case-insensitively.
+//   - As a final backstop, EVERY destination stream (file, ring buffer, and the
+//     pretty/stdout stream) runs filterOutput over each rendered line, which
+//     also covers serialized Error messages/stacks the hook leaves intact.
 
 const REDACT_PATHS = [
   'password', 'token', 'secret', 'apiKey', 'api_key', 'apikey', 'authorization',
   'accessToken', 'access_token', 'refreshToken', 'refresh_token',
   'privateKey', 'private_key', 'botToken', 'bot_token', 'masterKey', 'master_key',
   'AGW_MASTER_KEY', 'TELEGRAM_BOT_TOKEN', 'BRAVE_API_KEY',
+  // pino matches paths case-sensitively, so list HTTP-header / capitalized forms.
+  'Authorization', 'Cookie', 'Password', 'Token', 'Secret',
   '*.password', '*.token', '*.secret', '*.apiKey', '*.api_key', '*.authorization',
   '*.accessToken', '*.refreshToken', '*.privateKey', '*.botToken',
+  '*.Authorization', '*.Cookie',
 ];
 
 function redactLogMethod(this: unknown, args: unknown[], method: (...a: unknown[]) => void): void {
@@ -48,6 +55,16 @@ const REDACT_OPTIONS = {
   redact: { paths: REDACT_PATHS, censor: '***REDACTED***' },
   hooks: { logMethod: redactLogMethod },
 };
+
+/** Wrap a destination stream so every rendered line is run through filterOutput. */
+function redactingWritable(dest: NodeJS.WritableStream): Writable {
+  return new Writable({
+    write(chunk: Buffer, _encoding: string, callback: () => void) {
+      dest.write(filterOutput(chunk.toString()));
+      callback();
+    },
+  });
+}
 
 // ── Types ─────────────────────────────────────────
 
@@ -199,14 +216,18 @@ export function getLogsDir(): string { return _logsDir; }
 // ── Logger Factories ───────────────────────────────
 
 export function createLogger(level?: string): Logger {
+  // Use a direct pino-pretty stream (not a worker-thread transport) so its
+  // rendered output passes through the filterOutput backstop before stdout.
+  const prettyStream = pinoPretty({
+    colorize: true,
+    translateTime: 'HH:MM:ss',
+    ignore: 'pid,hostname',
+    destination: redactingWritable(process.stdout),
+  });
   return pino({
     level: level || process.env.LOG_LEVEL || 'info',
     ...REDACT_OPTIONS,
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
-    },
-  });
+  }, prettyStream);
 }
 
 export function createModuleLogger(category: LogCategory | string, level?: string): Logger {
@@ -251,7 +272,10 @@ export function createServerLogger(stateDir: string, level?: string): { stream: 
     colorize: true,
     translateTime: 'HH:MM:ss',
     ignore: 'pid,hostname',
-    destination: process.stdout,
+    // Backstop redaction over the rendered line before it reaches stdout, so
+    // secrets in serialized Errors / child bindings the hook leaves intact don't
+    // leak to the terminal/journald.
+    destination: redactingWritable(process.stdout),
   });
 
   const stream = multistream([
