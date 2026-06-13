@@ -141,12 +141,15 @@ export interface CronJob {
 
 export type JobExecutor = (job: CronJob) => Promise<{ text?: string; media?: import('@agw/types').MediaAttachment[] }>;
 
-/** Callback that delivers a cron job result to a specific channel. */
+/** Callback that delivers a cron job result to a specific channel.
+ * `ownerId` is the job's owner user id (null for system-owned jobs) so the
+ * deliverer can route per-user instead of broadcasting (#191). */
 export type JobDeliverer = (
   text: string,
   channel: string,
   to?: string,
   media?: import('@agw/types').MediaAttachment[],
+  ownerId?: string | null,
 ) => Promise<void>;
 
 // ---------------------------------------------------------------------------
@@ -509,7 +512,7 @@ export class CronScheduler {
           const delivered: string[] = [];
           for (const target of targets) {
             try {
-              await this.deliverer(responseText, target.channel, target.to, responseMedia);
+              await this.deliverer(responseText, target.channel, target.to, responseMedia, job.userId ?? null);
               delivered.push(target.channel);
             } catch (e) {
               this.log.error({ jobId: job.id, channel: target.channel, err: e instanceof Error ? e.message : String(e) }, 'Cron delivery to channel failed');

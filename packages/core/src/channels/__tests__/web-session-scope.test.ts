@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { webChatId, isValidSessionKey, ownsWebSession, sessionKeyFromWebChatId } from '../webchat.js';
+import { webChatId, isValidSessionKey, ownsWebSession, sessionKeyFromWebChatId, webDeliveryMatches } from '../webchat.js';
 
 const USER_A = 'uuid-aaaa';
 const USER_B = 'uuid-bbbb';
@@ -53,6 +53,28 @@ describe('web session scoping (#178)', () => {
 
     it('legacy unscoped "web:main" null-owner session is NOT world-readable', () => {
       expect(ownsWebSession({ user_id: null, chat_id: 'web:main' }, USER_A, 'user')).toBe(false);
+    });
+  });
+
+  describe('webDeliveryMatches — per-user routing (#191)', () => {
+    const a = { sessionKey: 'uuid-aaaa:main', clientId: USER_A, role: 'user' };
+    const b = { sessionKey: 'uuid-bbbb:main', clientId: USER_B, role: 'admin' };
+
+    it('userId filter delivers only to that user\'s connections', () => {
+      expect(webDeliveryMatches(a, { userId: USER_A })).toBe(true);
+      expect(webDeliveryMatches(b, { userId: USER_A })).toBe(false); // another user never receives
+    });
+    it('adminOnly filter delivers only to admin connections', () => {
+      expect(webDeliveryMatches(b, { adminOnly: true })).toBe(true);
+      expect(webDeliveryMatches(a, { adminOnly: true })).toBe(false);
+    });
+    it('sessionKey filter restricts to one bound session', () => {
+      expect(webDeliveryMatches(a, { sessionKey: 'uuid-aaaa:main' })).toBe(true);
+      expect(webDeliveryMatches(a, { sessionKey: 'uuid-bbbb:main' })).toBe(false);
+    });
+    it('empty filter is the only case that reaches everyone', () => {
+      expect(webDeliveryMatches(a, {})).toBe(true);
+      expect(webDeliveryMatches(b, {})).toBe(true);
     });
   });
 
