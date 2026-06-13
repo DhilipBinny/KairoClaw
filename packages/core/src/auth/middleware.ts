@@ -3,6 +3,9 @@ import fp from 'fastify-plugin';
 import { hashApiKey } from './keys.js';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { AuditService } from '../security/audit.js';
+import type { MediaUrlSigner } from '../media/signing.js';
+
+const MEDIA_FILE_RE = /^\/api\/v1\/media\/([a-zA-Z0-9._-]+\.[a-z0-9]+)$/i;
 
 export interface AuthUser {
   id: string;
@@ -24,8 +27,8 @@ declare module 'fastify' {
  * Authentication plugin for Fastify.
  * Uses fastify-plugin to break encapsulation — hooks apply to ALL routes.
  */
-export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService }>(async (app, opts) => {
-  const { db, auditService } = opts;
+export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService; mediaSigner?: MediaUrlSigner }>(async (app, opts) => {
+  const { db, auditService, mediaSigner } = opts;
 
   app.decorateRequest('user', undefined);
   app.decorateRequest('tenantId', undefined);
@@ -35,9 +38,29 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService 
     const publicPaths = ['/api/v1/health', '/api/v1/auth/login'];
     if (publicPaths.some(p => request.url === p || request.url.startsWith(p + '?'))) return;
 
-    // Media files need to be loadable by <img> tags (no auth header possible)
-    // Only bypass for actual file requests (uuid.ext pattern), not sub-routes
-    if (/^\/api\/v1\/media\/[a-f0-9-]+\.[a-z0-9]+$/i.test(request.url.split('?')[0])) return;
+    // Media files are loaded by plain <img>/external fetchers that can't send an
+    // Authorization header. Grant access only when the request carries a valid,
+    // unexpired signed token; otherwise fall through to normal authentication
+    // (a logged-in client can still load media with its Bearer/?token= key).
+    const mediaMatch = request.url.split('?')[0].match(MEDIA_FILE_RE);
+    if (mediaMatch && mediaSigner) {
+      const q = request.query as Record<string, unknown> | undefined;
+      const rawExpires = q?.expires;
+      const sig = q?.sig;
+      // Require canonical, single-valued params: Fastify yields string[] for
+      // duplicated keys, so reject anything that isn't a plain decimal string
+      // rather than relying on Number()/Buffer coercion to fail. The regex
+      // charset excludes '%', so mediaMatch[1] is already the exact raw
+      // filename that getUrl() signed — no decoding needed.
+      if (
+        typeof sig === 'string' &&
+        typeof rawExpires === 'string' &&
+        /^[0-9]+$/.test(rawExpires) &&
+        mediaSigner.verify(mediaMatch[1], Number(rawExpires), sig, Date.now())
+      ) {
+        return;
+      }
+    }
 
     // Also skip non-API routes (static files, etc.)
     if (!request.url.startsWith('/api/')) return;

@@ -27,6 +27,7 @@ import { MemorySystem } from './memory/index.js';
 import { MCPBridge } from './mcp/bridge.js';
 import { registerAllPlugins, reloadPlugins, loadPlugins } from './plugins/index.js';
 import { MediaStore } from './media/store.js';
+import { createMediaUrlSigner, deriveMediaSigningKey } from './media/signing.js';
 import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
@@ -222,6 +223,11 @@ async function main(): Promise<void> {
   migrateToSecretsStore(stateDir);
   const masterKey = resolveMasterKey(stateDir);
   const secretsStore = new SecretsStore(stateDir, masterKey);
+  // Signer for time-limited media URLs (key derived from the master key, so it
+  // survives restarts). Without a master key, media falls back to auth-only.
+  const mediaSigner = masterKey
+    ? createMediaUrlSigner(deriveMediaSigningKey(masterKey))
+    : undefined;
   if (secretsStore.isEncrypted) {
     console.log('  Secrets: encrypted (AES-256-GCM envelope encryption)');
   }
@@ -289,7 +295,7 @@ async function main(): Promise<void> {
   }
 
   // 7a. Initialize media store + load plugins from plugins.json
-  const mediaStore = new MediaStore(stateDir);
+  const mediaStore = new MediaStore(stateDir, mediaSigner);
   mediaStore.startCleanup();
 
   // Load plugins.json into runtime config
@@ -617,7 +623,7 @@ async function main(): Promise<void> {
   };
 
   // 11. Register auth plugin (BEFORE routes)
-  await server.register(authPlugin, { db, auditService });
+  await server.register(authPlugin, { db, auditService, mediaSigner });
 
   // 12. Register ALL routes
   await server.register(registerHealthRoutes, { secretsStore });

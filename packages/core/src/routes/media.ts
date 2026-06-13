@@ -25,7 +25,10 @@ const MIME_TYPES: Record<string, string> = {
 export const registerMediaRoutes: FastifyPluginAsync<{ mediaStore: MediaStore }> = async (app, opts) => {
   const { mediaStore } = opts;
 
-  // GET /api/v1/media/:filename — serve a media file (no auth required for image embedding)
+  // GET /api/v1/media/:filename — serve a media file. Auth is enforced upstream:
+  // the request must carry a Bearer/?token= key or a valid signed-URL grant
+  // (see auth middleware). A signed grant has no user, so it can only reach
+  // MediaStore + shared/media; scoped files still require an authenticated user.
   app.get('/api/v1/media/:filename', async (request, reply) => {
     const { filename } = request.params as { filename: string };
 

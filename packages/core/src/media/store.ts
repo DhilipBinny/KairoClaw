@@ -9,14 +9,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { MEDIA_RETENTION_DAYS, MEDIA_CLEANUP_INTERVAL_MS } from '../constants.js';
+import type { MediaUrlSigner } from './signing.js';
 
 export class MediaStore {
   private mediaDir: string;
   private cleanupTimer?: ReturnType<typeof setInterval>;
+  private signer?: MediaUrlSigner;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, signer?: MediaUrlSigner) {
     this.mediaDir = path.join(stateDir, 'media');
     fs.mkdirSync(this.mediaDir, { recursive: true });
+    this.signer = signer;
   }
 
   /** Get the media directory path. */
@@ -56,11 +59,14 @@ export class MediaStore {
 
   /**
    * Build a URL for a media file.
-   * Uses the gateway's host:port from config.
+   * Uses the gateway's host:port from config. When a signer is configured the
+   * URL carries a time-limited signature so it can be loaded without an auth
+   * header (the media route otherwise requires authentication).
    */
   getUrl(filename: string, baseUrl?: string): string {
     const base = baseUrl || '';
-    return `${base}/api/v1/media/${encodeURIComponent(filename)}`;
+    const url = `${base}/api/v1/media/${encodeURIComponent(filename)}`;
+    return this.signer ? this.signer.signUrl(url, filename) : url;
   }
 
   /**
