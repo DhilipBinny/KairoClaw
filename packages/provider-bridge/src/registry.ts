@@ -151,15 +151,24 @@ export class ProviderRegistry {
 
     const { providerName, modelId } = this.parseModelRef(chatArgs.model);
     const primary = this.providers[providerName];
+
+    // Primary unconfigured (no API key): walk the fallback chain instead of
+    // failing. Previously this threw 'unreachable' before any fallback ran (#183).
     if (!primary) {
-      await this.getProvider(chatArgs.model);
-      throw new Error('unreachable');
+      this.log.warn({ wanted: providerName }, 'Primary provider unconfigured — trying fallback chain');
+      return await this.runFallbackChain(
+        chatArgs,
+        providerName,
+        new Error(`No provider available for "${providerName}". Configure an API key.`),
+      );
     }
 
     const model = modelId || (primary as ProviderInterface & { defaultModel?: string }).defaultModel || '';
 
     try {
-      return await this.callWithRetry(primary, { ...chatArgs, model });
+      const resp = await this.callWithRetry(primary, { ...chatArgs, model });
+      resp.servedModel = `${providerName}/${model}`;
+      return resp;
     } catch (primaryErr: unknown) {
       // compact_and_retry should NOT trigger failover — re-throw for agent loop
       if (primaryErr instanceof CompactionNeededError) {
@@ -173,35 +182,61 @@ export class ProviderRegistry {
 
       const primaryError = primaryErr as Error;
       this.log.warn({ provider: providerName, err: primaryError.message }, 'Primary provider failed');
+      return await this.runFallbackChain(chatArgs, providerName, primaryError);
+    }
+  }
 
-      const chain = this.config.model.fallbackChain?.length
-        ? this.config.model.fallbackChain
-        : this.config.model.fallback ? [this.config.model.fallback] : [];
+  /**
+   * Try each configured fallback provider in order, returning the first success
+   * and stamping the response with the provider/model that actually served it.
+   * Used both when the primary is unconfigured and when it fails (#183). Throws
+   * the last error (or the supplied primary error) if none succeed.
+   */
+  private async runFallbackChain(
+    chatArgs: ChatArgs,
+    excludeProvider: string,
+    primaryError: Error,
+  ): Promise<ProviderResponse> {
+    const chain = this.config.model.fallbackChain?.length
+      ? this.config.model.fallbackChain
+      : this.config.model.fallback ? [this.config.model.fallback] : [];
 
-      for (const fbRef of chain) {
-        if (!fbRef) continue;
-        const { providerName: fbName, modelId: fbModel } = this.parseModelRef(fbRef);
-        const fallback = this.providers[fbName];
-        if (!fallback || fbName === providerName) continue;
+    let lastError = primaryError;
+    for (let i = 0; i < chain.length; i++) {
+      const fbRef = chain[i];
+      if (!fbRef) continue;
+      // Respect mid-chain cancellation rather than burning another generation.
+      if (chatArgs.signal?.aborted) throw lastError;
 
-        this.log.info({ from: providerName, to: fbName, attempt: chain.indexOf(fbRef) + 1 }, 'Failing over to next provider');
-        this.failoverLog.push({ ts: new Date().toISOString(), from: providerName, to: fbName, error: primaryError.message });
-        if (this.failoverLog.length > 50) {
-          this.failoverLog = this.failoverLog.slice(-50);
-        }
+      const { providerName: fbName, modelId: fbModel } = this.parseModelRef(fbRef);
+      const fallback = this.providers[fbName];
+      if (!fallback || fbName === excludeProvider) continue;
 
-        try {
-          return await this.callWithRetry(fallback, {
-            ...chatArgs,
-            model: fbModel || (fallback as ProviderInterface & { defaultModel?: string }).defaultModel || '',
-          });
-        } catch (fbErr: unknown) {
-          this.log.warn({ provider: fbName, err: (fbErr as Error).message }, 'Fallback provider failed, trying next');
-        }
+      const fbResolvedModel = fbModel || (fallback as ProviderInterface & { defaultModel?: string }).defaultModel || '';
+      this.log.info({ from: excludeProvider, to: fbName, attempt: i + 1 }, 'Failing over to next provider');
+      this.failoverLog.push({ ts: new Date().toISOString(), from: excludeProvider, to: fbName, error: primaryError.message });
+      if (this.failoverLog.length > 50) {
+        this.failoverLog = this.failoverLog.slice(-50);
       }
 
-      throw primaryErr;
+      try {
+        const resp = await this.callWithRetry(fallback, { ...chatArgs, model: fbResolvedModel });
+        resp.servedModel = `${fbName}/${fbResolvedModel}`;
+        return resp;
+      } catch (fbErr: unknown) {
+        // Compaction needs must propagate, not be swallowed as a failover miss.
+        if (fbErr instanceof CompactionNeededError) throw fbErr;
+        lastError = fbErr as Error;
+        this.log.warn({ provider: fbName, err: lastError.message }, 'Fallback provider failed, trying next');
+      }
     }
+
+    // Everything failed. Prefer the primary error when it is an actionable
+    // config problem (e.g. a bad/missing API key) so the user still sees the
+    // "check your API key" message rather than a transient fallback error;
+    // otherwise surface the most recent attempt's error.
+    if (classifyError(primaryError).type === 'auth_error') throw primaryError;
+    throw lastError;
   }
 
   private async callWithRetry(
