@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { AgwLogger } from '@agw/types';
 import { noopLogger } from '@agw/types';
+import { validateServerEnv } from './security.js';
 import type {
   MCPServerConfig,
   MCPServerStatus,
@@ -77,6 +78,16 @@ class StdioTransport {
         if (process.env[key]) safeEnv[key] = process.env[key]!;
       }
       const mergedEnv = { ...safeEnv, ...this.env };
+
+      // Warn if the configured server env appears to carry gateway secrets — they
+      // would be handed to a third-party MCP process. (Admin-configured, so we
+      // warn rather than refuse, but loudly.)
+      const envCheck = validateServerEnv(this.env);
+      if (!envCheck.safe) {
+        for (const w of envCheck.warnings) {
+          this.log.warn({ command: this.command }, `MCP server env: ${w}`);
+        }
+      }
 
       const child = spawn(this.command, this.args, {
         stdio: ['pipe', 'pipe', 'pipe'],

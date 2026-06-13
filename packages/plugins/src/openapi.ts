@@ -13,9 +13,11 @@
  * by default (configurable via `skipPaths`).
  */
 
+import { fetch } from 'undici';
 import type { HttpPluginConfig, HttpEndpointConfig, ResponseMediaMapping } from '@agw/types';
 import { noopLogger, type AgwLogger } from '@agw/types';
-import { validatePluginUrl } from './http.js';
+import { validatePluginUrl, readBodyCapped } from './http.js';
+import { ssrfSafeDispatcher } from './ssrf.js';
 
 let log: AgwLogger = noopLogger;
 export function setOpenAPILogger(logger: AgwLogger): void { log = logger; }
@@ -172,13 +174,15 @@ export async function importOpenAPIService(
   const res = await fetch(specUrl, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(10000),
+    dispatcher: ssrfSafeDispatcher(),
   });
 
   if (!res.ok) {
+    if (typeof res.body?.cancel === 'function') res.body.cancel().catch(() => { /* release socket */ });
     throw new Error(`Failed to fetch OpenAPI spec from ${specUrl}: ${res.status} ${res.statusText}`);
   }
 
-  const spec = await res.json() as OpenAPISpec;
+  const spec = JSON.parse((await readBodyCapped(res)).toString('utf8')) as OpenAPISpec;
 
   if (!spec.paths || Object.keys(spec.paths).length === 0) {
     throw new Error(`OpenAPI spec from ${specUrl} has no paths`);
