@@ -43,7 +43,7 @@ import { SubAgentRegistry } from './subagent-registry.js';
 import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
-import { filterOutput, containsSecrets, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
+import { filterOutput, containsSecrets, redactSecrets, createStreamingRedactor, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
 
 /**
  * Tools that send data to a network destination. A secret appearing in their
@@ -349,7 +349,10 @@ async function executeSingleTool(
         id: p.tc.id || crypto.randomUUID(),
         sessionId: context.session.id, tenantId: context.tenantId,
         userId: context.userId, toolName: p.toolName,
-        arguments: p.toolArgs,
+        // Redact secrets from the persisted arguments too — a credential passed
+        // as a tool argument would otherwise sit in the audit log in clear text
+        // (the result is already filtered below).
+        arguments: redactSecrets(p.toolArgs),
         result: typeof result === 'string' ? filterOutput(result) : result,
         status: toolStatus, durationMs,
       });
@@ -632,7 +635,13 @@ export async function runAgent(
   // final text, so manipulated output can't leak mid-stream before the output
   // block fires (#182). (`s` is only referenced here at call time, inside the
   // loop, by which point it is initialized.)
-  const onDelta = (d: string) => { streamedParts.push(d); if (!s.injectionDetected) rawOnDelta?.(d); };
+  // Stream tokens to the client through a redactor so a secret split across
+  // deltas can't leak live (the final text is filtered separately below) (#185).
+  // streamedParts always captures the RAW stream so a cancelled turn can still
+  // return its partial text and the final filter sees the complete output.
+  const forwardDelta = (chunk: string) => { if (!s.injectionDetected) rawOnDelta?.(chunk); };
+  const streamRedactor = rawOnDelta ? createStreamingRedactor(forwardDelta) : null;
+  const onDelta = (d: string) => { streamedParts.push(d); streamRedactor?.push(d); };
   // Suppress the extended-thinking stream the same way, so injected content
   // can't leak live via thinking deltas once an injection is detected (#182).
   const onThinkingDelta = rawOnThinkingDelta
@@ -923,6 +932,10 @@ export async function runAgent(
   }
 
   // ── Post-loop finalization ──────────────────────────────
+  // Release the redactor's held-back tail so the live stream shows the complete
+  // reply. Skipped on abort (the partial text is returned via streamedParts) and
+  // suppressed by the emit guard if an injection was detected mid-turn (#185).
+  if (streamRedactor && !s.aborted) streamRedactor.flush();
   context.signal?.removeEventListener('abort', onParentAbort);
   // On cancellation, kill any in-flight sub-agents before draining so they
   // don't keep burning tokens after the parent turn was stopped.

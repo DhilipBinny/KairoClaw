@@ -9,6 +9,8 @@ export {
 export {
   filterOutput,
   containsSecrets,
+  redactSecrets,
+  createStreamingRedactor,
   checkOutputSafety,
   neutralizeToolResultDelimiters,
   sanitizeToolName,

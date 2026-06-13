@@ -12,9 +12,42 @@ import type { Logger } from 'pino';
 import { Writable } from 'node:stream';
 import type { AgwLogger } from '@agw/types';
 import pinoPretty from 'pino-pretty';
+import { filterOutput, redactSecrets } from '@agw/security';
 
 const DEFAULT_BUFFER_CAPACITY = 1_000;
 const DEFAULT_RETENTION_DAYS = 7;
+
+// ── Redaction ──────────────────────────────────────
+// Secrets can reach the logs two ways: embedded in a free-text message, or as a
+// structured field. We defend both. `redact` censors well-known credential keys
+// by name (catching values that don't match a pattern, e.g. a short password).
+// The `logMethod` hook scrubs pattern-matchable secrets anywhere in the message
+// string or merged object. As a backstop, the file and ring-buffer streams (the
+// persisted and admin-visible destinations) run filterOutput over every line,
+// which also covers serialized Error messages/stacks the hook leaves intact.
+
+const REDACT_PATHS = [
+  'password', 'token', 'secret', 'apiKey', 'api_key', 'apikey', 'authorization',
+  'accessToken', 'access_token', 'refreshToken', 'refresh_token',
+  'privateKey', 'private_key', 'botToken', 'bot_token', 'masterKey', 'master_key',
+  'AGW_MASTER_KEY', 'TELEGRAM_BOT_TOKEN', 'BRAVE_API_KEY',
+  '*.password', '*.token', '*.secret', '*.apiKey', '*.api_key', '*.authorization',
+  '*.accessToken', '*.refreshToken', '*.privateKey', '*.botToken',
+];
+
+function redactLogMethod(this: unknown, args: unknown[], method: (...a: unknown[]) => void): void {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (typeof a === 'string') args[i] = filterOutput(a);
+    else if (a && typeof a === 'object') args[i] = redactSecrets(a);
+  }
+  method.apply(this, args);
+}
+
+const REDACT_OPTIONS = {
+  redact: { paths: REDACT_PATHS, censor: '***REDACTED***' },
+  hooks: { logMethod: redactLogMethod },
+};
 
 // ── Types ─────────────────────────────────────────
 
@@ -96,7 +129,10 @@ function createLogBufferStream(): Writable {
     objectMode: false,
     write(chunk: Buffer, _encoding: string, callback: () => void) {
       try {
-        const entry = JSON.parse(chunk.toString());
+        // Backstop redaction over the whole line (covers serialized Error
+        // messages/stacks the logMethod hook leaves intact). Replacements never
+        // contain quotes/braces, so the line stays valid JSON.
+        const entry = JSON.parse(filterOutput(chunk.toString()));
         const msg = entry.msg || '';
         if (msg === 'incoming request' || msg === 'request completed') {
           callback();
@@ -130,7 +166,8 @@ function createFileStream(logsDir: string, retentionDays = DEFAULT_RETENTION_DAY
         fd = fs.openSync(filePath, 'a');
         cleanOldLogs(logsDir, retentionDays);
       }
-      fs.writeSync(fd, chunk.toString());
+      // Backstop redaction over the persisted line (see ring-buffer stream).
+      fs.writeSync(fd, filterOutput(chunk.toString()));
       callback();
     },
     final(callback: () => void) {
@@ -164,6 +201,7 @@ export function getLogsDir(): string { return _logsDir; }
 export function createLogger(level?: string): Logger {
   return pino({
     level: level || process.env.LOG_LEVEL || 'info',
+    ...REDACT_OPTIONS,
     transport: {
       target: 'pino-pretty',
       options: { colorize: true, translateTime: 'HH:MM:ss', ignore: 'pid,hostname' },
@@ -177,7 +215,7 @@ export function createModuleLogger(category: LogCategory | string, level?: strin
   function getInner(): Logger {
     if (_inner) return _inner;
     if (_sharedStream) {
-      _inner = pino({ level: logLevel }, _sharedStream).child({ category });
+      _inner = pino({ level: logLevel, ...REDACT_OPTIONS }, _sharedStream).child({ category });
     } else {
       _inner = createLogger(logLevel).child({ category });
     }

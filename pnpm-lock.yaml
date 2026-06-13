@@ -246,6 +246,9 @@ importers:
 
   packages/logger:
     dependencies:
+      '@agw/security':
+        specifier: workspace:*
+        version: link:../security
       '@agw/types':
         specifier: workspace:*
         version: link:../types
