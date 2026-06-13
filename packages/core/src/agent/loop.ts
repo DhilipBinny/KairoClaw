@@ -569,6 +569,42 @@ async function persistResults(s: RunState, context: AgentContext): Promise<void>
   }
 }
 
+/**
+ * Persist the assistant (with its tool_calls) and tool-result messages produced
+ * in one completed round. Called only after the round's tools have run and any
+ * sub-agent placeholders have been finalized, so the stored content matches what
+ * the model saw. Without this, tool work was never written to the DB — leaving
+ * soft/hard compaction with nothing to compact, undercounting tokens, and making
+ * reactive-compact recovery (which reloads from the DB) silently drop the round's
+ * tool work (#184).
+ */
+async function persistRoundMessages(s: RunState, context: AgentContext, fromIndex: number): Promise<void> {
+  if (!s.messageRepo) return;
+  for (let i = fromIndex; i < s.messages.length; i++) {
+    const m = s.messages[i];
+    try {
+      const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      // Filter assistant-generated text the same way the final reply is filtered,
+      // so a secret the model echoes mid-turn isn't stored in clear text (#185).
+      // Tool/user content is stored as-is: the messages table is the actual
+      // conversation that must be replayed verbatim to the model next turn, so
+      // redacting it would corrupt context. (The disposable tool_calls audit copy
+      // IS redacted; at-rest protection for this table is the DB-level control.)
+      const content = m.role === 'assistant' ? filterOutput(raw) : raw;
+      await s.messageRepo.create({
+        sessionId: context.session.id,
+        tenantId: context.tenantId,
+        role: m.role,
+        content,
+        toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : undefined,
+        toolCallId: m.tool_call_id ?? undefined,
+      });
+    } catch (e: unknown) {
+      s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), role: m.role }, 'Failed to persist round message (non-critical)');
+    }
+  }
+}
+
 // ─── Stage: Memory extraction (fire-and-forget) ──────────────
 
 function triggerMemoryExtraction(s: RunState, context: AgentContext): void {
@@ -833,6 +869,12 @@ export async function runAgent(
             const freshRows = await s.messageRepo.listBySession(session.id);
             s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage));
             s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
+            // Compaction rewrote the table (delete-all + re-insert with new ids),
+            // so this turn's rows no longer exist as a contiguous suffix and the
+            // captured user-message id is stale. The post-compaction state is
+            // already valid and paired, so there is nothing to roll back —
+            // disable the per-turn rollback to avoid deleting unrelated history.
+            s.userMsgResult = null;
           } catch (compactErr: unknown) {
             reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');
           }
@@ -856,15 +898,15 @@ export async function runAgent(
             continue;
           }
           reqLog.error({ attempt: s.reactiveCompactFailures, errorType: retryClassified.type }, 'LLM call failed after reactive compact — giving up');
-          if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+          if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
           return { text: retryClassified.userMessage || 'Your conversation is too long even after compaction. Please start a new session with /new.', error: true };
         }
       } else if (classified.type === 'auth_error') {
-        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+        if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
         return { text: classified.userMessage || 'Authentication failed. Please check your API key configuration.', error: true };
       } else {
         reqLog.error({ latencyMs: Date.now() - llmStart, errorType: classified.type, action: classified.action }, 'LLM call failed');
-        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+        if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
         if (classified.type === 'prompt_too_long') {
           return { text: 'Your conversation is too long even after multiple compaction attempts. Please start a new session with /new.', error: true };
         }
@@ -935,12 +977,23 @@ export async function runAgent(
 
     // Append assistant message + execute tools. If cancellation arrived during
     // the LLM call, stop here rather than kicking off a new batch of tools.
+    const roundStartIdx = s.messages.length;
     const assistantMsg: Message = { role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks };
     s.messages.push(assistantMsg);
     s.totalContentSize += contentLen(assistantMsg.content);
+    // Abort before executing tools: don't persist the assistant tool_use, or it
+    // would be an orphaned tool_use with no results on the next reload.
     if (context.signal?.aborted) { s.aborted = true; if (onRoundEnd) onRoundEnd(s.round, maxToolRounds); break; }
     await executeToolCalls(response.toolCalls, s, context, callbacks);
     await drainSubAgents(s);
+
+    // Persist the completed round (assistant tool_use + tool results) so it
+    // survives reload/compaction (#184). Skip if cancelled mid-execution: the
+    // round may hold an assistant tool_use whose later tool calls never ran, and
+    // persisting that orphaned tool_use would make the next reload fail provider
+    // validation. The whole turn is being cancelled anyway, so dropping the
+    // partial round (as before this change) is the safe choice.
+    if (!ephemeral && !s.aborted) await persistRoundMessages(s, context, roundStartIdx);
 
     if (onRoundEnd) onRoundEnd(s.round, maxToolRounds);
   }

@@ -1,0 +1,228 @@
+import { describe, it, expect } from 'vitest';
+import os from 'node:os';
+import { runAgent, type AgentContext } from '../loop.js';
+import { MessageRepository } from '../../db/repositories/message.js';
+import { createTestDb, type TestDb } from '../../db/__tests__/test-db.js';
+import { rowToMessage, normalizeMessages } from '@agw/agent-core';
+import type { InboundMessage, GatewayConfig, ProviderResponse } from '@agw/types';
+
+function makeConfig(): GatewayConfig {
+  return {
+    model: { primary: 'anthropic/claude-sonnet-4-20250514', fallback: '', fallbackChain: [] },
+    agent: {
+      name: 'Test', workspace: os.tmpdir(), maxToolRounds: 10,
+      compactionThreshold: 0.75, softCompactionThreshold: 0.5, keepRecentMessages: 10,
+      routing: { enabled: false }, sessionMemory: { enabled: false },
+    },
+    gateway: { port: 3000, host: '0.0.0.0', token: '' },
+    providers: {} as any,
+  } as unknown as GatewayConfig;
+}
+
+async function seedSession(db: TestDb, id: string): Promise<AgentContext['session']> {
+  await db.run(
+    `INSERT INTO sessions (id, tenant_id, channel, model) VALUES (?, 'test-tenant', 'web', ?)`,
+    [id, 'anthropic/claude-sonnet-4-20250514'],
+  );
+  return (await db.get<AgentContext['session']>('SELECT * FROM sessions WHERE id = ?', [id]))!;
+}
+
+const TOOL_CALL = (name: string, id: string) => ([{ id, type: 'function', function: { name, arguments: '{}' } }]);
+
+function baseContext(db: TestDb, session: AgentContext['session'], overrides: Partial<AgentContext>): AgentContext {
+  return {
+    db: db as any, config: makeConfig(), session, tenantId: 'test-tenant',
+    model: 'anthropic/claude-sonnet-4-20250514', ephemeral: false, tools: [],
+    callLLM: async () => ({ text: 'hi', usage: { inputTokens: 1, outputTokens: 1 } } as unknown as ProviderResponse),
+    ...overrides,
+  };
+}
+
+describe('tool-result persistence (#184)', () => {
+  it('persists assistant tool_use + tool results, ordered, and reloadable as valid pairs', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's1');
+      const repo = new MessageRepository(db as any);
+      let round = 0;
+
+      const result = await runAgent(
+        { text: 'use the tool', channel: 'web', chatId: 'web:s1', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          callLLM: async () => {
+            round++;
+            if (round === 1) {
+              return { text: 'let me check', usage: { inputTokens: 5, outputTokens: 5 }, toolCalls: TOOL_CALL('lookup', 'tc1') } as unknown as ProviderResponse;
+            }
+            return { text: 'final answer', usage: { inputTokens: 5, outputTokens: 5 } } as unknown as ProviderResponse;
+          },
+          executeTool: async () => 'LOOKUP_RESULT_PAYLOAD',
+        }),
+      );
+
+      expect(result.text).toBe('final answer');
+
+      const rows = await repo.listBySession('s1');
+      const seq = rows.map(r => r.role);
+      // user → assistant(tool_use) → tool result → assistant(final)
+      expect(seq).toEqual(['user', 'assistant', 'tool', 'assistant']);
+
+      const toolUse = rows[1];
+      expect(toolUse.tool_calls).toBeTruthy();
+      expect(JSON.parse(toolUse.tool_calls!)[0].id).toBe('tc1');
+
+      const toolResult = rows[2];
+      expect(toolResult.tool_call_id).toBe('tc1');
+      expect(toolResult.content).toContain('LOOKUP_RESULT_PAYLOAD');
+
+      // Reloading the persisted rows yields a valid, paired message list (no
+      // orphaned tool_use / tool_result) — what the next turn would send.
+      const reloaded = normalizeMessages(rows.map(rowToMessage), 'next question');
+      const asstWithTools = reloaded.find(m => m.role === 'assistant' && m.tool_calls);
+      expect(asstWithTools).toBeTruthy();
+      const toolMsgIdx = reloaded.findIndex(m => m.role === 'tool');
+      // every tool message is immediately preceded by an assistant with tool_calls
+      expect(reloaded[toolMsgIdx - 1].role).toBe('assistant');
+      expect(reloaded[toolMsgIdx - 1].tool_calls).toBeTruthy();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not persist an orphaned tool_use when cancelled mid-round', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's3');
+      const repo = new MessageRepository(db as any);
+      const ac = new AbortController();
+      let calls = 0;
+
+      await runAgent(
+        { text: 'do two things', channel: 'web', chatId: 'web:s3', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          signal: ac.signal,
+          isToolConcurrencySafe: () => false, // force sequential so abort lands between calls
+          callLLM: async () => ({
+            text: 'working', usage: { inputTokens: 5, outputTokens: 5 },
+            toolCalls: [
+              { id: 'x1', type: 'function', function: { name: 'step', arguments: '{}' } },
+              { id: 'x2', type: 'function', function: { name: 'step', arguments: '{}' } },
+            ],
+          } as unknown as ProviderResponse),
+          executeTool: async () => { calls++; if (calls === 1) ac.abort(); return `R${calls}`; },
+        }),
+      );
+
+      const rows = await repo.listBySession('s3');
+      // No assistant tool_use may be persisted without a tool row for every id.
+      const toolIds = new Set(rows.filter(r => r.role === 'tool').map(r => r.tool_call_id));
+      for (const r of rows.filter(r => r.role === 'assistant' && r.tool_calls)) {
+        for (const tc of JSON.parse(r.tool_calls!)) {
+          expect(toolIds.has(tc.id)).toBe(true);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rolls back persisted round rows when the turn fails (no orphan left behind)', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's4');
+      const repo = new MessageRepository(db as any);
+      let round = 0;
+
+      const result = await runAgent(
+        { text: 'try it', channel: 'web', chatId: 'web:s4', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          callLLM: async () => {
+            round++;
+            if (round === 1) {
+              return { text: '', usage: { inputTokens: 5, outputTokens: 5 }, toolCalls: TOOL_CALL('lookup', 'y1') } as unknown as ProviderResponse;
+            }
+            throw new Error('provider exploded'); // non-recoverable → give-up path
+          },
+          executeTool: async () => 'SOME_RESULT',
+        }),
+      );
+
+      expect(result.error).toBe(true);
+      // The whole failed turn (user + the completed tool round) must be gone —
+      // leaving the round behind would orphan a tool_use and wedge the session.
+      const rows = await repo.listBySession('s4');
+      expect(rows).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not wipe prior history when a turn gives up after mid-turn compaction', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's5');
+      const repo = new MessageRepository(db as any);
+      // Seed enough prior history that reactive Stage-2 compaction will engage
+      // (compaction skips when messages <= keepRecentMessages + 2; default 10).
+      for (let i = 0; i < 16; i++) {
+        await db.run(
+          `INSERT INTO messages (session_id, tenant_id, role, content, created_at) VALUES ('s5','test-tenant',?,?,?)`,
+          [i % 2 === 0 ? 'user' : 'assistant', `OLD_HISTORY_${i}`, new Date(1000 + i).toISOString()],
+        );
+      }
+
+      const result = await runAgent(
+        { text: 'overflow please', channel: 'web', chatId: 'web:s5', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          callLLM: async (args: any) => {
+            const sys = typeof args.systemPrompt === 'string' ? args.systemPrompt : '';
+            const m0 = typeof args.messages?.[0]?.content === 'string' ? args.messages[0].content : '';
+            // The compaction summarizer call: return a valid structured summary.
+            if (sys.includes('summarizer') || m0.includes('STRUCTURED summary')) {
+              return { text: '## Active Tasks\n- none\n## Resolved Topics\n- t\n## Key Facts\n- f\n## Current Work\n- w', usage: { inputTokens: 1, outputTokens: 1 } } as unknown as ProviderResponse;
+            }
+            // Every real turn call overflows → drives reactive compaction + give-up.
+            throw new Error('prompt is too long');
+          },
+        }),
+      );
+
+      expect(result.error).toBe(true);
+      // The give-up must NOT delete the compacted history (the stale user-msg id
+      // would otherwise match every re-keyed row).
+      const rows = await repo.listBySession('s5');
+      expect(rows.length).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps insertion order for a same-millisecond parallel tool batch (stable id tiebreak)', async () => {
+    const db = createTestDb();
+    try {
+      await seedSession(db, 's2');
+      const repo = new MessageRepository(db as any);
+      const now = new Date().toISOString();
+      // Force identical created_at to simulate a parallel batch within one ms.
+      for (const [role, tcid, content] of [
+        ['assistant', null, ''],
+        ['tool', 'a', 'first'],
+        ['tool', 'b', 'second'],
+        ['tool', 'c', 'third'],
+      ] as Array<[string, string | null, string]>) {
+        await db.run(
+          `INSERT INTO messages (session_id, tenant_id, role, content, tool_call_id, created_at) VALUES ('s2','test-tenant',?,?,?,?)`,
+          [role, content, tcid, now],
+        );
+      }
+      const rows = await repo.listBySession('s2');
+      expect(rows.map(r => r.content)).toEqual(['', 'first', 'second', 'third']);
+    } finally {
+      db.close();
+    }
+  });
+});

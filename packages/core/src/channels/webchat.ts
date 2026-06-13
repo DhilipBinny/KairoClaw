@@ -547,7 +547,15 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             }
             const limit = (msg.limit as number) || 50;
             const rows = await messageRepo.listBySession(session.id);
-            const messages = rows.slice(-limit).map((m) => ({
+            // Display projection: tool-result rows and empty assistant tool_use
+            // rows are part of the model's context (persisted for replay/
+            // compaction, #184) but are not chat bubbles — skip them so reloaded
+            // history matches what was shown live (tool calls appear as chips,
+            // not raw envelopes).
+            const visible = rows.filter((m) =>
+              m.role !== 'tool' && !(m.role === 'assistant' && typeof m.content === 'string' && !m.content.trim()),
+            );
+            const messages = visible.slice(-limit).map((m) => ({
               role: m.role,
               content: m.content?.slice(0, 5000),
               metadata: m.metadata ?? undefined,
