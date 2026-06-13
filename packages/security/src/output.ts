@@ -116,118 +116,107 @@ function isPlainObjectOrArray(value: object): boolean {
 const STREAM_HOLDBACK = 128;
 const PEM_BEGIN = /-----BEGIN (?:RSA )?PRIVATE KEY-----/;
 const PEM_END = /-----END (?:RSA )?PRIVATE KEY-----/;
-// A JWT only matches once all three dot-separated segments are present, but the
-// header+payload alone can far exceed the holdback. This matches an in-progress
-// JWT (header, optionally one or two more segments) anchored to the buffer end,
-// so we can refuse to release it until it completes (and is redacted) or proves
-// not to be a JWT at flush.
-const JWT_INPROGRESS = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/;
+// A trailing run that could still grow into (or extend) a JWT: a header,
+// optionally one or two further dot-separated segments, anchored to the buffer
+// end. Run against the RAW buffer so an intermediate redaction can't sever it.
+const JWT_TRAIL = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/;
+// A real JWT's first (header) segment is short; a dot-free `eyJ…` run longer
+// than this cannot be a JWT header forming, so stop holding it (it's ordinary
+// base64 that filterOutput would leave alone).
+const JWT_HEADER_MAX = 1024;
 // First character that cannot be part of a JWT/base64url token run.
 const NON_TOKEN_CHAR = /[^A-Za-z0-9_.-]/;
+// Longest possible PEM_END match, retained across deltas while discarding so an
+// END marker split between two deltas is still detected.
+const PEM_END_MAXLEN = '-----END RSA PRIVATE KEY-----'.length;
+// Past this buffer size an in-progress multi-part secret is redacted in place
+// and its body discarded until the terminator, bounding CPU/memory. Comfortably
+// larger than any real key/JWT, so legitimate secrets still redact via the
+// normal path; correctness does not depend on this value.
+const STREAM_CEILING = 8192;
 
 /**
  * A streaming-safe secret redactor. Live token streams can't be redacted by
  * filtering each delta independently: a secret can be split across two deltas,
- * so neither fragment matches on its own. This buffers the stream, only emitting
- * text once enough following characters have arrived that a secret straddling
- * the boundary would already have been recognized (and redacted) as a whole.
+ * so neither fragment matches on its own. This buffers the stream and releases a
+ * prefix only once it is provably final.
  *
- * Correctness: release decisions are made in FILTERED coordinates, never raw, so
- * a completed redaction is always atomic in the emitted stream. We hold back the
- * last STREAM_HOLDBACK chars (longer than any single contiguous secret) and
- * never release into an unterminated PEM block or in-progress JWT (which can
- * exceed the window). The buffer is only ever trimmed at a point proven not to
- * change how anything filters (`filterOutput(buf) === filterOutput(dropped) +
- * filterOutput(rest)`) and only over already-emitted text, so a trim can never
- * split a secret or re-emit output.
+ * Invariant: for any chunking, `concat(emitted) + flush === filterOutput(whole
+ * input)`, except that an in-progress secret which grows past STREAM_CEILING is
+ * collapsed to its redaction marker (still safe — it is never emitted raw).
  *
- * Bounded cost: an in-progress multi-part secret (or pathological input) that
- * grows past a ceiling is redacted in place and the rest of it discarded until
- * its terminator, so per-delta work and memory stay bounded instead of O(n^2).
+ * How: all reasoning is in RAW coordinates. We release the prefix `buf[:cut]`
+ * only when (a) `cut` is not inside an in-progress multi-part secret (PEM with no
+ * END yet, or a trailing JWT-ish run that could still grow), and (b) it filters
+ * independently of the rest — `filterOutput(buf) === filterOutput(head) +
+ * filterOutput(tail)` — which guarantees no bounded match or completed redaction
+ * straddles the cut. The released head is dropped from the buffer, so cost stays
+ * O(total) for normal text; an oversized in-progress secret is capped.
  */
 export function createStreamingRedactor(
   emit: (chunk: string) => void,
 ): { push(delta: string): void; flush(): void } {
-  const TRIM_THRESHOLD = STREAM_HOLDBACK * 4;
-  const RETAIN = STREAM_HOLDBACK * 2;
-  // Past this buffer size we stop holding an in-progress multi-part secret in
-  // full: we emit its redaction marker and discard the rest until its
-  // terminator. Comfortably larger than any normal PEM key / JWT, so legitimate
-  // secrets still complete and redact via the normal path; correctness does not
-  // depend on this value (an oversized secret is still redacted, just via the
-  // discard path).
-  const CEILING = 8192;
-  // Longest possible PEM_END match, retained across deltas so an END marker
-  // split between two deltas is still detected while discarding.
-  const PEM_END_MAXLEN = '-----END RSA PRIVATE KEY-----'.length;
-
-  let buf = '';
-  let emitted = 0; // filtered chars already emitted from the current buffer
+  let buf = ''; // raw, not-yet-emitted
   // When set, we are discarding the body of an oversized secret whose marker has
   // already been emitted, until its terminator arrives.
   let discard: { kind: 'pem' | 'token'; tail: string } | null = null;
 
-  /** Start index in `buf` of the earliest in-progress multi-part secret, or -1. */
-  function multipartStart(): number {
-    let start = -1;
-    const m = PEM_BEGIN.exec(buf);
-    if (m && !PEM_END.test(buf.slice(m.index))) start = m.index;
-    const j = JWT_INPROGRESS.exec(buf);
-    if (j && (start === -1 || j.index < start)) start = j.index;
-    return start;
+  /** Earliest raw index that must be HELD (could still change with more input). */
+  function heldStart(): number {
+    let h = buf.length;
+    const pm = PEM_BEGIN.exec(buf);
+    if (pm && !PEM_END.test(buf.slice(pm.index))) h = Math.min(h, pm.index);
+    const jm = JWT_TRAIL.exec(buf);
+    if (jm) {
+      const run = buf.slice(jm.index);
+      // A dot-free run longer than a plausible JWT header can't be a JWT forming.
+      if (run.includes('.') || run.length <= JWT_HEADER_MAX) h = Math.min(h, jm.index);
+    }
+    return h;
   }
 
-  function pump(final: boolean): void {
-    const filtered = filterOutput(buf);
-    let safeLen = final ? filtered.length : Math.max(0, filtered.length - STREAM_HOLDBACK);
-    if (!final) {
-      const m = PEM_BEGIN.exec(filtered);
-      if (m && !PEM_END.test(filtered.slice(m.index))) safeLen = Math.min(safeLen, m.index);
-      const j = JWT_INPROGRESS.exec(filtered);
-      if (j) safeLen = Math.min(safeLen, j.index);
-    }
-    if (safeLen > emitted) {
-      emit(filtered.slice(emitted, safeLen));
-      emitted = safeLen;
-    }
-  }
-
-  function maybeTrim(): void {
-    if (buf.length <= TRIM_THRESHOLD) return;
-    // Don't cut into the start of an in-progress multi-part secret — keep it
-    // whole (it must stay recognizable), but everything before it is fair game.
-    let cut = buf.length - RETAIN;
-    const ms = multipartStart();
-    if (ms !== -1) cut = Math.min(cut, ms);
+  function release(final: boolean): void {
+    const cut = final ? buf.length : Math.min(buf.length - STREAM_HOLDBACK, heldStart());
     if (cut > 0) {
-      const dropped = buf.slice(0, cut);
-      const fDropped = filterOutput(dropped);
-      // Only drop text that (a) has already been emitted and (b) filters
-      // independently of the retained tail — i.e. no secret or completed
-      // redaction straddles the cut. Otherwise leave it for a later push.
-      if (fDropped.length <= emitted && filterOutput(buf) === fDropped + filterOutput(buf.slice(cut))) {
-        emitted -= fDropped.length;
-        buf = buf.slice(cut);
+      const head = buf.slice(0, cut);
+      const tail = buf.slice(cut);
+      // Final flush releases everything; otherwise only release a prefix that
+      // filters independently of the held tail (no match straddles the cut).
+      if (final || filterOutput(buf) === filterOutput(head) + filterOutput(tail)) {
+        emit(filterOutput(head));
+        buf = tail;
       }
     }
-    // If an in-progress secret still fills the buffer past the ceiling, redact
-    // it now rather than holding (and re-scanning) it unboundedly.
-    if (ms !== -1 && buf.length > CEILING) capOversizedSecret();
+    if (!final) capIfOversized();
   }
 
-  /** Redact an oversized in-progress secret and switch to discarding its body. */
-  function capOversizedSecret(): void {
-    const start = multipartStart();
-    if (start < 0) return;
-    // Release any not-yet-emitted text before the secret starts.
-    const fPre = filterOutput(buf.slice(0, start));
-    if (fPre.length > emitted) emit(fPre.slice(emitted));
-    const m = PEM_BEGIN.exec(buf);
-    const pemOpen = !!m && !PEM_END.test(buf.slice(m.index));
-    emit(pemOpen ? '***PRIVATE_KEY_REDACTED***' : '***JWT_REDACTED***');
-    discard = { kind: pemOpen ? 'pem' : 'token', tail: '' };
-    buf = '';
-    emitted = 0;
+  /** Cap an in-progress secret that has grown past the ceiling. */
+  function capIfOversized(): void {
+    if (buf.length <= STREAM_CEILING) return;
+    const pm = PEM_BEGIN.exec(buf);
+    if (pm && !PEM_END.test(buf.slice(pm.index))) {
+      emit(filterOutput(buf.slice(0, pm.index)));
+      emit('***PRIVATE_KEY_REDACTED***');
+      discard = { kind: 'pem', tail: buf.slice(pm.index).slice(-(PEM_END_MAXLEN - 1)) };
+      buf = '';
+      return;
+    }
+    const jm = JWT_TRAIL.exec(buf);
+    if (jm && buf.slice(jm.index).includes('.')) {
+      emit(filterOutput(buf.slice(0, jm.index)));
+      emit('***JWT_REDACTED***');
+      discard = { kind: 'token', tail: '' };
+      buf = '';
+      return;
+    }
+    // No real in-progress secret occupying the buffer (e.g. a long dot-free
+    // base64 run heldStart already releases). Force-release the safe prefix to
+    // keep memory bounded.
+    const cut = buf.length - STREAM_HOLDBACK;
+    if (cut > 0 && filterOutput(buf) === filterOutput(buf.slice(0, cut)) + filterOutput(buf.slice(cut))) {
+      emit(filterOutput(buf.slice(0, cut)));
+      buf = buf.slice(cut);
+    }
   }
 
   function handleDiscard(delta: string): void {
@@ -243,8 +232,7 @@ export function createStreamingRedactor(
         d.tail = combined.slice(-(PEM_END_MAXLEN - 1));
       }
     } else {
-      // Discard the run of base64url/JWT chars; resume at the first char that
-      // can't be part of the token.
+      // Discard the base64url/JWT run; resume at the first non-token char.
       const nt = NON_TOKEN_CHAR.exec(delta);
       if (nt) {
         const after = delta.slice(nt.index);
@@ -257,19 +245,17 @@ export function createStreamingRedactor(
   function push(delta: string): void {
     if (discard) { handleDiscard(delta); return; }
     buf += delta;
-    pump(false);
-    maybeTrim();
+    release(false);
   }
 
   return {
     push,
     flush(): void {
       // An unterminated oversized secret: its marker is already emitted, drop
-      // the rest. Otherwise release the held-back tail.
-      if (discard) { discard = null; buf = ''; emitted = 0; return; }
-      pump(true);
+      // the rest. Otherwise release everything that remains.
+      if (discard) { discard = null; buf = ''; return; }
+      release(true);
       buf = '';
-      emitted = 0;
     },
   };
 }

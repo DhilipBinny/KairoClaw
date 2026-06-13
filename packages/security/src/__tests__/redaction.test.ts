@@ -285,4 +285,70 @@ describe('createStreamingRedactor (#185)', () => {
     const chunked = run(Array.from({ length: Math.ceil(text.length / 3) }, (_, i) => text.slice(i * 3, i * 3 + 3)));
     expect(chunked).toBe(filterOutput(text));
   });
+
+  it('does not leak the header of a JWT whose segment embeds another redactable token', () => {
+    // The middle segment contains an AWS-key-shaped substring. On a partial
+    // buffer that substring redacts first; the header must still be held until
+    // the whole JWT completes, not released early.
+    const header = 'eyJ' + 'A'.repeat(160);
+    const payload = 'eyJpayloadAKIAIOSFODNN7EXAMPLEmorepayloadcontent';
+    const sig = 'c'.repeat(40);
+    const jwt = `${header}.${payload}.${sig}`;
+    const live = liveBeforeFlush(`tok ${jwt} end`, 1);
+    expect(live).not.toContain(header);
+    expect(live).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(run([`tok ${jwt} end`])).toBe(filterOutput(`tok ${jwt} end`));
+  });
+
+  it('does not truncate the reply when an oversized PEM END straddles the cap boundary', () => {
+    const begin = '-----BEGIN PRIVATE KEY-----\n';
+    const end = '\n-----END PRIVATE KEY-----';
+    const body = 'A'.repeat(20000); // exceeds ceiling
+    const text = `${begin}${body}${end} the answer continues afterwards.`;
+    // Chunk so the END marker is split right around where the cap fires.
+    for (const size of [1, 3, 5, 7, 13]) {
+      const chunked = run(Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, i * size + size)));
+      expect(chunked).toContain('***PRIVATE_KEY_REDACTED***');
+      expect(chunked).toContain('the answer continues afterwards.');
+      expect(chunked).not.toContain('AAAAAAAAAA');
+    }
+  });
+
+  it('handles a long dot-free eyJ base64 blob identically regardless of chunking (no over-redaction)', () => {
+    const text = 'data: eyJ' + 'A'.repeat(9000) + ' done'; // base64-of-JSON shape, not a JWT
+    const expected = filterOutput(text);
+    expect(expected).toBe(text); // filterOutput leaves it alone
+    for (const size of [1, 7, 100, 100000]) {
+      const chunked = run(Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, i * size + size)));
+      expect(chunked).toBe(expected);
+    }
+  });
+
+  it('fuzz: streamed output always equals filterOutput(whole) for sub-ceiling inputs', () => {
+    // Deterministic LCG so failures reproduce.
+    let seed = 0x1234abcd;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    const vocab = [
+      'hello ', 'world ', 'eyJ', 'AKIAIOSFODNN7EXAMPLE', 'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345',
+      '.', '_', '-', ' ', '\n', 'A'.repeat(30), 'token=', 'secret ',
+      '-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----', 'Bearer ', 'normaltext',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc',
+    ];
+    for (let iter = 0; iter < 2000; iter++) {
+      let text = '';
+      const words = 2 + Math.floor(rnd() * 18);
+      for (let w = 0; w < words; w++) text += vocab[Math.floor(rnd() * vocab.length)];
+      if (text.length > 3000) text = text.slice(0, 3000); // stay below the ceiling
+      const out: string[] = [];
+      const r = createStreamingRedactor((c) => out.push(c));
+      let i = 0;
+      while (i < text.length) {
+        const size = 1 + Math.floor(rnd() * 9);
+        r.push(text.slice(i, i + size));
+        i += size;
+      }
+      r.flush();
+      expect(out.join('')).toBe(filterOutput(text));
+    }
+  });
 });
