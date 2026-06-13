@@ -314,8 +314,8 @@ describe('createStreamingRedactor (#185)', () => {
     }
   });
 
-  it('handles a long dot-free eyJ base64 blob identically regardless of chunking (no over-redaction)', () => {
-    const text = 'data: eyJ' + 'A'.repeat(9000) + ' done'; // base64-of-JSON shape, not a JWT
+  it('does not over-redact a sub-ceiling dot-free eyJ base64 blob', () => {
+    const text = 'data: eyJ' + 'A'.repeat(4000) + ' done'; // base64-of-JSON shape, not a JWT, < ceiling
     const expected = filterOutput(text);
     expect(expected).toBe(text); // filterOutput leaves it alone
     for (const size of [1, 7, 100, 100000]) {
@@ -324,31 +324,86 @@ describe('createStreamingRedactor (#185)', () => {
     }
   });
 
-  it('fuzz: streamed output always equals filterOutput(whole) for sub-ceiling inputs', () => {
-    // Deterministic LCG so failures reproduce.
-    let seed = 0x1234abcd;
-    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  it('redacts a JWT whose header segment exceeds the old 1024 cap (no raw leak)', () => {
+    // A real x5c/jwk JOSE header can be large. Header is dot-free and >1024 but
+    // under the ceiling, so it must be held until the dots arrive, then redacted.
+    const header = 'eyJ' + 'A'.repeat(2000);
+    const jwt = `${header}.eyJ${'B'.repeat(40)}.${'C'.repeat(40)}`;
+    const text = `auth ${jwt} ok`;
+    for (const size of [1, 7, 64]) {
+      const live = liveBeforeFlush(text, size);
+      expect(live).not.toContain(header);
+      const chunked = run(Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, i * size + size)));
+      expect(chunked).toBe(filterOutput(text));
+      expect(chunked).toContain('***JWT_REDACTED***');
+      expect(chunked).not.toContain('AAAAAAAAAA');
+    }
+  });
+
+  it('redacts (never leaks) an oversized unresolved eyJ run, bounding memory', () => {
+    const out: string[] = [];
+    const r = createStreamingRedactor((c) => out.push(c));
+    r.push('x eyJ');
+    for (let i = 0; i < 2000; i++) r.push('ABCDEFGHIJ'); // 20k dot-free, exceeds ceiling
+    r.push('.eyJpayload.signature trailing');
+    r.flush();
+    const joined = out.join('');
+    expect(joined).toContain('***JWT_REDACTED***');
+    expect(joined).not.toContain('ABCDEFGHIJABCDEFGHIJ');
+    expect(joined).toContain('trailing');
+  });
+
+  // Deterministic LCG so any failure reproduces.
+  function lcg(seed: number) { return () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; }
+  function streamRandom(text: string, rnd: () => number): string {
+    const out: string[] = [];
+    const r = createStreamingRedactor((c) => out.push(c));
+    let i = 0;
+    while (i < text.length) { const size = 1 + Math.floor(rnd() * 11); r.push(text.slice(i, i + size)); i += size; }
+    r.flush();
+    return out.join('');
+  }
+
+  // The recognized secrets that, once redacted by filterOutput, must NEVER appear
+  // raw in the streamed output regardless of input or chunking.
+  const SECRET_TOKENS = [
+    'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345', 'ant-ABCDEFGHIJKLMNOPQRSTUVWX', 'AKIAIOSFODNN7EXAMPLE',
+    'AIza' + 'A'.repeat(35), 'ghp_' + 'A'.repeat(36), 'xoxb-1234567890-abcdefghij',
+    'sk_live_' + 'A'.repeat(24), '123456789:' + 'A'.repeat(35), 'postgres://u:p@h/db', 'MIIEvSECRETKEYBODY',
+  ];
+
+  it('fuzz: never leaks a recognized secret, for any input/chunking (incl. mashed)', () => {
+    const rnd = lcg(0x1234abcd);
     const vocab = [
-      'hello ', 'world ', 'eyJ', 'AKIAIOSFODNN7EXAMPLE', 'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345',
-      '.', '_', '-', ' ', '\n', 'A'.repeat(30), 'token=', 'secret ',
-      '-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----', 'Bearer ', 'normaltext',
-      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc',
+      'hello ', 'world ', 'eyJ', '.', '_', '-', ' ', '\n', 'A'.repeat(40), 'token=', 'secret ',
+      'password=hunter2x', 'Bearer ', '-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----',
+      'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij', ...SECRET_TOKENS,
     ];
-    for (let iter = 0; iter < 2000; iter++) {
+    for (let iter = 0; iter < 4000; iter++) {
       let text = '';
-      const words = 2 + Math.floor(rnd() * 18);
+      const words = 1 + Math.floor(rnd() * 24);
       for (let w = 0; w < words; w++) text += vocab[Math.floor(rnd() * vocab.length)];
-      if (text.length > 3000) text = text.slice(0, 3000); // stay below the ceiling
-      const out: string[] = [];
-      const r = createStreamingRedactor((c) => out.push(c));
-      let i = 0;
-      while (i < text.length) {
-        const size = 1 + Math.floor(rnd() * 9);
-        r.push(text.slice(i, i + size));
-        i += size;
+      const filtered = filterOutput(text);
+      const out = streamRandom(text, rnd);
+      for (const tok of SECRET_TOKENS) {
+        if (!filtered.includes(tok)) expect(out.includes(tok)).toBe(false);
       }
-      r.flush();
-      expect(out.join('')).toBe(filterOutput(text));
+    }
+  });
+
+  it('fuzz: streamed output equals filterOutput(whole) for whitespace-separated input', () => {
+    const rnd = lcg(0x55aa33cc);
+    const vocab = [
+      'hello', 'world', 'normaltext', 'eyJ', 'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345', 'AKIAIOSFODNN7EXAMPLE',
+      'token=value12345', 'Bearer abcdefghijklmnopqrstuvwxyz', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghij',
+      'postgres://u:p@h/db', 'a'.repeat(50),
+    ];
+    for (let iter = 0; iter < 4000; iter++) {
+      const words = 1 + Math.floor(rnd() * 24);
+      const parts: string[] = [];
+      for (let w = 0; w < words; w++) parts.push(vocab[Math.floor(rnd() * vocab.length)]);
+      const text = parts.join(rnd() < 0.5 ? ' ' : '\n'); // tokens always separated
+      expect(streamRandom(text, rnd)).toBe(filterOutput(text));
     }
   });
 });

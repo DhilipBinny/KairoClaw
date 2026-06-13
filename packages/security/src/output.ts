@@ -120,10 +120,6 @@ const PEM_END = /-----END (?:RSA )?PRIVATE KEY-----/;
 // optionally one or two further dot-separated segments, anchored to the buffer
 // end. Run against the RAW buffer so an intermediate redaction can't sever it.
 const JWT_TRAIL = /eyJ[A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*){0,2}$/;
-// A real JWT's first (header) segment is short; a dot-free `eyJ…` run longer
-// than this cannot be a JWT header forming, so stop holding it (it's ordinary
-// base64 that filterOutput would leave alone).
-const JWT_HEADER_MAX = 1024;
 // First character that cannot be part of a JWT/base64url token run.
 const NON_TOKEN_CHAR = /[^A-Za-z0-9_.-]/;
 // Longest possible PEM_END match, retained across deltas while discarding so an
@@ -167,11 +163,11 @@ export function createStreamingRedactor(
     const pm = PEM_BEGIN.exec(buf);
     if (pm && !PEM_END.test(buf.slice(pm.index))) h = Math.min(h, pm.index);
     const jm = JWT_TRAIL.exec(buf);
-    if (jm) {
-      const run = buf.slice(jm.index);
-      // A dot-free run longer than a plausible JWT header can't be a JWT forming.
-      if (run.includes('.') || run.length <= JWT_HEADER_MAX) h = Math.min(h, jm.index);
-    }
+    // Hold any trailing eyJ run until it resolves — we can't tell a forming JWT
+    // (whose header alone can be large, e.g. an x5c cert chain) from ordinary
+    // base64 until a non-token char or the dots arrive. Oversized runs are
+    // handled by the ceiling.
+    if (jm) h = Math.min(h, jm.index);
     return h;
   }
 
@@ -202,16 +198,19 @@ export function createStreamingRedactor(
       return;
     }
     const jm = JWT_TRAIL.exec(buf);
-    if (jm && buf.slice(jm.index).includes('.')) {
+    if (jm) {
+      // An eyJ run still unresolved at the ceiling is redacted rather than
+      // released raw: we can't yet rule out a JWT (header alone may be huge), and
+      // never-leak takes priority over the rare over-redaction of a large
+      // eyJ-prefixed base64 blob.
       emit(filterOutput(buf.slice(0, jm.index)));
       emit('***JWT_REDACTED***');
       discard = { kind: 'token', tail: '' };
       buf = '';
       return;
     }
-    // No real in-progress secret occupying the buffer (e.g. a long dot-free
-    // base64 run heldStart already releases). Force-release the safe prefix to
-    // keep memory bounded.
+    // No in-progress secret occupying the buffer. Force-release the safe prefix
+    // to keep memory bounded.
     const cut = buf.length - STREAM_HOLDBACK;
     if (cut > 0 && filterOutput(buf) === filterOutput(buf.slice(0, cut)) + filterOutput(buf.slice(cut))) {
       emit(filterOutput(buf.slice(0, cut)));
