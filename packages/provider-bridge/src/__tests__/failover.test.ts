@@ -7,7 +7,11 @@ function fakeProvider(text: string): ProviderInterface {
     chat: async (_args: ChatArgs): Promise<ProviderResponse> => ({
       text, toolCalls: null, usage: { inputTokens: 1, outputTokens: 1 },
     }),
-  } as ProviderInterface;
+  } as unknown as ProviderInterface;
+}
+
+function throwingProvider(message: string): ProviderInterface {
+  return { chat: async (): Promise<ProviderResponse> => { throw new Error(message); } } as unknown as ProviderInterface;
 }
 
 function makeConfig(model: GatewayConfig['model']): GatewayConfig {
@@ -48,6 +52,20 @@ describe('provider failover (#183)', () => {
   it('throws a clear error when primary is unconfigured and no fallback is available', async () => {
     const reg = new ProviderRegistry(makeConfig({ primary: 'openai/gpt-4o', fallback: '', fallbackChain: [] } as any));
     await expect(reg.callWithFailover(ARGS('openai/gpt-4o'))).rejects.toThrow(/No provider available/);
+  });
+
+  it('surfaces the actionable primary auth error when the primary and all fallbacks fail', async () => {
+    const reg = new ProviderRegistry(makeConfig({ primary: 'openai/gpt-4o', fallback: 'anthropic/claude-sonnet-4-6', fallbackChain: [] } as any));
+    reg.addProvider('openai', throwingProvider('unauthorized')); // auth_error (non-retriable)
+    reg.addProvider('anthropic', throwingProvider('generic boom')); // unknown (non-retriable)
+    await expect(reg.callWithFailover(ARGS('openai/gpt-4o'))).rejects.toThrow(/unauthorized/);
+  });
+
+  it('surfaces the last error when neither primary nor fallback is actionable', async () => {
+    const reg = new ProviderRegistry(makeConfig({ primary: 'openai/gpt-4o', fallback: 'anthropic/claude-sonnet-4-6', fallbackChain: [] } as any));
+    reg.addProvider('openai', throwingProvider('primary boom')); // unknown
+    reg.addProvider('anthropic', throwingProvider('fallback boom')); // unknown
+    await expect(reg.callWithFailover(ARGS('openai/gpt-4o'))).rejects.toThrow(/fallback boom/);
   });
 
   it('does not fail over to the same (unconfigured) provider listed in the chain', async () => {

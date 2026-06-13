@@ -231,6 +231,11 @@ export class ProviderRegistry {
       }
     }
 
+    // Everything failed. Prefer the primary error when it is an actionable
+    // config problem (e.g. a bad/missing API key) so the user still sees the
+    // "check your API key" message rather than a transient fallback error;
+    // otherwise surface the most recent attempt's error.
+    if (classifyError(primaryError).type === 'auth_error') throw primaryError;
     throw lastError;
   }
 
