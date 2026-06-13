@@ -33,6 +33,11 @@ export const PENDING_PENDING_CAP = 20;
 
 export const MEDIA_RETENTION_DAYS = 7;
 export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/**
+ * Lifetime of a signed media URL. Matched to the retention window so a signed
+ * link stays valid for as long as the file exists but no longer.
+ */
+export const MEDIA_URL_TTL_MS = MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 // ── Rate Limiting ───────────────────────────────────────────
 

@@ -135,15 +135,33 @@ function resolveMediaPath(
 
 // ── Extraction ───────────────────────────────────
 
-// Matches: ![alt text](url) or ![](url)
-const MARKDOWN_IMAGE_RE = /!\[([^\]]*)\]\(([^)]+)\)/g;
+// ReDoS hardening: both the alt/display-text classes AND the URL-body classes
+// below exclude the bracket/paren delimiters `[ ] ( )`. With the looser classes
+// a long run of `[`/`![`/`[a](` openers would let a greedy class scan across
+// many openers and fail at the end, restarting from every position — O(n²)
+// backtracking on attacker-influenceable LLM output. Excluding the delimiters
+// makes a failed match fail fast (linear). extractMedia() also length-caps its
+// input as a backstop. Real media URLs/paths never contain these delimiters.
 
-// Matches: [display name](url) where url points to a known file extension
+// Matches: ![alt text](url) or ![](url)
+const MARKDOWN_IMAGE_RE = /!\[([^\][]*)\]\(([^)(\][]+)\)/g;
+
+// Matches: [display name](url) where url points to a known file extension,
+// allowing an optional trailing query string (signed media URLs carry one, e.g.
+// /api/v1/media/x.pdf?expires=..&sig=..). resolveMediaPath ignores the query.
+// `?` is also excluded from the URL body so only the query group consumes it.
 const ALL_KNOWN_EXTS = Object.keys(EXT_TO_MIME).join('|');
 const MARKDOWN_LINK_RE = new RegExp(
-  `\\[([^\\]]+)\\]\\(([^)]+\\.(?:${ALL_KNOWN_EXTS}))\\)`,
+  `\\[([^\\][]+)\\]\\(([^)(\\][\\s?]+\\.(?:${ALL_KNOWN_EXTS})(?:\\?[^)(\\][\\s]*)?)\\)`,
   'gi',
 );
+
+/**
+ * Upper bound on how much response text we scan for media refs. Legitimate
+ * references appear early and downstream channels slice captions anyway; the
+ * cap is a hard ceiling on regex work for pathological/adversarial input.
+ */
+const MAX_DETECT_LEN = 256 * 1024;
 
 /**
  * Extract media references from LLM response text.
@@ -160,8 +178,12 @@ export function extractMedia(
   const seen = new Set<string>();
   const matches: Array<{ match: string; index: number }> = [];
 
+  // Bound regex work; media refs live at the front. cleanText still uses the
+  // full text so nothing past the cap is silently dropped from the message.
+  const scan = text.length > MAX_DETECT_LEN ? text.slice(0, MAX_DETECT_LEN) : text;
+
   // 1. Markdown images: ![alt](url)
-  for (const m of text.matchAll(MARKDOWN_IMAGE_RE)) {
+  for (const m of scan.matchAll(MARKDOWN_IMAGE_RE)) {
     const alt = m[1] || '';
     const ref = m[2];
     const filePath = resolveMediaPath(ref, stateDir, workspace);
@@ -181,7 +203,7 @@ export function extractMedia(
   }
 
   // 2. Markdown links to known file types: [name](url.ext)
-  for (const m of text.matchAll(MARKDOWN_LINK_RE)) {
+  for (const m of scan.matchAll(MARKDOWN_LINK_RE)) {
     const display = m[1] || '';
     const ref = m[2];
     // Skip if already captured as an image
