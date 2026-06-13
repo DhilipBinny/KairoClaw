@@ -58,6 +58,7 @@ function isNetworkEgressTool(name: string): boolean {
     || name === 'send_email'   // model-supplied recipient + body
     || name === 'send_message' // model-supplied chat id/JID + text
     || name === 'send_file'    // model-supplied recipient (file content is the known high-entropy limit)
+    || name === 'manage_cron'  // model-supplied delivery target + prompt → deferred/time-shifted delivery
     || name.startsWith('http_')
     || name.startsWith('mcp__');
 }
