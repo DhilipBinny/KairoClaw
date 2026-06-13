@@ -6,6 +6,7 @@
  */
 
 import path from 'node:path';
+import { fetch, type Response as UndiciResponse } from 'undici';
 import type { GatewayConfig, HttpPluginConfig, HttpEndpointConfig, MediaAttachment } from '@agw/types';
 
 type EndpointParamDef = { type: string; description?: string; required?: boolean; default?: unknown };
@@ -14,11 +15,55 @@ import type { PluginToolRegistry as ToolRegistry } from './interfaces.js';
 import type { PluginSecretsResolver as SecretsStore } from './interfaces.js';
 import type { PluginMediaStore as MediaStore } from './interfaces.js';
 import { detectBase64Image, extFromContentType, sniffBase64Mime } from './media-utils.js';
+import { ssrfSafeDispatcher, blockedIpReason } from './ssrf.js';
 import type { AgwLogger } from '@agw/types';
 type Logger = AgwLogger;
 
 /** Max response size returned to the LLM. */
 const MAX_RESPONSE_SIZE = 10 * 1024;
+
+/**
+ * Hard ceiling on how many bytes we read from a plugin response body, including
+ * binary/image downloads. Without this a malicious or buggy endpoint returning
+ * a multi-GB body would be buffered entirely into memory and OOM the process.
+ */
+const MAX_DOWNLOAD_SIZE = 25 * 1024 * 1024;
+
+/**
+ * Read a response body into a Buffer, aborting if it exceeds `maxBytes`.
+ * Honours Content-Length when present and also enforces the cap while streaming
+ * (a lying or absent Content-Length cannot bypass it).
+ */
+/**
+ * Release a response we are about to discard (a redirect hop, a 5xx we'll retry,
+ * an error response) so its socket is returned to the shared dispatcher pool
+ * instead of lingering until keep-alive timeout.
+ */
+function discardBody(res: UndiciResponse | undefined): void {
+  if (typeof res?.body?.cancel === 'function') res.body.cancel().catch(() => { /* best effort */ });
+}
+
+export async function readBodyCapped(res: UndiciResponse, maxBytes = MAX_DOWNLOAD_SIZE): Promise<Buffer> {
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    // Cancel the body, else the undici socket is never drained and is lost from
+    // the shared dispatcher's connection pool.
+    if (typeof res.body?.cancel === 'function') res.body.cancel().catch(() => { /* best effort */ });
+    throw new Error(`Response too large: ${declared} bytes (max ${maxBytes})`);
+  }
+  if (!res.body) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of res.body) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+    total += buf.length;
+    if (total > maxBytes) {
+      throw new Error(`Response too large: exceeded ${maxBytes} bytes`);
+    }
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks);
+}
 
 /**
  * Resolve a JSON path like "data[0].b64_json" against an object.
@@ -50,9 +95,12 @@ function setJsonPath(obj: unknown, jsonPath: string, value: unknown): void {
 }
 
 /**
- * Validate a URL for HTTP plugins.
+ * Validate a URL for HTTP plugins (a fast pre-flight string check).
  * Admin explicitly configured these URLs, so private IPs are allowed.
- * Only block metadata endpoints and loopback.
+ * Block bad schemes, loopback/metadata hostnames, and loopback/link-local/
+ * metadata literal IPs (IPv4, IPv6 and IPv4-mapped). The authoritative defence
+ * against DNS rebinding is the connection-pinning dispatcher (see ssrf.ts) —
+ * this check just rejects obviously-bad URLs early.
  */
 export function validatePluginUrl(urlStr: string): void {
   let parsed: URL;
@@ -68,8 +116,8 @@ export function validatePluginUrl(urlStr: string): void {
 
   const hostname = parsed.hostname.toLowerCase();
 
-  // Block loopback only (private IPs are intentionally allowed for HTTP plugins)
-  if (['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(hostname)) {
+  // Block loopback hostnames (literal loopback IPs are caught by blockedIpReason).
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
     throw new Error('Blocked: localhost/loopback URLs not allowed');
   }
 
@@ -79,14 +127,10 @@ export function validatePluginUrl(urlStr: string): void {
     throw new Error('Blocked: cloud metadata endpoint');
   }
 
-  // Block link-local / metadata IPs
-  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (ipMatch) {
-    const a = Number(ipMatch[1]);
-    const b = Number(ipMatch[2]);
-    if (a === 169 && b === 254) throw new Error('Blocked: link-local/cloud metadata (169.254.x.x)');
-    if (a === 0) throw new Error('Blocked: invalid IP range (0.x.x.x)');
-  }
+  // Block loopback / link-local / metadata literal IPs (v4, v6, IPv4-mapped).
+  // URL.hostname keeps the brackets around IPv6 literals — strip them first.
+  const ipReason = blockedIpReason(hostname.replace(/^\[|\]$/g, ''));
+  if (ipReason) throw new Error(`Blocked: ${ipReason}`);
 }
 
 /**
@@ -230,18 +274,19 @@ export function registerHttpPlugins(
               url.searchParams.set(k, v);
             }
 
-            const fetchOpts: RequestInit = {
+            const fetchOpts: Parameters<typeof fetch>[1] = {
               method: endpoint.method,
               headers: requestHeaders,
               signal: AbortSignal.timeout(plugin.timeout * 1000),
               redirect: 'manual',
+              dispatcher: ssrfSafeDispatcher(),
             };
 
             if (isBodyMethod && Object.keys(resolvedArgs).length > 0) {
               fetchOpts.body = JSON.stringify(resolvedArgs);
             }
 
-            let res!: Response;
+            let res!: UndiciResponse;
             for (let attempt = 0; attempt <= 2; attempt++) {
               try {
                 res = await fetch(url.toString(), fetchOpts);
@@ -253,11 +298,13 @@ export function registerHttpPlugins(
                   if (!location) break;
                   const redirectUrl = new URL(location, url.toString()).toString();
                   validatePluginUrl(redirectUrl);
+                  discardBody(res); // release the redirect response before the next hop
                   res = await fetch(redirectUrl, { ...fetchOpts, method: 'GET', body: undefined });
                   redirects++;
                 }
 
                 if (res.status < 500 || attempt === 2) break;
+                discardBody(res); // release the 5xx response before retrying
                 await new Promise(r => setTimeout(r, (attempt + 1) * 1000));
               } catch (fetchErr) {
                 if (attempt === 2) throw fetchErr;
@@ -272,7 +319,7 @@ export function registerHttpPlugins(
               return { error: `Response is a binary image (${contentType}) but no media store is configured — cannot save.` };
             }
             if (imgExt && mediaStore) {
-              const buf = Buffer.from(await res.arrayBuffer());
+              const buf = await readBodyCapped(res);
               const filename = mediaStore.save(buf, imgExt);
               const mediaUrl = mediaStore.getUrl(filename);
               const filePath = path.join(mediaStore.dir, filename);
@@ -297,7 +344,7 @@ export function registerHttpPlugins(
             let body: unknown;
             const b64Media: MediaAttachment[] = [];
             if (contentType.includes('application/json')) {
-              body = await res.json();
+              body = JSON.parse((await readBodyCapped(res)).toString('utf8'));
 
               if (mediaStore && body && typeof body === 'object') {
                 // Strategy 1: Use explicit responseMedia mappings (from OpenAPI spec or manual config)
@@ -330,8 +377,8 @@ export function registerHttpPlugins(
                         if (responseHost !== pluginHost) {
                           continue; // skip URLs pointing to a different host
                         }
-                        const imgRes = await fetch(value, { signal: AbortSignal.timeout(30000) });
-                        const buf = Buffer.from(await imgRes.arrayBuffer());
+                        const imgRes = await fetch(value, { signal: AbortSignal.timeout(30000), dispatcher: ssrfSafeDispatcher() });
+                        const buf = await readBodyCapped(imgRes);
                         const ext = mapping.mimeType.split('/')[1] || 'png';
                         const filename = mediaStore.save(buf, ext);
                         const mediaUrl = mediaStore.getUrl(filename);
@@ -382,7 +429,7 @@ export function registerHttpPlugins(
                 }
               }
             } else {
-              body = await res.text();
+              body = (await readBodyCapped(res)).toString('utf8');
             }
 
             // Truncate

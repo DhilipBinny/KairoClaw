@@ -17,7 +17,8 @@
     "@agw/types": "workspace:*",
     "@agw/tool-platform": "workspace:*",
     "@agw/tools-common": "workspace:*",
-    "@agw/schemas": "workspace:*"
+    "@agw/schemas": "workspace:*",
+    "undici": "^6.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
