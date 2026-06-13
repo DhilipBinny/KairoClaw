@@ -527,16 +527,18 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
           case 'chat.history': {
             const sessionKey = (msg.sessionKey as string) || 'main';
             const sessionId = msg.sessionId as string | undefined;
-            // Look up session by ID first, then by the user-scoped chatId.
-            const webSessions = (await sessionRepo.listByTenant(tenantId, 500))
-              .filter((s) => s.channel === 'web');
+            // Keyed lookups (indexed) — by ID first, then by the user-scoped
+            // chatId. The previous 500-session scan missed sessions past the cap
+            // and returned empty history for them (#186).
             let session = sessionId
-              ? webSessions.find((s) => s.id === sessionId)
-              : webSessions.find((s) => s.chat_id === webChatId(clientId, sessionKey));
+              ? await sessionRepo.getById(sessionId, tenantId)
+              : await sessionRepo.findByChat(tenantId, 'web', webChatId(clientId, sessionKey));
             // Also try matching by session ID passed as sessionKey
             if (!session) {
-              session = webSessions.find((s) => s.id === sessionKey);
+              session = await sessionRepo.getById(sessionKey, tenantId);
             }
+            // Restrict to web sessions (the old code filtered channel === 'web').
+            if (session && session.channel !== 'web') session = undefined;
             // Ownership check: only return a session this client actually owns.
             // Applied uniformly so a missing session and a forbidden session are
             // indistinguishable (no existence oracle), and null-owner sessions

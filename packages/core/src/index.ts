@@ -428,10 +428,10 @@ async function main(): Promise<void> {
     const isGroupChat = chatIdStr.startsWith('telegram:-') || chatIdStr.includes('@g.us');
     const validUserId = isGroupChat ? undefined : resolvedUser?.id;
 
-    const existingSessions = await sessionRepo.listByTenant(tenantId, 500);
-    let sessionRow = existingSessions.find(
-      (s) => s.channel === inbound.channel && s.chat_id === chatIdStr,
-    );
+    // Keyed lookup (indexed) — resolves the chat's session regardless of how
+    // many sessions exist. The previous linear scan was capped at 500 and
+    // silently forked a new session (losing history) past the cap (#186).
+    let sessionRow = await sessionRepo.findByChat(tenantId, inbound.channel, chatIdStr);
 
     if (!sessionRow) {
       const sessionId = crypto.randomUUID();
