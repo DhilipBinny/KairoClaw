@@ -39,17 +39,25 @@ export const messagingTools: ToolRegistration[] = [
       }
 
       if (channel === 'web') {
-        // Use the broadcast function injected via context
-        const broadcast = ctx.broadcastToWeb as ((msg: Record<string, unknown>) => void) | undefined;
-        if (broadcast) {
-          broadcast({
-            type: 'chat.proactive',
-            text,
-            ts: new Date().toISOString(),
-          });
+        // Route to the requesting user's own web connections (#191) — never
+        // broadcast a proactive message to every connected client. System
+        // context delivers to admins; an anonymous context has no owner to
+        // deliver to.
+        const msg = { type: 'chat.proactive', text, ts: new Date().toISOString() };
+        const toUser = ctx.broadcastToUser as ((userId: string, m: Record<string, unknown>) => void) | undefined;
+        const toAdmins = ctx.broadcastToAdmins as ((m: Record<string, unknown>) => void) | undefined;
+        const uid = (ctx.user as { id?: string } | undefined)?.id;
+        if (uid && uid !== 'system' && uid !== 'anonymous') {
+          if (!toUser) return { error: 'WebChat delivery not available' };
+          toUser(uid, msg);
           return { success: true, channel: 'web', delivered: true };
         }
-        return { error: 'WebChat broadcast not available' };
+        if (uid === 'system') {
+          if (!toAdmins) return { error: 'WebChat delivery not available' };
+          toAdmins(msg);
+          return { success: true, channel: 'web', delivered: true };
+        }
+        return { error: 'No web recipient for this context (anonymous sender)' };
       }
 
       if (channel === 'telegram') {

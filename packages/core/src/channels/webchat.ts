@@ -27,7 +27,7 @@ const log = createModuleLogger('channel.web');
 
 // ─── Connected client tracking ──────────────────────────────
 
-const clients = new Map<WebSocket, { sessionKey: string }>();
+const clients = new Map<WebSocket, { sessionKey: string; clientId: string; role: string }>();
 
 // ─── Per-user session scoping (#178) ────────────────────────
 // A web session id is namespaced by the connected client's identity so two
@@ -79,26 +79,66 @@ export function ownsWebSession(
 }
 const MAX_WS_CONNECTIONS = 50;
 
+export interface WebClientMeta { sessionKey: string; clientId: string; role: string }
+export interface WebDeliveryFilter {
+  /** Restrict to one bound session (scoped key). */
+  sessionKey?: string;
+  /** Restrict to the connections owned by this user id. */
+  userId?: string;
+  /** Restrict to admin-role connections. */
+  adminOnly?: boolean;
+}
+
 /**
- * Broadcast a message to authenticated webchat clients.
- * If `sessionKey` is provided, only send to clients bound to that session.
+ * Pure recipient predicate — decides whether a connected client should receive
+ * a message given a delivery filter. Centralizes the routing rules so proactive
+ * / cron output reaches only the intended recipients, never every client (#191).
  */
-export function broadcastToWeb(message: Record<string, unknown>, sessionKey?: string): void {
+export function webDeliveryMatches(meta: WebClientMeta, filter: WebDeliveryFilter): boolean {
+  if (filter.userId !== undefined) return meta.clientId === filter.userId;
+  if (filter.adminOnly) return meta.role === 'admin';
+  if (filter.sessionKey !== undefined) return meta.sessionKey === filter.sessionKey;
+  return true; // no filter → all authenticated clients
+}
+
+/** Send `message` to every live client matching `filter`; prune dead sockets. */
+function sendToClients(message: Record<string, unknown>, filter: WebDeliveryFilter): void {
   const data = JSON.stringify(message);
   for (const [ws, meta] of clients) {
     try {
       if (ws.readyState === 1) {
-        if (!sessionKey || meta.sessionKey === sessionKey) {
-          ws.send(data);
-        }
+        if (webDeliveryMatches(meta, filter)) ws.send(data);
       } else {
-        // Clean up dead connections
         clients.delete(ws);
       }
     } catch {
       clients.delete(ws);
     }
   }
+}
+
+/**
+ * Broadcast a message to authenticated webchat clients.
+ * If `sessionKey` is provided, only send to clients bound to that session.
+ */
+export function broadcastToWeb(message: Record<string, unknown>, sessionKey?: string): void {
+  sendToClients(message, sessionKey !== undefined ? { sessionKey } : {});
+}
+
+/**
+ * Deliver a message only to the connections owned by a specific user (#191).
+ * Used to route proactive/cron output to its owner instead of broadcasting it
+ * to every connected web client.
+ */
+export function broadcastToUser(userId: string, message: Record<string, unknown>): void {
+  if (!userId) return;
+  sendToClients(message, { userId });
+}
+
+/** Deliver a message only to admin-role connections (#191) — for ownerless
+ * system-originated output that should not fan out to every user. */
+export function broadcastToAdmins(message: Record<string, unknown>): void {
+  sendToClients(message, { adminOnly: true });
 }
 
 // Periodic cleanup of dead WebSocket connections (every 60s)
@@ -263,7 +303,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         }
         if (authValid) {
           authenticated = true;
-          clients.set(socket, { sessionKey: 'main' });
+          clients.set(socket, { sessionKey: 'main', clientId, role: clientRole });
           safeSend({ type: 'auth.ok' });
           log.info({ clientId, clientRole }, 'WebChat client authenticated');
         } else {
@@ -317,7 +357,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
             // Always refresh the broadcast-routing key from the LIVE clientId so
             // it can't go stale (e.g. after a mid-connection API-key re-auth that
             // upgrades the client identity).
-            clients.set(socket, { sessionKey: scopedKey });
+            clients.set(socket, { sessionKey: scopedKey, clientId, role: clientRole });
             const rawText = typeof msg.text === 'string' ? msg.text.trim() : '';
             if (!rawText) {
               safeSend({ type: 'error', message: 'Empty message' });
@@ -613,7 +653,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
 
     // ── Initial greeting ─────────────────────────
     if (authenticated) {
-      clients.set(socket, { sessionKey: 'main' });
+      clients.set(socket, { sessionKey: 'main', clientId, role: clientRole });
       safeSend({ type: 'auth.ok' });
     } else {
       safeSend({ type: 'auth.required' });

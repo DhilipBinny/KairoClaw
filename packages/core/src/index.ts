@@ -40,7 +40,7 @@ import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
-import { broadcastToWeb, stopWebchatCleanup } from './channels/webchat.js';
+import { broadcastToWeb, broadcastToUser, broadcastToAdmins, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
 import type { TelegramChannelInstance } from './channels/telegram.js';
 import { createWhatsAppChannel } from './channels/whatsapp.js';
@@ -602,6 +602,8 @@ async function main(): Promise<void> {
           telegramSend: sharedServices.telegramSend,
           whatsappSend: sharedServices.whatsappSend,
           broadcastToWeb,
+          broadcastToUser,
+          broadcastToAdmins,
           checkOutboundAllowed: (channel: 'whatsapp' | 'telegram', recipient: string) =>
             checkOutboundAllowed(channel, recipient, config, db),  // already returns Promise
           braveApiKey: secretsStore.get('tools.webSearch', 'apiKey') || config.tools?.webSearch?.apiKey || process.env.BRAVE_API_KEY || '',
@@ -795,7 +797,7 @@ async function main(): Promise<void> {
       const result = await createRunner(inbound);
       return { text: result.text ?? undefined, media: result.media };
     },
-    deliverer: async (text, channel, to, media) => {
+    deliverer: async (text, channel, to, media, ownerId) => {
       // Outbound policy check for cron delivery
       if ((channel === 'whatsapp' || channel === 'telegram') && to) {
         const check = await checkOutboundAllowed(channel, to, config, db);
@@ -828,7 +830,15 @@ async function main(): Promise<void> {
           await channelRegistry.whatsapp.sendToChat(text, to);
         }
       } else if (channel === 'web') {
-        broadcastToWeb({ type: 'cron.delivery', text, ts: Date.now() });
+        // Route to the cron's owner only — never fan a user's scheduled output
+        // out to every connected web client (#191). System-owned jobs (no
+        // owner) go to admin connections rather than everyone.
+        const msg = { type: 'cron.delivery', text, ts: Date.now() };
+        if (ownerId && ownerId !== 'system' && ownerId !== 'anonymous') {
+          broadcastToUser(ownerId, msg);
+        } else {
+          broadcastToAdmins(msg);
+        }
       } else {
         const cronLog = createModuleLogger('cron');
         cronLog.warn({ channel }, 'Cron delivery skipped: unknown channel');
