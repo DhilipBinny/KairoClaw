@@ -43,7 +43,25 @@ import { SubAgentRegistry } from './subagent-registry.js';
 import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
-import { filterOutput, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
+import { filterOutput, containsSecrets, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
+
+/**
+ * Tools that send data to a network destination. A secret appearing in their
+ * call arguments is almost never legitimate (these tools get any credentials
+ * from the secrets store, not from model-supplied args) and is the signature of
+ * exfiltration, so such calls are blocked before execution (#195).
+ */
+function isNetworkEgressTool(name: string): boolean {
+  return name === 'web_fetch'
+    || name === 'web_search'
+    || name === 'browse'
+    || name === 'send_email'   // model-supplied recipient + body
+    || name === 'send_message' // model-supplied chat id/JID + text
+    || name === 'send_file'    // model-supplied recipient (file content is the known high-entropy limit)
+    || name === 'manage_cron'  // model-supplied delivery target + prompt → deferred/time-shifted delivery
+    || name.startsWith('http_')
+    || name.startsWith('mcp__');
+}
 
 /**
  * Tools whose results are externally-controlled content (web pages, MCP server
@@ -284,6 +302,17 @@ async function executeSingleTool(
   callbacks: AgentRoundCallbacks,
 ): Promise<{ toolCallId: string; content: string }> {
   if (p.skipped) return { toolCallId: p.tc.id, content: p.skipped };
+
+  // Egress guard (#195): never send recognized secrets to a network destination.
+  // These tools authenticate via the secrets store, so a credential in their
+  // call arguments is the signature of exfiltration — block before executing.
+  if (isNetworkEgressTool(p.toolName) && containsSecrets(JSON.stringify(p.toolArgs ?? {}))) {
+    s.reqLog.error({ tool: p.toolName, category: 'security' }, 'Blocked egress tool call: arguments contain a secret');
+    return {
+      toolCallId: p.tc.id,
+      content: `<tool_result name="${sanitizeToolName(p.toolName)}">\n[BLOCKED: this call was not executed because its arguments contained what looks like a secret or credential. Secrets must never be placed in outbound request arguments — the gateway injects any required credentials automatically. Remove the secret and try again.]\n</tool_result>`,
+    };
+  }
 
   if (callbacks.onToolStart) {
     try { callbacks.onToolStart(p.toolName, p.toolArgs); } catch { /* ignore */ }

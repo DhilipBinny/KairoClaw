@@ -8,6 +8,7 @@ export {
 
 export {
   filterOutput,
+  containsSecrets,
   checkOutputSafety,
   neutralizeToolResultDelimiters,
   sanitizeToolName,

@@ -1,3 +1,12 @@
+/**
+ * Whether `text` contains something that looks like a secret/credential, using
+ * the same recognized patterns as filterOutput. Used to block secrets being
+ * placed in outbound tool-call arguments (#195).
+ */
+export function containsSecrets(text: string): boolean {
+  return filterOutput(text) !== text;
+}
+
 export function filterOutput(text: string): string {
   let filtered = text;
 
