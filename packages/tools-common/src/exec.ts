@@ -193,13 +193,23 @@ export function checkExecCommandPolicy(
     return { action: safety.action, reason: safety.reason, kind: 'safety' };
   }
 
-  // Non-admin: block access to the application's own source directory
-  // (parent of workspace), which works on any install path.
+  // Non-admin: block parent-directory traversal. The sandbox cwd is the user's
+  // own scope dir; `../` is the only way to climb out of it toward the state
+  // dir (where master.key/secrets.enc live). Blocking it closes the realistic
+  // glob/quote bypass of the secret-file denylist — `cat ../../../mast*.key`
+  // and `cat ../../../"mast""er.key"` never contain the literal filename but
+  // do require `../` to escape the scope (#189). NOTE: this is defense-in-depth;
+  // a shell running as the gateway user can still reach host files via absolute
+  // or `~` paths, so untrusted code execution ultimately needs OS-level
+  // isolation (the Docker sandbox_exec path).
   if (!isAdmin) {
     const appRoot = path.resolve(opts.workspace, '..');
     if (command.includes(path.join(appRoot, 'node_modules')) ||
         command.includes(path.join(appRoot, 'packages'))) {
       return { action: 'block', reason: 'access to application source code', kind: 'source' };
+    }
+    if (/(^|[\s'"=:(])\.\.[/\\]/.test(command)) {
+      return { action: 'block', reason: 'parent-directory traversal outside the sandbox scope', kind: 'scope' };
     }
   }
 
