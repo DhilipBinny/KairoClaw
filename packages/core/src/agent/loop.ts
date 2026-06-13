@@ -43,7 +43,7 @@ import { SubAgentRegistry } from './subagent-registry.js';
 import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
-import { filterOutput, containsSecrets, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
+import { filterOutput, containsSecrets, redactSecrets, createStreamingRedactor, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
 
 /**
  * Tools that send data to a network destination. A secret appearing in their
@@ -349,8 +349,11 @@ async function executeSingleTool(
         id: p.tc.id || crypto.randomUUID(),
         sessionId: context.session.id, tenantId: context.tenantId,
         userId: context.userId, toolName: p.toolName,
-        arguments: p.toolArgs,
-        result: typeof result === 'string' ? filterOutput(result) : result,
+        // Redact secrets from both the arguments and the result before they are
+        // persisted to the audit log — a credential could sit in either, in a
+        // string or nested under a credential-named key.
+        arguments: redactSecrets(p.toolArgs),
+        result: typeof result === 'string' ? filterOutput(result) : redactSecrets(result),
         status: toolStatus, durationMs,
       });
     } catch (e: unknown) {
@@ -457,9 +460,10 @@ async function executeToolCalls(
     }
     if (typeof toolArgs !== 'object' || toolArgs === null) toolArgs = {};
 
-    const argSummary = Object.entries(toolArgs).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
     s.reqLog.info({ tool: toolName, category: 'tool' }, 'Tool called');
-    s.reqLog.debug({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool args');
+    // Log the structured args (not a pre-flattened string) so the logger's
+    // key-aware redaction scrubs short/opaque secrets under credential keys too.
+    s.reqLog.debug({ tool: toolName, args: redactSecrets(toolArgs), category: 'tool' }, 'Tool args');
 
     const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
     const callCount = (s.toolCallCounts.get(toolHash) ?? 0) + 1;
@@ -632,11 +636,20 @@ export async function runAgent(
   // final text, so manipulated output can't leak mid-stream before the output
   // block fires (#182). (`s` is only referenced here at call time, inside the
   // loop, by which point it is initialized.)
-  const onDelta = (d: string) => { streamedParts.push(d); if (!s.injectionDetected) rawOnDelta?.(d); };
-  // Suppress the extended-thinking stream the same way, so injected content
-  // can't leak live via thinking deltas once an injection is detected (#182).
+  // Stream tokens to the client through a redactor so a secret split across
+  // deltas can't leak live (the final text is filtered separately below) (#185).
+  // streamedParts always captures the RAW stream so a cancelled turn can still
+  // return its partial text and the final filter sees the complete output.
+  const forwardDelta = (chunk: string) => { if (!s.injectionDetected) rawOnDelta?.(chunk); };
+  const streamRedactor = rawOnDelta ? createStreamingRedactor(forwardDelta) : null;
+  const onDelta = (d: string) => { streamedParts.push(d); streamRedactor?.push(d); };
+  // Redact the extended-thinking stream the same way (#185), and suppress it
+  // entirely once an injection is detected (#182). The thinking trace is
+  // client-facing too, so secrets the model echoes into it must not leak live.
+  const forwardThinking = (chunk: string) => { if (!s.injectionDetected) rawOnThinkingDelta?.(chunk); };
+  const thinkingRedactor = rawOnThinkingDelta ? createStreamingRedactor(forwardThinking) : null;
   const onThinkingDelta = rawOnThinkingDelta
-    ? (d: string) => { if (!s.injectionDetected) rawOnThinkingDelta(d); }
+    ? (d: string) => { thinkingRedactor?.push(d); }
     : undefined;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
@@ -861,15 +874,16 @@ export async function runAgent(
 
     const llmLatencyMs = Date.now() - llmStart;
 
-    // Debug JSONL logging
+    // Debug JSONL logging. This writes straight to disk, bypassing the logger's
+    // redaction layer, so scrub the whole entry here (#185).
     if (debugEnabled) {
-      appendDebugLog(config.agent.workspace, {
+      appendDebugLog(config.agent.workspace, redactSecrets({
         ts: new Date().toISOString(), sessionId: session.id, messageId: s.userMsgResult?.id ?? null,
         turn: debugTurnIndex, round: s.round, model,
         systemPrompt: { cached: s.systemPrompt.cached, dynamic: s.systemPrompt.dynamic },
         messages: sanitizeMessagesForLog(s.messages),
         response: { text: response.text || null, toolCalls: response.toolCalls ?? null, usage: response.usage ?? null, latencyMs: llmLatencyMs },
-      });
+      }));
     }
 
     // Track tokens + log
@@ -898,6 +912,15 @@ export async function runAgent(
       } catch (e: unknown) { reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)'); }
     }
 
+    // Release this round's streamed narration/thinking now that the round's
+    // stream is complete, so it reaches the client with the same timing as
+    // before (the redactor otherwise holds its tail until more text arrives or
+    // end-of-turn). Resets the buffer for the next round (#185).
+    if (!s.aborted) {
+      streamRedactor?.flush();
+      thinkingRedactor?.flush();
+    }
+
     // No tool calls → done
     if (!response.toolCalls) {
       s.fullText = response.text || '';
@@ -923,6 +946,13 @@ export async function runAgent(
   }
 
   // ── Post-loop finalization ──────────────────────────────
+  // Release any held-back tail so the live stream shows the complete reply.
+  // Skipped on abort (the partial text is returned via streamedParts) and
+  // suppressed by the emit guard if an injection was detected mid-turn (#185).
+  if (!s.aborted) {
+    streamRedactor?.flush();
+    thinkingRedactor?.flush();
+  }
   context.signal?.removeEventListener('abort', onParentAbort);
   // On cancellation, kill any in-flight sub-agents before draining so they
   // don't keep burning tokens after the parent turn was stopped.
@@ -960,6 +990,10 @@ export async function runAgent(
       }
     }
   }
+
+  // Filter the thinking trace returned to non-streaming consumers too — it is
+  // raw provider output and can echo secrets the model read this turn (#185).
+  if (s.finalThinkingText) s.finalThinkingText = filterOutput(s.finalThinkingText);
 
   reqLog.info({
     totalRounds: s.round, totalInputTokens: s.totalInputTokens, totalOutputTokens: s.totalOutputTokens,
