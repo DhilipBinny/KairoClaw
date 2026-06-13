@@ -594,7 +594,7 @@ export async function runAgent(
   callbacks: AgentRoundCallbacks,
   context: AgentContext,
 ): Promise<AgentResult> {
-  const { onDelta: rawOnDelta, onThinkingDelta, onRoundStart, onRoundEnd } = callbacks;
+  const { onDelta: rawOnDelta, onThinkingDelta: rawOnThinkingDelta, onRoundStart, onRoundEnd } = callbacks;
   // Capture streamed text so a turn cancelled mid-stream still returns the
   // partial response instead of null (#181). Cheap array push + join.
   const streamedParts: string[] = [];
@@ -604,6 +604,11 @@ export async function runAgent(
   // block fires (#182). (`s` is only referenced here at call time, inside the
   // loop, by which point it is initialized.)
   const onDelta = (d: string) => { streamedParts.push(d); if (!s.injectionDetected) rawOnDelta?.(d); };
+  // Suppress the extended-thinking stream the same way, so injected content
+  // can't leak live via thinking deltas once an injection is detected (#182).
+  const onThinkingDelta = rawOnThinkingDelta
+    ? (d: string) => { if (!s.injectionDetected) rawOnThinkingDelta(d); }
+    : undefined;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
   const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
@@ -782,7 +787,7 @@ export async function runAgent(
         if (s.messageRepo) {
           try {
             reqLog.info('Stage 2: Forcing hard compaction');
-            await compactSession(session.id, tenantId, model, db, config, context.callLLM);
+            await compactSession(session.id, tenantId, model, db, config, (a) => context.callLLM({ ...a, signal: context.signal }));
             const freshRows = await s.messageRepo.listBySession(session.id);
             s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage));
             s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
@@ -920,6 +925,7 @@ export async function runAgent(
         // detected, nothing unsafe reached the client. (#182)
         reqLog.error({ flags: safety.flags, category: 'security' }, 'Blocked unsafe output after a detected injection attempt');
         s.fullText = 'I stopped before sending that response: after processing external content, the reply matched data-exfiltration or privilege-escalation patterns, which usually means the external source tried to manipulate me. Please double-check the source or rephrase your request.';
+        s.finalThinkingText = null; // don't leak the (unchecked) thinking trace alongside a blocked reply
       } else {
         reqLog.warn({ flags: safety.flags, usedUntrustedContent: s.usedUntrustedContent }, 'Output safety flags detected');
       }

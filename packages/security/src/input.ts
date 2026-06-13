@@ -20,7 +20,15 @@ export function sanitizeInput(text: string, maxLength = 50_000): string {
 
 /** Normalize homoglyphs to ASCII for pattern matching (not for display). */
 export function normalizeForDetection(text: string): string {
-  return text.replace(HOMOGLYPH_RE, ch => HOMOGLYPH_MAP[ch] || ch);
+  // Strip zero-width chars + NFC-normalize before folding homoglyphs, so a
+  // trigger phrase split with zero-width joiners can't evade detection on the
+  // tool-result path (which never runs sanitizeInput). Keep in sync with the
+  // cleaning sanitizeInput does.
+  return text
+    .replace(/\0/g, '')
+    .replace(ZERO_WIDTH_RE, '')
+    .normalize('NFC')
+    .replace(HOMOGLYPH_RE, ch => HOMOGLYPH_MAP[ch] || ch);
 }
 
 export type InjectionSeverity = 'block' | 'warn';

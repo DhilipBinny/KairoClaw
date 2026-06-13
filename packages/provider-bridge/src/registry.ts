@@ -242,7 +242,16 @@ export class ProviderRegistry {
             throw e; // handled by outer callWithFailover
           }
           if (classified.retryDelayMs > 0) {
-            await new Promise((r) => setTimeout(r, classified.retryDelayMs));
+            // Abort-aware backoff: a Stop/kill during the delay returns at once
+            // instead of waiting out the (possibly large Retry-After) sleep (#181).
+            await new Promise<void>((resolve) => {
+              const sig = chatArgs.signal;
+              if (sig?.aborted) return resolve();
+              const t = setTimeout(() => { sig?.removeEventListener('abort', onAbort); resolve(); }, classified.retryDelayMs);
+              const onAbort = () => { clearTimeout(t); resolve(); };
+              sig?.addEventListener('abort', onAbort, { once: true });
+            });
+            if (chatArgs.signal?.aborted) throw e;
           }
           continue;
         }

@@ -188,6 +188,13 @@ export const webTools: ToolRegistration[] = [
       const defaultMaxChars = typeof configMaxChars === 'number' && configMaxChars > 0 ? configMaxChars : 50000;
       const maxChars = (args.maxChars as number) || defaultMaxChars;
 
+      // Compose the caller's cancellation signal with the per-request timeout so
+      // a Stop/kill aborts an in-flight fetch immediately (#181).
+      const callerSignal = ctx.signal as AbortSignal | undefined;
+      const fetchSignal = (ms: number) => callerSignal
+        ? AbortSignal.any([callerSignal, AbortSignal.timeout(ms)])
+        : AbortSignal.timeout(ms);
+
       try {
         // Use manual redirect handling to validate each hop against SSRF
         let currentUrl = url;
@@ -196,7 +203,7 @@ export const webTools: ToolRegistration[] = [
         for (let i = 0; ; i++) {
           res = await fetch(currentUrl, {
             headers: { 'User-Agent': 'AgenticGateway/2.0' },
-            signal: AbortSignal.timeout(30000),
+            signal: fetchSignal(30000),
             redirect: 'manual',
           });
           if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
@@ -290,10 +297,11 @@ export const webTools: ToolRegistration[] = [
       const count = Math.min((args.count as number) || 5, 10);
 
       try {
+        const callerSignal = ctx.signal as AbortSignal | undefined;
         const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${count}`;
         const res = await fetch(url, {
           headers: { 'X-Subscription-Token': apiKey, Accept: 'application/json' },
-          signal: AbortSignal.timeout(15000),
+          signal: callerSignal ? AbortSignal.any([callerSignal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000),
           redirect: 'error',
         });
 
