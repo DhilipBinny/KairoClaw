@@ -67,8 +67,18 @@ const MINIMAL_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
 // ── Sandboxed blocks — apply to non-admin users only ───────
 // Persona files, source code, secrets, cross-scope access
 const SANDBOXED_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
-  // Credential/key theft
-  { pattern: /\bcat\b.*\/(\.ssh\/|\.aws\/|\.env\b|secrets\.json|\.docker\/config)/i, reason: 'read credential files' },
+  // Credential/key theft — VERB-INDEPENDENT (#189). Any reference to a secret
+  // file is blocked regardless of the command, because no read/copy/archive/
+  // interpret verb is legitimate for a sandboxed user. The previous patterns
+  // were anchored to specific verbs (cat/head/…), which od/dd/cp/gzip/tar and
+  // interpreter reads (python -c "open('master.key')") trivially bypassed.
+  { pattern: /master\.key\b/i, reason: 'access encryption master key' },
+  { pattern: /secrets\.enc\b/i, reason: 'access encrypted secrets' },
+  { pattern: /\bsecrets\.json\b/i, reason: 'access secrets file' },
+  { pattern: /(\.ssh\/|\.aws\/|\.docker\/config|\.npmrc\b|\.git-credentials\b|\.netrc\b|\.config\/gcloud)/i, reason: 'access credential files' },
+  { pattern: /\b(id_rsa|id_dsa|id_ecdsa|id_ed25519)\b/i, reason: 'access private SSH key' },
+  { pattern: /\/\.env(\b|\.)/i, reason: 'access env file' },
+  { pattern: /\/etc\/(passwd|shadow|sudoers)\b/i, reason: 'access system credential file' },
   { pattern: /\b(history|\.bash_history|\.zsh_history)\b/i, reason: 'read shell history' },
   { pattern: /\bsystemctl\s+(stop|disable|mask)\s+(docker|sshd|network|firewall)/i, reason: 'disable critical service' },
 
@@ -85,9 +95,6 @@ const SANDBOXED_BLOCKED: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\/app\/node_modules\//i, reason: 'access application dependencies' },
   { pattern: /\bfind\s+\/app\b/i, reason: 'scan application directory' },
 
-  // Encrypted secrets / master key
-  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*master\.key/i, reason: 'read encryption master key' },
-  { pattern: /\b(cat|head|tail|less|more|xxd|base64|strings)\b.*secrets\.enc/i, reason: 'read encrypted secrets' },
 ];
 
 // ── Layer 2: Confirmation required — risky but sometimes needed ──
