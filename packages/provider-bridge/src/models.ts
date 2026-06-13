@@ -1,4 +1,5 @@
 import type { GatewayConfig, ModelCapabilities, CostEstimate } from '@agw/types';
+import { lookupModelPricing } from './pricing.js';
 
 // ══════════════════════════════════════════════
 // Model capabilities registry
@@ -36,6 +37,8 @@ function stripProviderPrefix(modelRef: string): string {
  *   1. config.models.capabilities exact match (by bare model ID)
  *   2. config.models.capabilities substring match
  *   3. Safe defaults
+ * Pricing falls back to the built-in pricing table (see pricing.ts) when neither
+ * config nor the fetched capabilities supply a cost.
  */
 function getModelCapabilities(
   modelRef: string | undefined,
@@ -45,28 +48,28 @@ function getModelCapabilities(
 
   const bareId = stripProviderPrefix(modelRef);
   const caps = config?.models?.capabilities;
+  let result: ModelCapabilities = { ...MODEL_DEFAULTS };
 
   if (caps) {
     // 1. Exact match
     if (caps[bareId]) {
-      return { ...MODEL_DEFAULTS, ...caps[bareId] };
-    }
-
-    // 2. Exact match on full ref (backward compat)
-    if (caps[modelRef] && modelRef !== bareId) {
-      return { ...MODEL_DEFAULTS, ...caps[modelRef] };
-    }
-
-    // 3. Substring match — longest match wins
-    const key = Object.keys(caps)
-      .filter(k => bareId.includes(k) || modelRef.includes(k))
-      .sort((a, b) => b.length - a.length)[0];
-    if (key) {
-      return { ...MODEL_DEFAULTS, ...caps[key] };
+      result = { ...MODEL_DEFAULTS, ...caps[bareId] };
+    } else if (caps[modelRef] && modelRef !== bareId) {
+      // 2. Exact match on full ref (backward compat)
+      result = { ...MODEL_DEFAULTS, ...caps[modelRef] };
+    } else {
+      // 3. Substring match — longest match wins
+      const key = Object.keys(caps)
+        .filter(k => bareId.includes(k) || modelRef.includes(k))
+        .sort((a, b) => b.length - a.length)[0];
+      if (key) result = { ...MODEL_DEFAULTS, ...caps[key] };
     }
   }
 
-  return { ...MODEL_DEFAULTS };
+  // Fill cost from the built-in table when config/fetched data didn't supply one.
+  if (!result.costPer1M) result.costPer1M = lookupModelPricing(bareId);
+
+  return result;
 }
 
 /**
