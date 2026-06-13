@@ -160,6 +160,47 @@ describe('tool-result persistence (#184)', () => {
     }
   });
 
+  it('does not wipe prior history when a turn gives up after mid-turn compaction', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's5');
+      const repo = new MessageRepository(db as any);
+      // Seed enough prior history that reactive Stage-2 compaction will engage
+      // (compaction skips when messages <= keepRecentMessages + 2; default 10).
+      for (let i = 0; i < 16; i++) {
+        await db.run(
+          `INSERT INTO messages (session_id, tenant_id, role, content, created_at) VALUES ('s5','test-tenant',?,?,?)`,
+          [i % 2 === 0 ? 'user' : 'assistant', `OLD_HISTORY_${i}`, new Date(1000 + i).toISOString()],
+        );
+      }
+
+      const result = await runAgent(
+        { text: 'overflow please', channel: 'web', chatId: 'web:s5', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          callLLM: async (args: any) => {
+            const sys = typeof args.systemPrompt === 'string' ? args.systemPrompt : '';
+            const m0 = typeof args.messages?.[0]?.content === 'string' ? args.messages[0].content : '';
+            // The compaction summarizer call: return a valid structured summary.
+            if (sys.includes('summarizer') || m0.includes('STRUCTURED summary')) {
+              return { text: '## Active Tasks\n- none\n## Resolved Topics\n- t\n## Key Facts\n- f\n## Current Work\n- w', usage: { inputTokens: 1, outputTokens: 1 } } as unknown as ProviderResponse;
+            }
+            // Every real turn call overflows → drives reactive compaction + give-up.
+            throw new Error('prompt is too long');
+          },
+        }),
+      );
+
+      expect(result.error).toBe(true);
+      // The give-up must NOT delete the compacted history (the stale user-msg id
+      // would otherwise match every re-keyed row).
+      const rows = await repo.listBySession('s5');
+      expect(rows.length).toBeGreaterThan(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it('keeps insertion order for a same-millisecond parallel tool batch (stable id tiebreak)', async () => {
     const db = createTestDb();
     try {

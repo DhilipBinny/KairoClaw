@@ -869,6 +869,12 @@ export async function runAgent(
             const freshRows = await s.messageRepo.listBySession(session.id);
             s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage));
             s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
+            // Compaction rewrote the table (delete-all + re-insert with new ids),
+            // so this turn's rows no longer exist as a contiguous suffix and the
+            // captured user-message id is stale. The post-compaction state is
+            // already valid and paired, so there is nothing to roll back —
+            // disable the per-turn rollback to avoid deleting unrelated history.
+            s.userMsgResult = null;
           } catch (compactErr: unknown) {
             reqLog.warn({ err: compactErr instanceof Error ? compactErr.message : String(compactErr) }, 'Stage 2 compaction failed');
           }
