@@ -349,11 +349,11 @@ async function executeSingleTool(
         id: p.tc.id || crypto.randomUUID(),
         sessionId: context.session.id, tenantId: context.tenantId,
         userId: context.userId, toolName: p.toolName,
-        // Redact secrets from the persisted arguments too — a credential passed
-        // as a tool argument would otherwise sit in the audit log in clear text
-        // (the result is already filtered below).
+        // Redact secrets from both the arguments and the result before they are
+        // persisted to the audit log — a credential could sit in either, in a
+        // string or nested under a credential-named key.
         arguments: redactSecrets(p.toolArgs),
-        result: typeof result === 'string' ? filterOutput(result) : result,
+        result: typeof result === 'string' ? filterOutput(result) : redactSecrets(result),
         status: toolStatus, durationMs,
       });
     } catch (e: unknown) {
@@ -460,9 +460,10 @@ async function executeToolCalls(
     }
     if (typeof toolArgs !== 'object' || toolArgs === null) toolArgs = {};
 
-    const argSummary = Object.entries(toolArgs).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
     s.reqLog.info({ tool: toolName, category: 'tool' }, 'Tool called');
-    s.reqLog.debug({ tool: toolName, args: argSummary, category: 'tool' }, 'Tool args');
+    // Log the structured args (not a pre-flattened string) so the logger's
+    // key-aware redaction scrubs short/opaque secrets under credential keys too.
+    s.reqLog.debug({ tool: toolName, args: redactSecrets(toolArgs), category: 'tool' }, 'Tool args');
 
     const toolHash = `${toolName}:${JSON.stringify(toolArgs).slice(0, 100)}`;
     const callCount = (s.toolCallCounts.get(toolHash) ?? 0) + 1;
@@ -873,15 +874,16 @@ export async function runAgent(
 
     const llmLatencyMs = Date.now() - llmStart;
 
-    // Debug JSONL logging
+    // Debug JSONL logging. This writes straight to disk, bypassing the logger's
+    // redaction layer, so scrub the whole entry here (#185).
     if (debugEnabled) {
-      appendDebugLog(config.agent.workspace, {
+      appendDebugLog(config.agent.workspace, redactSecrets({
         ts: new Date().toISOString(), sessionId: session.id, messageId: s.userMsgResult?.id ?? null,
         turn: debugTurnIndex, round: s.round, model,
         systemPrompt: { cached: s.systemPrompt.cached, dynamic: s.systemPrompt.dynamic },
         messages: sanitizeMessagesForLog(s.messages),
         response: { text: response.text || null, toolCalls: response.toolCalls ?? null, usage: response.usage ?? null, latencyMs: llmLatencyMs },
-      });
+      }));
     }
 
     // Track tokens + log

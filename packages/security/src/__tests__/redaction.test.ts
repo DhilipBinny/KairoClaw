@@ -94,6 +94,33 @@ describe('redactSecrets — deep structural redaction (#185)', () => {
     expect(out.nested.Cookie).toBe('***REDACTED***');
   });
 
+  it('does not redact (or retype) non-string values under credential-named keys', () => {
+    const out = redactSecrets({
+      hasPassword: true,
+      topSecret: false,
+      csrfToken: 12345,
+      tokenCount: 7,        // not a credential suffix, kept anyway
+      maxTokens: 4096,
+    }) as Record<string, any>;
+    expect(out.hasPassword).toBe(true);
+    expect(out.topSecret).toBe(false);
+    expect(out.csrfToken).toBe(12345);
+    expect(out.tokenCount).toBe(7);
+    expect(out.maxTokens).toBe(4096);
+  });
+
+  it('fails closed past the depth cap and on cycles (no raw secret leaks through)', () => {
+    // Nest a secret deeper than the depth cap (12).
+    let deep: any = { password: 'hunter2deepsecret' };
+    for (let i = 0; i < 20; i++) deep = { wrap: deep };
+    const out = JSON.stringify(redactSecrets(deep));
+    expect(out).not.toContain('hunter2deepsecret');
+    // A cyclic structure is rendered safe (serializable, no throw).
+    const a: Record<string, unknown> = { x: 1 };
+    a.self = a;
+    expect(() => JSON.stringify(redactSecrets(a))).not.toThrow();
+  });
+
   it('leaves Error / Date / Buffer / Map / Set / typed arrays / class instances intact', () => {
     const err = new Error('boom');
     expect(redactSecrets(err)).toBe(err);
@@ -199,5 +226,63 @@ describe('createStreamingRedactor (#185)', () => {
     const chunked = run(Array.from({ length: Math.ceil(text.length / 5) }, (_, i) => text.slice(i * 5, i * 5 + 5)));
     expect(chunked).toBe(filterOutput(text));
     expect(chunked).not.toMatch(/sk-ABCDEFGHIJKLMNOP/);
+  });
+
+  it('never leaks the body of a COMPLETED PEM block larger than the trim threshold', () => {
+    // RSA-key-sized body (~2KB) — well past TRIM_THRESHOLD/RETAIN, so the trim
+    // path runs while the (now complete) block is in the buffer.
+    const body = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcw' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.repeat(60);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----`;
+    const text = `here is your key: ${pem} done`;
+    const chunked = run(Array.from({ length: Math.ceil(text.length / 5) }, (_, i) => text.slice(i * 5, i * 5 + 5)));
+    expect(chunked).not.toContain('MIIEvQ');
+    expect(chunked).not.toContain(body.slice(50, 90));
+    expect(chunked).toContain('***PRIVATE_KEY_REDACTED***');
+    expect(chunked).toBe(filterOutput(text));
+  });
+
+  it('never leaks the body of a COMPLETED long JWT streamed past the threshold', () => {
+    const header = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9';
+    const payload = 'eyJ' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-'.repeat(40);
+    const sig = 'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    const text = `tok ${header}.${payload}.${sig} end`;
+    const chunked = run(Array.from({ length: Math.ceil(text.length / 7) }, (_, i) => text.slice(i * 7, i * 7 + 7)));
+    expect(chunked).not.toContain(payload.slice(10, 60));
+    expect(chunked).toContain('***JWT_REDACTED***');
+    expect(chunked).toBe(filterOutput(text));
+  });
+
+  it('redacts and bounds an UNTERMINATED PEM block (no leak, no unbounded buffer)', () => {
+    const out: string[] = [];
+    const r = createStreamingRedactor((c) => out.push(c));
+    r.push('your key: -----BEGIN PRIVATE KEY-----\n');
+    for (let i = 0; i < 5000; i++) r.push('ABCDEFGHIJ'); // 50k chars, never terminated
+    const live = out.join('');
+    expect(live).not.toContain('ABCDEFGHIJABCDEFGHIJ');
+    expect(live).toContain('***PRIVATE_KEY_REDACTED***');
+    r.flush();
+    // After the marker, the discarded body never surfaces.
+    expect(out.join('')).not.toContain('ABCDEFGHIJABCDEFGHIJ');
+  });
+
+  it('resumes normal output after a capped oversized secret terminates', () => {
+    const out: string[] = [];
+    const r = createStreamingRedactor((c) => out.push(c));
+    r.push('-----BEGIN PRIVATE KEY-----\n');
+    for (let i = 0; i < 2000; i++) r.push('ABCDEFGHIJ'); // exceed ceiling → capped
+    r.push('\n-----END PRIVATE KEY-----\nafterwards the answer continues here.');
+    r.flush();
+    const joined = out.join('');
+    expect(joined).toContain('***PRIVATE_KEY_REDACTED***');
+    expect(joined).toContain('afterwards the answer continues here.');
+    expect(joined).not.toContain('ABCDEFGHIJABCDEFGHIJ');
+  });
+
+  it('does not duplicate or drop output when a redaction precedes a long tail', () => {
+    // A redaction early (shrinks filtered length) followed by lots of text that
+    // forces trims — exercises the emitted-accounting after trim.
+    const text = 'key sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 then ' + 'lorem ipsum dolor sit amet '.repeat(80);
+    const chunked = run(Array.from({ length: Math.ceil(text.length / 3) }, (_, i) => text.slice(i * 3, i * 3 + 3)));
+    expect(chunked).toBe(filterOutput(text));
   });
 });
