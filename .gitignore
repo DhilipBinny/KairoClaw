@@ -70,3 +70,11 @@ CLAUDE.md
 
 # ── Docker ──
 docker-compose.override.yml
+
+# ── Ad-hoc scratch scripts (never commit) ──
+# Throwaway repro/fuzz scripts dropped in package roots. Real tests live under
+# each package's src/__tests__/.
+packages/*/test_*.mjs
+packages/*/fuzz_*.mjs
+scratch_*.mjs
+*.scratch.mjs
