@@ -13,6 +13,47 @@ export interface CronRoutesOptions {
   scheduler: CronScheduler;
 }
 
+// Body validation schemas (API-004). The scheduler also validates schedule
+// semantics, but rejecting malformed bodies here gives callers a clear 400 and
+// keeps unvalidated input from reaching scheduler.add/update.
+const scheduleSchema = {
+  type: 'object',
+  required: ['type', 'value'],
+  properties: {
+    type: { type: 'string', enum: ['at', 'every', 'cron'] },
+    value: { type: ['string', 'number'] },
+    tz: { type: 'string' },
+    timezone: { type: 'string' },
+  },
+} as const;
+
+const cronCreateSchema = {
+  type: 'object',
+  required: ['schedule', 'prompt'],
+  properties: {
+    name: { type: 'string', maxLength: 200 },
+    prompt: { type: 'string', minLength: 1, maxLength: 5000 },
+    enabled: { type: 'boolean' },
+    schedule: scheduleSchema,
+    delivery: {}, // string or object; shape validated downstream
+  },
+} as const;
+
+// Note: an update that includes `schedule` must send the WHOLE schedule object.
+// scheduler.update() replaces the schedule wholesale (it doesn't deep-merge), so
+// requiring type+value here prevents a partial `{schedule:{tz}}` from clobbering
+// the existing type/value. Both shipping clients always send the full schedule.
+const cronUpdateSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', maxLength: 200 },
+    prompt: { type: 'string', maxLength: 5000 },
+    enabled: { type: 'boolean' },
+    schedule: scheduleSchema,
+    delivery: {},
+  },
+} as const;
+
 export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (app, opts) => {
   const { scheduler } = opts;
 
@@ -34,11 +75,15 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
   });
 
   // POST /api/v1/admin/cron — create a cron job
-  app.post('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.post('/api/v1/admin/cron', { preHandler: [requireRole('admin')], schema: { body: cronCreateSchema } }, async (request, reply) => {
     const body = request.body as Record<string, unknown>;
 
     try {
-      const job = scheduler.add(body as any);
+      // Never trust a client-supplied id or owner: the id is server-generated and
+      // the job is owned by the admin who creates it (mirrors the #179 rule that
+      // ownership cannot be forged/reassigned via the update route).
+      const { id: _id, userId: _userId, ...rest } = body;
+      const job = scheduler.add({ ...rest, userId: request.user!.id } as any);
       return { success: true, job };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -49,7 +94,7 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
   // PATCH /api/v1/admin/cron/:id — update a cron job
   app.patch(
     '/api/v1/admin/cron/:id',
-    { preHandler: [requireRole('admin')] },
+    { preHandler: [requireRole('admin')], schema: { body: cronUpdateSchema } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = request.body as Record<string, unknown>;
@@ -110,7 +155,7 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
   });
 
   // PATCH /api/v1/my/cron/:id — update own cron job
-  app.patch('/api/v1/my/cron/:id', async (request, reply) => {
+  app.patch('/api/v1/my/cron/:id', { schema: { body: cronUpdateSchema } }, async (request, reply) => {
     const userId = request.user?.id;
     if (!userId) return reply.code(401).send({ error: 'Not authenticated' });
 

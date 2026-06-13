@@ -24,6 +24,9 @@ export async function createServer(context: ServerContext): Promise<FastifyInsta
     },
     disableRequestLogging: true,
     trustProxy: gw?.trustProxy ?? false,
+    // Allow union types in route schemas (e.g. a cron schedule value that may be
+    // a string or a number) without an Ajv strict-mode warning on boot.
+    ajv: { customOptions: { allowUnionTypes: true } },
   });
 
   // CORS — env override > auto-derive from listen config
