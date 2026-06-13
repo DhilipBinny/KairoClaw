@@ -9,7 +9,10 @@ import { FileStateTracker } from '../../../agent/file-state.js';
 let workspace: string;
 
 beforeEach(() => {
-  workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-test-'));
+  // realpathSync canonicalizes the temp dir so the path-safety symlink check
+  // compares like-for-like — on macOS os.tmpdir() is itself a symlink
+  // (→ /private/var/...), which would otherwise trip the guard. No-op on Linux.
+  workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kairo-test-')));
   fs.mkdirSync(path.join(workspace, 'scopes', 'user-a-uuid', 'documents'), { recursive: true });
   fs.mkdirSync(path.join(workspace, 'scopes', 'user-b-uuid', 'documents'), { recursive: true });
   fs.mkdirSync(path.join(workspace, 'scopes', 'group_telegram_-100123', 'memory'), { recursive: true });
