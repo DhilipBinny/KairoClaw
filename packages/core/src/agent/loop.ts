@@ -569,6 +569,38 @@ async function persistResults(s: RunState, context: AgentContext): Promise<void>
   }
 }
 
+/**
+ * Persist the assistant (with its tool_calls) and tool-result messages produced
+ * in one completed round. Called only after the round's tools have run and any
+ * sub-agent placeholders have been finalized, so the stored content matches what
+ * the model saw. Without this, tool work was never written to the DB — leaving
+ * soft/hard compaction with nothing to compact, undercounting tokens, and making
+ * reactive-compact recovery (which reloads from the DB) silently drop the round's
+ * tool work (#184).
+ */
+async function persistRoundMessages(s: RunState, context: AgentContext, fromIndex: number): Promise<void> {
+  if (!s.messageRepo) return;
+  for (let i = fromIndex; i < s.messages.length; i++) {
+    const m = s.messages[i];
+    try {
+      const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      // Filter assistant-generated text the same way the final reply is filtered,
+      // so a secret the model echoes mid-turn isn't stored in clear text (#185).
+      const content = m.role === 'assistant' ? filterOutput(raw) : raw;
+      await s.messageRepo.create({
+        sessionId: context.session.id,
+        tenantId: context.tenantId,
+        role: m.role,
+        content,
+        toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : undefined,
+        toolCallId: m.tool_call_id ?? undefined,
+      });
+    } catch (e: unknown) {
+      s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), role: m.role }, 'Failed to persist round message (non-critical)');
+    }
+  }
+}
+
 // ─── Stage: Memory extraction (fire-and-forget) ──────────────
 
 function triggerMemoryExtraction(s: RunState, context: AgentContext): void {
@@ -935,12 +967,19 @@ export async function runAgent(
 
     // Append assistant message + execute tools. If cancellation arrived during
     // the LLM call, stop here rather than kicking off a new batch of tools.
+    const roundStartIdx = s.messages.length;
     const assistantMsg: Message = { role: 'assistant', content: response.text || '', tool_calls: response.toolCalls, thinking_blocks: response.thinkingBlocks };
     s.messages.push(assistantMsg);
     s.totalContentSize += contentLen(assistantMsg.content);
+    // Abort before executing tools: don't persist the assistant tool_use, or it
+    // would be an orphaned tool_use with no results on the next reload.
     if (context.signal?.aborted) { s.aborted = true; if (onRoundEnd) onRoundEnd(s.round, maxToolRounds); break; }
     await executeToolCalls(response.toolCalls, s, context, callbacks);
     await drainSubAgents(s);
+
+    // Persist the completed round (assistant tool_use + tool results) so it
+    // survives reload/compaction (#184).
+    if (!ephemeral) await persistRoundMessages(s, context, roundStartIdx);
 
     if (onRoundEnd) onRoundEnd(s.round, maxToolRounds);
   }

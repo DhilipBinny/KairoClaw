@@ -48,7 +48,11 @@ export class MessageRepository {
   }
 
   async listBySession(sessionId: string, limit?: number, offset?: number): Promise<MessageRow[]> {
-    let sql = 'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC';
+    // Tiebreak on id so messages inserted within the same millisecond (e.g. a
+    // parallel tool-result batch, or an assistant turn and its tool results)
+    // keep insertion order — otherwise a tool result could sort before its
+    // assistant tool_use and orphan the pair on reload.
+    let sql = 'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC';
     const params: unknown[] = [sessionId];
 
     if (limit !== undefined) {
@@ -78,7 +82,7 @@ export class MessageRepository {
   /** List messages in a session after a given message ID (for incremental processing). */
   async listSinceId(sessionId: string, sinceId: number): Promise<MessageRow[]> {
     return await this.db.query<MessageRow>(
-      'SELECT * FROM messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC',
+      'SELECT * FROM messages WHERE session_id = ? AND id > ? ORDER BY created_at ASC, id ASC',
       [sessionId, sinceId],
     );
   }
