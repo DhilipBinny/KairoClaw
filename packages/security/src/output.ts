@@ -157,11 +157,21 @@ export function createStreamingRedactor(
   // already been emitted, until its terminator arrives.
   let discard: { kind: 'pem' | 'token'; tail: string } | null = null;
 
+  /** Index of the first `-----BEGIN…` that has no matching END after it, else -1. */
+  function unterminatedPemStart(): number {
+    const re = new RegExp(PEM_BEGIN.source, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(buf)) !== null) {
+      if (!PEM_END.test(buf.slice(m.index))) return m.index;
+    }
+    return -1;
+  }
+
   /** Earliest raw index that must be HELD (could still change with more input). */
   function heldStart(): number {
     let h = buf.length;
-    const pm = PEM_BEGIN.exec(buf);
-    if (pm && !PEM_END.test(buf.slice(pm.index))) h = Math.min(h, pm.index);
+    const pem = unterminatedPemStart();
+    if (pem !== -1) h = Math.min(h, pem);
     const jm = JWT_TRAIL.exec(buf);
     // Hold any trailing eyJ run until it resolves — we can't tell a forming JWT
     // (whose header alone can be large, e.g. an x5c cert chain) from ordinary
@@ -189,11 +199,11 @@ export function createStreamingRedactor(
   /** Cap an in-progress secret that has grown past the ceiling. */
   function capIfOversized(): void {
     if (buf.length <= STREAM_CEILING) return;
-    const pm = PEM_BEGIN.exec(buf);
-    if (pm && !PEM_END.test(buf.slice(pm.index))) {
-      emit(filterOutput(buf.slice(0, pm.index)));
+    const pem = unterminatedPemStart();
+    if (pem !== -1) {
+      emit(filterOutput(buf.slice(0, pem)));
       emit('***PRIVATE_KEY_REDACTED***');
-      discard = { kind: 'pem', tail: buf.slice(pm.index).slice(-(PEM_END_MAXLEN - 1)) };
+      discard = { kind: 'pem', tail: buf.slice(pem).slice(-(PEM_END_MAXLEN - 1)) };
       buf = '';
       return;
     }

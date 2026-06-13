@@ -353,6 +353,16 @@ describe('createStreamingRedactor (#185)', () => {
     expect(joined).toContain('trailing');
   });
 
+  it('redacts every block when multiple PEM keys appear in one stream', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nMIIEvKEYBODY' + 'Z'.repeat(80) + '\n-----END PRIVATE KEY-----';
+    const text = `first ${pem} middle ${pem} last ${pem} end`;
+    for (const size of [1, 3, 5, 7, 11, 20]) {
+      const chunked = run(Array.from({ length: Math.ceil(text.length / size) }, (_, i) => text.slice(i * size, i * size + size)));
+      expect(chunked).toBe(filterOutput(text));
+      expect(chunked).not.toContain('MIIEvKEYBODY');
+    }
+  });
+
   // Deterministic LCG so any failure reproduces.
   function lcg(seed: number) { return () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; }
   function streamRandom(text: string, rnd: () => number): string {

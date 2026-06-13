@@ -1,0 +1,10 @@
+import { createStreamingRedactor } from './dist/output.js';
+const N = 2_000_000;
+const out = [];
+const r = createStreamingRedactor((c) => out.push(c));
+r.push('password=');
+const t0 = Date.now();
+for (let i = 0; i < N/1000; i++) r.push('a'.repeat(1000));
+console.log('password 2M push time', Date.now()-t0, 'ms; emitted-before-flush chunks', out.length);
+r.flush();
+console.log('outLen', out.join('').length);
