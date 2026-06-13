@@ -54,6 +54,20 @@ export class SessionRepository {
     return await this.db.get<SessionRow>('SELECT * FROM sessions WHERE id = ?', [id]);
   }
 
+  /**
+   * Resolve the session for a chat by its key (tenant + channel + chat_id).
+   * Replaces a linear scan that was capped at 500 sessions and silently forked
+   * a new session past the cap, losing history (#186). Uses the idx_sessions_chat_id
+   * index. If duplicates exist (e.g. from the old fork bug), returns the most
+   * recently updated one so the active history is the one that continues.
+   */
+  async findByChat(tenantId: string, channel: string, chatId: string): Promise<SessionRow | undefined> {
+    return await this.db.get<SessionRow>(
+      'SELECT * FROM sessions WHERE tenant_id = ? AND channel = ? AND chat_id = ? ORDER BY updated_at DESC LIMIT 1',
+      [tenantId, channel, chatId],
+    );
+  }
+
   async listByTenant(tenantId: string, limit = 100): Promise<SessionRow[]> {
     return await this.db.query<SessionRow>(
       'SELECT * FROM sessions WHERE tenant_id = ? ORDER BY updated_at DESC LIMIT ?',
