@@ -586,6 +586,10 @@ async function persistRoundMessages(s: RunState, context: AgentContext, fromInde
       const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
       // Filter assistant-generated text the same way the final reply is filtered,
       // so a secret the model echoes mid-turn isn't stored in clear text (#185).
+      // Tool/user content is stored as-is: the messages table is the actual
+      // conversation that must be replayed verbatim to the model next turn, so
+      // redacting it would corrupt context. (The disposable tool_calls audit copy
+      // IS redacted; at-rest protection for this table is the DB-level control.)
       const content = m.role === 'assistant' ? filterOutput(raw) : raw;
       await s.messageRepo.create({
         sessionId: context.session.id,
@@ -978,8 +982,12 @@ export async function runAgent(
     await drainSubAgents(s);
 
     // Persist the completed round (assistant tool_use + tool results) so it
-    // survives reload/compaction (#184).
-    if (!ephemeral) await persistRoundMessages(s, context, roundStartIdx);
+    // survives reload/compaction (#184). Skip if cancelled mid-execution: the
+    // round may hold an assistant tool_use whose later tool calls never ran, and
+    // persisting that orphaned tool_use would make the next reload fail provider
+    // validation. The whole turn is being cancelled anyway, so dropping the
+    // partial round (as before this change) is the safe choice.
+    if (!ephemeral && !s.aborted) await persistRoundMessages(s, context, roundStartIdx);
 
     if (onRoundEnd) onRoundEnd(s.round, maxToolRounds);
   }

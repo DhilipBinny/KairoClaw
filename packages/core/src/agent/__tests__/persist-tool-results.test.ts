@@ -90,6 +90,44 @@ describe('tool-result persistence (#184)', () => {
     }
   });
 
+  it('does not persist an orphaned tool_use when cancelled mid-round', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's3');
+      const repo = new MessageRepository(db as any);
+      const ac = new AbortController();
+      let calls = 0;
+
+      await runAgent(
+        { text: 'do two things', channel: 'web', chatId: 'web:s3', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          signal: ac.signal,
+          isToolConcurrencySafe: () => false, // force sequential so abort lands between calls
+          callLLM: async () => ({
+            text: 'working', usage: { inputTokens: 5, outputTokens: 5 },
+            toolCalls: [
+              { id: 'x1', type: 'function', function: { name: 'step', arguments: '{}' } },
+              { id: 'x2', type: 'function', function: { name: 'step', arguments: '{}' } },
+            ],
+          } as unknown as ProviderResponse),
+          executeTool: async () => { calls++; if (calls === 1) ac.abort(); return `R${calls}`; },
+        }),
+      );
+
+      const rows = await repo.listBySession('s3');
+      // No assistant tool_use may be persisted without a tool row for every id.
+      const toolIds = new Set(rows.filter(r => r.role === 'tool').map(r => r.tool_call_id));
+      for (const r of rows.filter(r => r.role === 'assistant' && r.tool_calls)) {
+        for (const tc of JSON.parse(r.tool_calls!)) {
+          expect(toolIds.has(tc.id)).toBe(true);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   it('keeps insertion order for a same-millisecond parallel tool batch (stable id tiebreak)', async () => {
     const db = createTestDb();
     try {
