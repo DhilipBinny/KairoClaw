@@ -36,6 +36,12 @@ export interface ProviderResponse {
   thinkingText?: string | null;
   /** Structured thinking blocks with signatures (Anthropic only). */
   thinkingBlocks?: import('./message.js').ThinkingBlock[];
+  /**
+   * The provider/model that actually served this response (e.g. "openai/gpt-4o"),
+   * which may differ from the requested model after a failover. Used to attribute
+   * usage and cost to the provider that did the work.
+   */
+  servedModel?: string;
 }
 
 /**

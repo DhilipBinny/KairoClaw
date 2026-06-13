@@ -944,13 +944,16 @@ export async function runAgent(
       reqLog.info({ round: s.round, responsePreview: response.text.slice(0, 300), responseLen: response.text.length, category: 'llm' }, 'LLM response text');
     }
 
-    // Record usage
-    const provider = model.split('/')[0] ?? 'unknown';
-    const costUsd = estimateCost(model, inTok, outTok, config)?.total ?? 0;
+    // Record usage against the model that ACTUALLY served the response — after a
+    // failover this differs from the requested model, so attribute cost to the
+    // provider that did the work (#183).
+    const servedModel = response.servedModel || model;
+    const provider = servedModel.split('/')[0] ?? 'unknown';
+    const costUsd = estimateCost(servedModel, inTok, outTok, config)?.total ?? 0;
     if (costUsd > 0) reqLog.info({ round: s.round, costUsd: +costUsd.toFixed(6), category: 'llm' }, 'Round cost');
     if (s.usageRepo) {
       try {
-        await s.usageRepo.record({ tenantId, userId, sessionId: session.id, model, provider, inputTokens: inTok, outputTokens: outTok, costUsd });
+        await s.usageRepo.record({ tenantId, userId, sessionId: session.id, model: servedModel, provider, inputTokens: inTok, outputTokens: outTok, costUsd });
       } catch (e: unknown) { reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to record usage (non-critical)'); }
     }
 
