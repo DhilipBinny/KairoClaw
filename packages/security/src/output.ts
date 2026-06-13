@@ -29,6 +29,38 @@ export function filterOutput(text: string): string {
   return filtered;
 }
 
+/**
+ * Defang attempts by tool-result content to break out of its `<tool_result>`
+ * wrapper. Without this, externally-controlled content (a web page, an MCP
+ * server response) could embed a literal `</tool_result>` followed by forged
+ * "system" instructions — which would then appear OUTSIDE the wrapper the model
+ * is told to distrust, defeating the tool-result trust boundary. We replace the
+ * delimiters with a visually-similar but inert form so the boundary the agent
+ * loop adds is the only real one. Also defangs a few other turn/role delimiters
+ * content might use to forge a new turn.
+ */
+export function neutralizeToolResultDelimiters(content: string): string {
+  return content
+    .replace(/<\s*\/\s*tool_result\s*>/gi, '⟨/tool_result⟩')
+    .replace(/<\s*tool_result\b/gi, '⟨tool_result')
+    // ChatML / role markers (<|system|>, <|im_start|>, <|im_end|>, <|end|>, …)
+    .replace(/<\|[^|>]*\|>/g, (m) => `⟨${m.slice(2, -2)}⟩`)
+    // Llama-style instruction + system delimiters
+    .replace(/\[\/?INST\]/gi, (m) => `⟨${m.slice(1, -1)}⟩`)
+    .replace(/<<\/?SYS>>/gi, (m) => `⟨${m.slice(2, -2)}⟩`);
+}
+
+/**
+ * Sanitize a tool name before it is interpolated into a `<tool_result name="…">`
+ * attribute. A name from an untrusted source (e.g. a tool advertised by a
+ * malicious MCP server) could otherwise contain quotes/angle-brackets/newlines
+ * and forge a wrapper boundary from inside the attribute (#182). Keeps only the
+ * characters legitimate tool names use.
+ */
+export function sanitizeToolName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_.:-]/g, '').slice(0, 128) || 'unknown';
+}
+
 export function checkOutputSafety(text: string): { safe: boolean; flags: string[] } {
   const flags: string[] = [];
 
