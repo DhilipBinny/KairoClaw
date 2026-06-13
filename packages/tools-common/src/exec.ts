@@ -288,6 +288,7 @@ export const execTools: ToolRegistration[] = [
           timeout,
           maxBuffer: 1024 * 1024,
           env: safeEnv,
+          signal: context.signal, // kill the child immediately on cancellation (#181)
         });
         return textEnvelope(formatExecResult(
           stdout.slice(0, MAX_STDOUT),
@@ -415,6 +416,7 @@ export const execTools: ToolRegistration[] = [
               timeout,
               maxBuffer: 1024 * 1024,
               env: safeEnv,
+              signal: context.signal, // cancel in-flight children on Stop (#181)
             });
             return { command: cmd, exitCode: 0, stdout: (stdout || '').slice(0, MAX_STDOUT), stderr: (stderr || '').slice(0, MAX_STDERR) };
           } catch (e: unknown) {

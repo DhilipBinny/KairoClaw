@@ -41,7 +41,8 @@ export function filterOutput(text: string): string {
  */
 export function neutralizeToolResultDelimiters(content: string): string {
   return content
-    .replace(/<\s*\/\s*tool_result\s*>/gi, '⟨/tool_result⟩')
+    // closing tag in any form: </tool_result>, </tool_result >, </tool_result/>, </tool_result foo="bar">
+    .replace(/<\s*\/\s*tool_result\b[^>]*>/gi, '⟨/tool_result⟩')
     .replace(/<\s*tool_result\b/gi, '⟨tool_result')
     // ChatML / role markers (<|system|>, <|im_start|>, <|im_end|>, <|end|>, …)
     .replace(/<\|[^|>]*\|>/g, (m) => `⟨${m.slice(2, -2)}⟩`)

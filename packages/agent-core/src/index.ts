@@ -54,17 +54,6 @@ export {
   setMessagesLogger,
 } from './messages.js';
 
-// ── Tool Execution ──────────────────────────────────────────
-export {
-  executeSingleTool,
-  executeToolCalls,
-} from './tool-execution.js';
-export type {
-  ToolCallRecorder,
-  ParsedToolCall,
-  ToolExecContext,
-} from './tool-execution.js';
-
 // ── Injectable Store Interfaces ─────────────────────────────
 export type {
   AgentMessageStore,
