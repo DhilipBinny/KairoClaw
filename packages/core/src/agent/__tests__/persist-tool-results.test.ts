@@ -128,6 +128,38 @@ describe('tool-result persistence (#184)', () => {
     }
   });
 
+  it('rolls back persisted round rows when the turn fails (no orphan left behind)', async () => {
+    const db = createTestDb();
+    try {
+      const session = await seedSession(db, 's4');
+      const repo = new MessageRepository(db as any);
+      let round = 0;
+
+      const result = await runAgent(
+        { text: 'try it', channel: 'web', chatId: 'web:s4', chatType: 'private' } as InboundMessage,
+        {},
+        baseContext(db, session, {
+          callLLM: async () => {
+            round++;
+            if (round === 1) {
+              return { text: '', usage: { inputTokens: 5, outputTokens: 5 }, toolCalls: TOOL_CALL('lookup', 'y1') } as unknown as ProviderResponse;
+            }
+            throw new Error('provider exploded'); // non-recoverable → give-up path
+          },
+          executeTool: async () => 'SOME_RESULT',
+        }),
+      );
+
+      expect(result.error).toBe(true);
+      // The whole failed turn (user + the completed tool round) must be gone —
+      // leaving the round behind would orphan a tool_use and wedge the session.
+      const rows = await repo.listBySession('s4');
+      expect(rows).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it('keeps insertion order for a same-millisecond parallel tool batch (stable id tiebreak)', async () => {
     const db = createTestDb();
     try {

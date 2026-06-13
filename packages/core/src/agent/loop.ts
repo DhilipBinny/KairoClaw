@@ -892,15 +892,15 @@ export async function runAgent(
             continue;
           }
           reqLog.error({ attempt: s.reactiveCompactFailures, errorType: retryClassified.type }, 'LLM call failed after reactive compact — giving up');
-          if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+          if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
           return { text: retryClassified.userMessage || 'Your conversation is too long even after compaction. Please start a new session with /new.', error: true };
         }
       } else if (classified.type === 'auth_error') {
-        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+        if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
         return { text: classified.userMessage || 'Authentication failed. Please check your API key configuration.', error: true };
       } else {
         reqLog.error({ latencyMs: Date.now() - llmStart, errorType: classified.type, action: classified.action }, 'LLM call failed');
-        if (s.userMsgResult?.id) { try { s.messageRepo?.deleteById(s.userMsgResult.id); } catch { /* best effort */ } }
+        if (s.userMsgResult?.id) { try { await s.messageRepo?.deleteFromId(context.session.id, s.userMsgResult.id); } catch { /* best effort */ } }
         if (classified.type === 'prompt_too_long') {
           return { text: 'Your conversation is too long even after multiple compaction attempts. Please start a new session with /new.', error: true };
         }
