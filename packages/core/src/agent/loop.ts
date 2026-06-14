@@ -580,28 +580,25 @@ async function persistResults(s: RunState, context: AgentContext): Promise<void>
  */
 async function persistRoundMessages(s: RunState, context: AgentContext, fromIndex: number): Promise<void> {
   if (!s.messageRepo) return;
-  for (let i = fromIndex; i < s.messages.length; i++) {
-    const m = s.messages[i];
-    try {
-      const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      // Filter assistant-generated text the same way the final reply is filtered,
-      // so a secret the model echoes mid-turn isn't stored in clear text (#185).
-      // Tool/user content is stored as-is: the messages table is the actual
-      // conversation that must be replayed verbatim to the model next turn, so
-      // redacting it would corrupt context. (The disposable tool_calls audit copy
-      // IS redacted; at-rest protection for this table is the DB-level control.)
-      const content = m.role === 'assistant' ? filterOutput(raw) : raw;
-      await s.messageRepo.create({
-        sessionId: context.session.id,
-        tenantId: context.tenantId,
-        role: m.role,
-        content,
-        toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : undefined,
-        toolCallId: m.tool_call_id ?? undefined,
-      });
-    } catch (e: unknown) {
-      s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), role: m.role }, 'Failed to persist round message (non-critical)');
-    }
+  const db = context.db as import('../db/index.js').DatabaseAdapter;
+  try {
+    await db.transaction(async () => {
+      for (let i = fromIndex; i < s.messages.length; i++) {
+        const m = s.messages[i];
+        const raw = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        const content = m.role === 'assistant' ? filterOutput(raw) : raw;
+        await s.messageRepo!.create({
+          sessionId: context.session.id,
+          tenantId: context.tenantId,
+          role: m.role,
+          content,
+          toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : undefined,
+          toolCallId: m.tool_call_id ?? undefined,
+        });
+      }
+    });
+  } catch (e: unknown) {
+    s.reqLog.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist round messages — rolled back');
   }
 }
 
