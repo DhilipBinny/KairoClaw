@@ -43,3 +43,9 @@ export const MEDIA_URL_TTL_MS = MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 export const RATE_LIMIT_MAX = 300;
 export const LOGIN_MAP_MAX_SIZE = 10_000;
+
+// Failed API-key authentications allowed per client IP per window before further
+// attempts are rejected. Applies to the Bearer/?token= auth path (not just the
+// login route), so key-guessing can't bypass the login limiter via other routes.
+export const AUTH_FAIL_RATE_LIMIT = 20;
+export const AUTH_FAIL_RATE_WINDOW_MS = 60_000;
