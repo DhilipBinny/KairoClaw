@@ -28,6 +28,7 @@ import { MCPBridge } from './mcp/bridge.js';
 import { registerAllPlugins, reloadPlugins, loadPlugins } from './plugins/index.js';
 import { MediaStore } from './media/store.js';
 import { createMediaUrlSigner, deriveMediaSigningKey } from './media/signing.js';
+import { setApiKeyPepper, deriveApiKeyPepper } from './auth/keys.js';
 import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
@@ -222,6 +223,9 @@ async function main(): Promise<void> {
   // 6. Migrate secrets + create unified secrets store
   migrateToSecretsStore(stateDir);
   const masterKey = resolveMasterKey(stateDir);
+  // Pepper API-key hashing with a master-key-derived secret (HMAC-SHA256).
+  // Existing SHA-256 hashes keep working and upgrade lazily on next auth.
+  setApiKeyPepper(masterKey ? deriveApiKeyPepper(masterKey) : null);
   const secretsStore = new SecretsStore(stateDir, masterKey);
   // Signer for time-limited media URLs (key derived from the master key, so it
   // survives restarts). Without a master key, media falls back to auth-only.

@@ -1,6 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
-import { hashApiKey } from './keys.js';
+import { findUserByApiKey } from './keys.js';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { AuditService } from '../security/audit.js';
 import type { MediaUrlSigner } from '../media/signing.js';
@@ -74,13 +74,10 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
     }
 
     const apiKey = queryToken || authHeader!.slice(7);
-    const keyHash = hashApiKey(apiKey);
 
-    // Look up user by hashed API key
-    const user = await db.get<{ id: string; tenant_id: string; name: string; role: string; elevated: number; active: number }>(
-      'SELECT id, tenant_id, name, role, elevated, active FROM users WHERE api_key_hash = ?',
-      [keyHash]
-    );
+    // Look up user by hashed API key (accepts legacy SHA-256 hashes and upgrades
+    // them to the peppered hash on the fly).
+    const user = await findUserByApiKey<{ id: string; tenant_id: string; name: string; role: string; elevated: number; active: number; api_key_hash?: string | null }>(db, apiKey);
 
     if (!user) {
       reply.code(401).send({ error: 'Invalid API key', statusCode: 401 });
