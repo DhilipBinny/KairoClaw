@@ -1,49 +1,22 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { findUserByApiKey } from '../auth/keys.js';
+import { RateLimiter } from '../auth/rate-limit.js';
 import { getDb } from './utils.js';
 
-// Per-IP login attempt tracking for brute-force protection
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+// Per-IP login attempt tracking for brute-force protection (request.ip respects
+// gateway.trustProxy, so behind a trusted proxy this keys on the real client).
 const LOGIN_RATE_LIMIT = 5;        // max attempts per window
 const LOGIN_RATE_WINDOW = 60_000;   // 1 minute window
-import { LOGIN_MAP_MAX_SIZE } from '../constants.js';
-
-function checkLoginRateLimit(ip: string): boolean {
-  const now = Date.now();
-
-  // Evict expired entries if map is at capacity
-  if (loginAttempts.size >= LOGIN_MAP_MAX_SIZE) {
-    for (const [key, entry] of loginAttempts) {
-      if (now > entry.resetAt) loginAttempts.delete(key);
-    }
-    // If still at capacity after cleanup, reject to protect memory
-    if (loginAttempts.size >= LOGIN_MAP_MAX_SIZE) {
-      return false;
-    }
-  }
-
-  const entry = loginAttempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_RATE_WINDOW });
-    return true;
-  }
-  entry.count++;
-  return entry.count <= LOGIN_RATE_LIMIT;
-}
-
-// Periodic cleanup of expired entries (every 5 minutes)
-const _authCleanupInterval = setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of loginAttempts) {
-    if (now > entry.resetAt) loginAttempts.delete(ip);
-  }
-}, 5 * 60_000);
 
 export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
+  const loginLimiter = new RateLimiter(LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW);
+  loginLimiter.startCleanup();
+  app.addHook('onClose', async () => loginLimiter.stopCleanup());
+
   // POST /api/v1/auth/login — validate API key and return user info
   app.post('/api/v1/auth/login', async (request, reply) => {
     // Per-IP rate limiting for brute-force protection
-    if (!checkLoginRateLimit(request.ip)) {
+    if (!loginLimiter.record(request.ip)) {
       return reply.code(429).send({ error: 'Too many login attempts. Try again later.' });
     }
 

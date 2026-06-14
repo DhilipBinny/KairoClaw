@@ -1,9 +1,11 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { findUserByApiKey } from './keys.js';
+import { RateLimiter } from './rate-limit.js';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { AuditService } from '../security/audit.js';
 import type { MediaUrlSigner } from '../media/signing.js';
+import { AUTH_FAIL_RATE_LIMIT, AUTH_FAIL_RATE_WINDOW_MS } from '../constants.js';
 
 const MEDIA_FILE_RE = /^\/api\/v1\/media\/([a-zA-Z0-9._-]+\.[a-z0-9]+)$/i;
 
@@ -29,6 +31,13 @@ declare module 'fastify' {
  */
 export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService; mediaSigner?: MediaUrlSigner }>(async (app, opts) => {
   const { db, auditService, mediaSigner } = opts;
+
+  // Per-IP limiter on FAILED API-key auth. Applies to every Bearer/?token=
+  // request (not just /auth/login), so key-guessing can't bypass the login
+  // limiter via other routes. request.ip respects gateway.trustProxy.
+  const authFailLimiter = new RateLimiter(AUTH_FAIL_RATE_LIMIT, AUTH_FAIL_RATE_WINDOW_MS);
+  authFailLimiter.startCleanup();
+  app.addHook('onClose', async () => authFailLimiter.stopCleanup());
 
   app.decorateRequest('user', undefined);
   app.decorateRequest('tenantId', undefined);
@@ -75,16 +84,30 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
 
     const apiKey = queryToken || authHeader!.slice(7);
 
+    // Brute-force guard: snapshot whether this IP is already over its failed-auth
+    // budget. A VALID key always authenticates (and clears the count), so the
+    // owner is never locked out; only wrong keys are throttled — once over the
+    // limit, a failed attempt returns 429 instead of 401.
+    const wasLimited = authFailLimiter.isLimited(request.ip);
+    const rejectFailure = (code: number, error: string) => {
+      authFailLimiter.record(request.ip);
+      reply.code(wasLimited ? 429 : code).send(
+        wasLimited
+          ? { error: 'Too many failed authentication attempts. Try again later.', statusCode: 429 }
+          : { error, statusCode: code },
+      );
+    };
+
     // Look up user by hashed API key (accepts legacy SHA-256 hashes and upgrades
     // them to the peppered hash on the fly).
     const user = await findUserByApiKey<{ id: string; tenant_id: string; name: string; role: string; elevated: number; active: number; api_key_hash?: string | null }>(db, apiKey);
 
     if (!user) {
-      reply.code(401).send({ error: 'Invalid API key', statusCode: 401 });
+      rejectFailure(401, 'Invalid API key');
       return;
     }
 
-    // Reject deactivated users
+    // Reject deactivated users (valid key — not a brute-force signal)
     if (!user.active) {
       reply.code(403).send({ error: 'Account deactivated', statusCode: 403 });
       return;
@@ -92,9 +115,12 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
 
     const validRoles = ['admin', 'user', 'viewer'];
     if (!validRoles.includes(user.role)) {
-      reply.code(401).send({ error: 'Unauthorized', statusCode: 401 });
+      rejectFailure(401, 'Unauthorized');
       return;
     }
+
+    // Successful auth — clear this IP's failure count.
+    authFailLimiter.reset(request.ip);
 
     request.user = {
       id: user.id,
