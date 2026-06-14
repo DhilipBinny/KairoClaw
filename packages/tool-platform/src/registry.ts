@@ -311,7 +311,13 @@ export class ToolRegistry {
           details: { role: userRole, args: Object.keys(args), callId },
         });
       } catch { /* audit should not break execution */ }
-      return { _requiresConfirmation: true, _callId: callId, tool: name, args } as unknown as ToolResult;
+      return {
+        _requiresConfirmation: true,
+        _callId: callId,
+        tool: name,
+        args,
+        message: `Tool "${name}" is configured to require confirmation. Tell the user what it will do and ask them to confirm before it runs.`,
+      } as unknown as ToolResult;
     }
 
     const ctxExt = context as Phase6ContextExtensions & ToolExecutionContext;
