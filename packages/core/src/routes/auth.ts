@@ -1,22 +1,15 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { findUserByApiKey } from '../auth/keys.js';
-import { RateLimiter } from '../auth/rate-limit.js';
+import type { RateLimiter } from '../auth/rate-limit.js';
 import { getDb } from './utils.js';
 
-// Per-IP login attempt tracking for brute-force protection (request.ip respects
-// gateway.trustProxy, so behind a trusted proxy this keys on the real client).
-const LOGIN_RATE_LIMIT = 5;        // max attempts per window
-const LOGIN_RATE_WINDOW = 60_000;   // 1 minute window
-
 export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
-  const loginLimiter = new RateLimiter(LOGIN_RATE_LIMIT, LOGIN_RATE_WINDOW);
-  loginLimiter.startCleanup();
-  app.addHook('onClose', async () => loginLimiter.stopCleanup());
+  // Use the shared auth rate limiter from the auth middleware
+  const authLimiter = (app as unknown as { authFailLimiter: RateLimiter }).authFailLimiter;
 
   // POST /api/v1/auth/login — validate API key and return user info
   app.post('/api/v1/auth/login', async (request, reply) => {
-    // Per-IP rate limiting for brute-force protection
-    if (!loginLimiter.record(request.ip)) {
+    if (authLimiter && !authLimiter.record(request.ip)) {
       return reply.code(429).send({ error: 'Too many login attempts. Try again later.' });
     }
 
@@ -35,6 +28,8 @@ export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
     if (!user.active) {
       return reply.code(403).send({ error: 'Account deactivated' });
     }
+
+    if (authLimiter) authLimiter.reset(request.ip);
 
     return {
       user: { id: user.id, name: user.name, role: user.role, email: user.email },

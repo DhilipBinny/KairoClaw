@@ -38,6 +38,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
   const authFailLimiter = new RateLimiter(AUTH_FAIL_RATE_LIMIT, AUTH_FAIL_RATE_WINDOW_MS);
   authFailLimiter.startCleanup();
   app.addHook('onClose', async () => authFailLimiter.stopCleanup());
+  app.decorate('authFailLimiter', authFailLimiter);
 
   app.decorateRequest('user', undefined);
   app.decorateRequest('tenantId', undefined);

@@ -3,8 +3,32 @@
  * the same recognized patterns as filterOutput. Used to block secrets being
  * placed in outbound tool-call arguments (#195).
  */
+/**
+ * High-confidence secret detection for BLOCKING egress tool calls.
+ * Unlike filterOutput (which over-matches safely for redaction), this only
+ * triggers on patterns with known prefixes or high entropy — false positives
+ * here block legitimate tool calls, not just mask text.
+ */
 export function containsSecrets(text: string): boolean {
-  return filterOutput(text) !== text;
+  const patterns = [
+    /agw_sk_[a-f0-9]{64}/,
+    /sk-[a-zA-Z0-9]{20,}/,
+    /sk-ant-[a-zA-Z0-9-]{20,}/,
+    /Bearer\s+[a-zA-Z0-9._\-/+=]{40,}/i,
+    /eyJ[a-zA-Z0-9_-]{20,}\.eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}/,
+    /(?:postgres|postgresql|mysql|mongodb|redis):\/\/[^\s"']+/i,
+    /AKIA[0-9A-Z]{16}/,
+    /AIza[0-9A-Za-z_-]{35}/,
+    /ghp_[0-9a-zA-Z]{36}/,
+    /gho_[0-9a-zA-Z]{36}/,
+    /ghs_[0-9a-zA-Z]{36}/,
+    /github_pat_[0-9a-zA-Z_]{22,}/,
+    /xox[bporas]-[0-9a-zA-Z-]{10,}/,
+    /sk_live_[0-9a-zA-Z]{24,}/,
+    /\b\d{6,16}:[A-Za-z0-9_-]{35}\b/,
+    /-----BEGIN\s(?:RSA\s)?PRIVATE\sKEY-----/,
+  ];
+  return patterns.some(p => p.test(text));
 }
 
 export function filterOutput(text: string): string {
