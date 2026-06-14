@@ -9,7 +9,7 @@ import type { WebSocket } from '@fastify/websocket';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { GatewayConfig } from '@agw/types';
-import { hashApiKey } from '../auth/keys.js';
+import { findUserByApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
 
 const log = createModuleLogger('browser');
@@ -108,11 +108,7 @@ export const browserBridgePlugin: FastifyPluginAsync<{ db: DatabaseAdapter; conf
           return;
         }
 
-        const keyHash = hashApiKey(token);
-        const user = await db.get<{ id: string; role: string; active: number }>(
-          'SELECT id, role, active FROM users WHERE api_key_hash = ?',
-          [keyHash],
-        );
+        const user = await findUserByApiKey<{ id: string; role: string; active: number; api_key_hash?: string | null }>(db, token);
 
         if (!user || !user.active) {
           log.warn({ category: 'browser' }, 'Extension auth failed: invalid or inactive API key');

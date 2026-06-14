@@ -18,7 +18,7 @@ import type { AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
-import { hashApiKey } from '../auth/keys.js';
+import { findUserByApiKey } from '../auth/keys.js';
 import { createModuleLogger } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 import { getModelShortName, shouldShowModelIndicator } from './utils.js';
@@ -285,11 +285,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         let authValid = authenticated || safeTokenCompare(token, gatewayToken);
         // Always try to resolve user from API key — sets stable UUID for scoping
         if (token) {
-          const keyHash = hashApiKey(token);
-          const user = await db.get<{ id: string; active: number; role: string }>(
-            'SELECT id, active, role FROM users WHERE api_key_hash = ?',
-            [keyHash],
-          );
+          const user = await findUserByApiKey<{ id: string; active: number; role: string; api_key_hash?: string | null }>(db, token);
           if (user) {
             if (!user.active) {
               safeSend({ type: 'auth.error', message: 'Account deactivated' });
