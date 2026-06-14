@@ -40,14 +40,30 @@ afterEach(() => {
 });
 
 describe('checkToolPermission', () => {
-  // Admin always allowed
-  it('admin always gets allow', async () => {
+  // Admin allowed by default (no rule) — full access for the personal-assistant case
+  it('admin gets allow when no rule is configured', async () => {
     expect(await checkToolPermission('exec', 'admin', db, 'test-tenant')).toBe('allow');
   });
 
-  it('admin bypasses deny rules', async () => {
+  // #105: admins are no longer blanket-bypassed — an explicit rule applies to them.
+  it('admin deny rule is honored (defense-in-depth)', async () => {
     await db.run("INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission) VALUES ('test-tenant', 'admin', 'exec', 'deny')");
-    expect(await checkToolPermission('exec', 'admin', db, 'test-tenant')).toBe('allow');
+    expect(await checkToolPermission('exec', 'admin', db, 'test-tenant')).toBe('deny');
+  });
+
+  it('admin confirm rule is honored', async () => {
+    await db.run("INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission) VALUES ('test-tenant', 'admin', 'send_email', 'confirm')");
+    expect(await checkToolPermission('send_email', 'admin', db, 'test-tenant')).toBe('confirm');
+  });
+
+  it('admin keeps access to other tools when an unrelated deny rule exists', async () => {
+    await db.run("INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission) VALUES ('test-tenant', 'admin', 'exec', 'deny')");
+    expect(await checkToolPermission('read_file', 'admin', db, 'test-tenant')).toBe('allow');
+  });
+
+  it('admin counts as elevated for power_user tools', async () => {
+    await db.run("INSERT INTO tool_permissions (tenant_id, role, tool_pattern, permission) VALUES ('test-tenant', 'admin', 'exec', 'power_user')");
+    expect(await checkToolPermission('exec', 'admin', db, 'test-tenant', false)).toBe('allow');
   });
 
   // No rules = allow (open by default)
