@@ -19,6 +19,19 @@ import type { DatabaseAdapter } from '@agw/types';
 
 // ── Inlined constants (previously from core/constants.ts) ─────
 const SCOPE_DIR_NAME = 'scopes';
+
+/**
+ * A scope key is used as a single path segment under scopes/. It must not be
+ * able to escape that directory. deriveScopeKey already enforces this when a key
+ * is created, but values that reach the filesystem from elsewhere (e.g. DB rows
+ * during migration) are validated here too — a stored "../" must never let an
+ * fs operation touch a path outside the scopes directory.
+ */
+export function isSafeScopeKey(key: string): boolean {
+  // Reject empty, null bytes, separators, ".." traversal, and the bare "."
+  // (which would collapse scopes/<key>/ back to the scopes/ root).
+  return !!key && key !== '.' && !key.includes('\0') && !/[/\\]|\.\./.test(key);
+}
 const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'SOUL.md'];
 const SCOPED_CHANNELS = ['telegram', 'whatsapp', 'web'];
 const SHARED_DIR = 'shared';
@@ -89,8 +102,8 @@ export function resolveScopedFile(
     return path.join(workspace, filename);
   }
 
-  // No scope — use global
-  if (!scopeKey) {
+  // No scope (or an unsafe key that must never hit the filesystem) — use global
+  if (!scopeKey || !isSafeScopeKey(scopeKey)) {
     return path.join(workspace, filename);
   }
 
@@ -115,6 +128,11 @@ export function getScopedMemoryDir(
   if (!scopeKey) {
     return path.join(workspace, 'memory');
   }
+  // Never silently fall back to global memory for a malformed key — that would
+  // leak one scope's memory into another. A safe key is guaranteed by callers.
+  if (!isSafeScopeKey(scopeKey)) {
+    throw new Error('Unsafe scope key');
+  }
   return path.join(workspace, SCOPE_DIR_NAME, scopeKey, 'memory');
 }
 
@@ -128,6 +146,10 @@ export function ensureScopeDir(
   scopeKey: string,
   senderInfo?: { name?: string; channel?: string; userId?: string | number },
 ): void {
+  // Refuse to create a directory tree from an unsafe key (path traversal).
+  if (!isSafeScopeKey(scopeKey)) {
+    throw new Error('Unsafe scope key');
+  }
   const scopeDir = path.join(workspace, SCOPE_DIR_NAME, scopeKey);
   const memoryDir = path.join(scopeDir, 'memory', 'sessions');
   const sessionContextDir = path.join(scopeDir, 'memory', 'session-context');
@@ -182,6 +204,12 @@ export async function migrateScopesToUserUUID(
   for (const link of links) {
     const oldKey = `${link.channel_type}:${link.sender_id}`;
     const newKey = link.user_id;
+
+    // These come straight from DB rows (sender ids are attacker-influenceable).
+    // A traversal sequence here would make fs.rmSync/copy escape scopes/, so
+    // skip any key that isn't a safe single path segment.
+    if (!isSafeScopeKey(oldKey) || !isSafeScopeKey(newKey)) { skipped++; continue; }
+
     const oldDir = path.join(scopesDir, oldKey);
     const newDir = path.join(scopesDir, newKey);
 
