@@ -776,7 +776,7 @@ class TelegramChannel implements Channel {
           }
           mediaSent = true;
         } catch (e) {
-          log.debug({ err: (e as Error).message, type: item.type }, 'Failed to send media in cron delivery');
+          log.warn({ err: (e as Error).message, type: item.type, filePath: item.filePath }, 'Failed to send media in cron delivery');
         }
       }
       if (mediaSent) {

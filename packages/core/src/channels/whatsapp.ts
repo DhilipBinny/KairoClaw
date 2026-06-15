@@ -844,7 +844,7 @@ class WhatsAppChannel implements Channel {
           await this.sendWhatsAppMedia(jid, item, !mediaSent ? caption : undefined);
           mediaSent = true;
         } catch (e) {
-          log.debug({ err: (e as Error).message, type: item.type }, 'Failed to send media in cron delivery');
+          log.warn({ err: (e as Error).message, type: item.type, filePath: item.filePath, jid }, 'Failed to send media in cron delivery');
         }
       }
       if (mediaSent) {
