@@ -8,6 +8,7 @@ export interface MessageRow {
   content: string;
   tool_calls: string | null; // JSON
   tool_call_id: string | null;
+  thinking_blocks: string | null; // JSON
   metadata: string | null; // JSON
   created_at: string;
 }
@@ -22,13 +23,14 @@ export class MessageRepository {
     content: string;
     toolCalls?: string;
     toolCallId?: string;
+    thinkingBlocks?: string;
     metadata?: string;
   }): Promise<MessageRow> {
     const now = new Date().toISOString();
 
     await this.db.run(
-      `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, thinking_blocks, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         msg.sessionId,
         msg.tenantId,
@@ -36,6 +38,7 @@ export class MessageRepository {
         msg.content,
         msg.toolCalls ?? null,
         msg.toolCallId ?? null,
+        msg.thinkingBlocks ?? null,
         msg.metadata ?? null,
         now,
       ],

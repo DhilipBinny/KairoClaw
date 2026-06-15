@@ -122,6 +122,7 @@ export function rowToMessage(row: {
   content: string;
   tool_calls: string | null;
   tool_call_id: string | null;
+  thinking_blocks?: string | null;
 }): Message {
   const msg: Message = {
     role: row.role as Message['role'],
@@ -134,6 +135,11 @@ export function rowToMessage(row: {
   }
   if (row.tool_call_id) {
     msg.tool_call_id = row.tool_call_id;
+  }
+  if (row.thinking_blocks) {
+    try {
+      msg.thinking_blocks = JSON.parse(row.thinking_blocks);
+    } catch { /* corrupt thinking blocks, skip */ }
   }
   return msg;
 }
