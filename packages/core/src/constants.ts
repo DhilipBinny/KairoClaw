@@ -39,6 +39,10 @@ export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
  */
 export const MEDIA_URL_TTL_MS = MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
+// ── Anthropic API ───────────────────────────────────────────
+
+export const ANTHROPIC_API_VERSION = '2023-06-01';
+
 // ── Sub-Agents ──────────────────────────────────────────────
 
 export const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;

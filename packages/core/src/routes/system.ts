@@ -12,6 +12,7 @@ import { getModelCapabilities } from '@agw/provider-bridge';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SecretsStore } from '../secrets/store.js';
 import { resolveMasterKey, readEncryptedStore, decryptStore, encryptStore, writeEncryptedStore } from '../secrets/crypto.js';
+import { ANTHROPIC_API_VERSION } from '../constants.js';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -71,7 +72,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
     if (anthropicKey) {
       try {
         const headers: Record<string, string> = {
-          'anthropic-version': '2023-06-01',
+          'anthropic-version': ANTHROPIC_API_VERSION,
           'content-type': 'application/json',
           'x-api-key': anthropicKey,
         };
@@ -284,7 +285,7 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         if (!apiKey) return reply.code(400).send({ error: 'No API key provided. For OAuth, use the Kairo Premium test.' });
 
         const headers: Record<string, string> = {
-          'anthropic-version': '2023-06-01',
+          'anthropic-version': ANTHROPIC_API_VERSION,
           'content-type': 'application/json',
           'x-api-key': apiKey,
         };
