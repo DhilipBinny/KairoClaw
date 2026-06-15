@@ -114,7 +114,17 @@ export class PostgresAdapter implements DatabaseAdapter {
         console.warn('[db] PostgreSQL backup: no connection string available');
         return;
       }
-      await execFileAsync('pg_dump', ['--format=custom', '--file', outputPath, connStr], { timeout: 120_000 });
+      const u = new URL(connStr);
+      const args = [
+        '--format=custom',
+        '--file', outputPath,
+        '--host', u.hostname,
+        '--port', u.port || '5432',
+        '--username', decodeURIComponent(u.username),
+        '--dbname', u.pathname.slice(1),
+      ];
+      const env = { ...process.env, PGPASSWORD: decodeURIComponent(u.password) };
+      await execFileAsync('pg_dump', args, { timeout: 120_000, env });
     } catch (e) {
       const msg = (e as Error).message || '';
       if (msg.includes('ENOENT') || msg.includes('not found')) {
