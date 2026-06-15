@@ -966,6 +966,30 @@ async function main(): Promise<void> {
   // Register unified channels status route
   await server.register(registerChannelRoutes, { channelRegistry, config, secretsStore });
 
+  // Alert test + status endpoint (admin only)
+  server.post('/api/v1/admin/alerts/test', { preHandler: [requireRole('admin')] }, async () => {
+    alertManager.emitFailure({
+      type: 'system.test',
+      severity: 'warning',
+      source: 'admin',
+      labels: { source: 'admin', trigger: 'manual-test' },
+      title: 'Test alert',
+      message: 'This is a test alert triggered from the admin panel',
+    });
+    alertManager.emitFailure({
+      type: 'system.test',
+      severity: 'warning',
+      source: 'admin',
+      labels: { source: 'admin', trigger: 'manual-test' },
+      title: 'Test alert',
+      message: 'This is a test alert triggered from the admin panel',
+    });
+    return { ok: true, message: 'Test alert fired (2 failures to exceed threshold)' };
+  });
+  server.get('/api/v1/admin/alerts', { preHandler: [requireRole('admin')] }, async () => {
+    return { firing: alertManager.getFiringAlerts(), all: alertManager.getStore().getAll() };
+  });
+
   // 16. Serve static UI files
   // Try SvelteKit build first, fall back to legacy public/index.html
   const svelteKitBuild = path.join(projectRoot, 'packages', 'ui', 'build');
