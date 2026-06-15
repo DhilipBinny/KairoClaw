@@ -11,6 +11,7 @@ import type { GatewayConfig, ModelCapabilities } from '@agw/types';
 import type { SecretsStore } from '../secrets/store.js';
 import { parseAnthropicModels, parseOllamaModel, mergeCapabilities } from '@agw/provider-bridge';
 import { createModuleLogger } from '../observability/logger.js';
+import { ANTHROPIC_API_VERSION } from '../constants.js';
 
 const log = createModuleLogger('system');
 
@@ -54,7 +55,7 @@ async function doRefresh(
   if (anthropicKey && !anthropicKey.startsWith('${')) {
     try {
       const baseUrl = config.providers?.anthropic?.baseUrl || 'https://api.anthropic.com';
-      const headers = { 'anthropic-version': '2023-06-01', 'x-api-key': anthropicKey };
+      const headers = { 'anthropic-version': ANTHROPIC_API_VERSION, 'x-api-key': anthropicKey };
       const allModels: Array<Record<string, unknown>> = [];
       let afterId: string | undefined;
 

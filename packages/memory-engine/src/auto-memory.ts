@@ -348,6 +348,18 @@ Rules:
     ensureDir(path.dirname(profilePath));
     fs.writeFileSync(profilePath, newProfile, 'utf8');
 
+    // Clean up consolidated session files (keep today's, delete older)
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      if (fs.existsSync(sessionsDir)) {
+        for (const file of fs.readdirSync(sessionsDir).filter(f => f.endsWith('.md'))) {
+          if (!file.startsWith(today)) {
+            fs.unlinkSync(path.join(sessionsDir, file));
+          }
+        }
+      }
+    } catch { /* cleanup is best-effort */ }
+
     log.info({
       profileLength: newProfile.length,
       sessionFiles: fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).length : 0,
