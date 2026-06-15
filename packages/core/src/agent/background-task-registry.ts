@@ -161,8 +161,8 @@ export class BackgroundTaskRegistry {
     void this.db
       .run(
         `INSERT INTO background_tasks (id, scope_key, task, status, started_at, created_at)
-         VALUES (?, ?, ?, ?, ?, datetime('now'))`,
-        [entry.id, entry.scopeKey, entry.task, entry.status, entry.startedAt],
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [entry.id, entry.scopeKey, entry.task, entry.status, entry.startedAt, new Date().toISOString()],
       )
       .catch((e) => log.warn({ err: (e as Error).message, id: entry.id }, 'background_tasks insert failed'));
   }

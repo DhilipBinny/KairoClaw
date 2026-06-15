@@ -55,19 +55,18 @@ export class AlertStateStore {
   private evictOldest(): void {
     let oldest: string | null = null;
     let oldestTime = Infinity;
-    for (const [fp, inst] of this.instances) {
-      if (inst.state === 'inactive' || inst.state === 'resolved') {
-        if (inst.lastEventAt < oldestTime) {
+    const evictable: Array<'inactive' | 'resolved' | 'pending'> = ['inactive', 'resolved', 'pending'];
+    for (const targetState of evictable) {
+      for (const [fp, inst] of this.instances) {
+        if (inst.state === targetState && inst.lastEventAt < oldestTime) {
           oldestTime = inst.lastEventAt;
           oldest = fp;
         }
       }
+      if (oldest) break;
     }
     if (oldest) {
       this.instances.delete(oldest);
-    } else {
-      const first = this.instances.keys().next().value;
-      if (first) this.instances.delete(first);
     }
   }
 

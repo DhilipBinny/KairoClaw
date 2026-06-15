@@ -25,7 +25,7 @@ function makeConfig(): GatewayConfig {
     tools: {} as any,
     models: { capabilities: {} },
     mcp: { servers: {} },
-  } as GatewayConfig;
+  } as unknown as GatewayConfig;
 }
 
 function makeTool(name: string): ToolDefinition {

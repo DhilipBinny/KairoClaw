@@ -42,7 +42,7 @@ function makeConfig(overrides: Partial<GatewayConfig['agent']> = {}): GatewayCon
     tools: {} as any,
     models: { capabilities: {} },
     mcp: { servers: {} },
-  } as GatewayConfig;
+  } as unknown as GatewayConfig;
 }
 
 function makeSessionRow(metadata: Record<string, unknown> = {}): SessionRow {

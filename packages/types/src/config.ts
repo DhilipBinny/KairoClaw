@@ -554,7 +554,7 @@ export interface GatewayConfig {
   hooks?: HooksConfig;
 
   /** System alerting configuration. */
-  alerts?: import('./alert.js').AlertsConfig;
+  alerts: import('./alert.js').AlertsConfig;
 
   /** Internal: resolved path to the state directory (~/.agw). Set at runtime. */
   _stateDir?: string;
