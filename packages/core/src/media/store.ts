@@ -44,7 +44,7 @@ export class MediaStore {
    * Returns the filename (uuid.ext).
    */
   saveBase64(base64Data: string, ext: string): string {
-    const cleaned = base64Data.replace(/^data:image\/[a-z+]+;base64,/i, '');
+    const cleaned = base64Data.replace(DATA_URI_RE, '');
     const buffer = Buffer.from(cleaned, 'base64');
     return this.save(buffer, ext);
   }
@@ -147,6 +147,8 @@ export class MediaStore {
 
 // ── Base64 image detection helpers ──────────────
 
+const DATA_URI_RE = /^data:image\/[a-z+]+;base64,/i;
+
 /** Known base64 magic bytes for image formats. */
 const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string }> = [
   { prefix: 'iVBOR', ext: 'png', mime: 'image/png' },
@@ -162,7 +164,7 @@ const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string
  */
 export function detectBase64Image(value: string): { ext: string; mime: string } | null {
   if (typeof value !== 'string' || value.length < 1000) return null;
-  const cleaned = value.replace(/^data:image\/[a-z+]+;base64,/i, '');
+  const cleaned = value.replace(DATA_URI_RE, '');
   return sniffBase64Mime(cleaned);
 }
 
@@ -199,5 +201,6 @@ export function extFromContentType(contentType: string): string | null {
   for (const [mime, ext] of Object.entries(map)) {
     if (contentType.includes(mime)) return ext;
   }
+  if (contentType.startsWith('image/')) return contentType.split('/')[1]?.split(';')[0] || 'bin';
   return null;
 }
