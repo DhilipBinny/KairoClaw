@@ -28,7 +28,7 @@ export class MessageRepository {
   }): Promise<MessageRow> {
     const now = new Date().toISOString();
 
-    await this.db.run(
+    const result = await this.db.run(
       `INSERT INTO messages (session_id, tenant_id, role, content, tool_calls, tool_call_id, thinking_blocks, metadata, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -44,6 +44,12 @@ export class MessageRepository {
       ],
     );
 
+    // Use lastInsertRowid for exact row (avoids race with concurrent inserts)
+    if (result.lastInsertRowid) {
+      const row = await this.db.get<MessageRow>('SELECT * FROM messages WHERE id = ?', [result.lastInsertRowid]);
+      if (row) return row;
+    }
+    // Fallback for PG (lastInsertRowid is 0) — use ordering tiebreak
     return (await this.db.get<MessageRow>(
       'SELECT * FROM messages WHERE session_id = ? AND role = ? AND created_at = ? ORDER BY id DESC LIMIT 1',
       [msg.sessionId, msg.role, now],

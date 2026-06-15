@@ -869,7 +869,7 @@ export async function runAgent(
         if (s.messageRepo) {
           try {
             reqLog.info('Stage 2: Forcing hard compaction');
-            await compactSession(session.id, tenantId, model, db, config, (a) => context.callLLM({ ...a, signal: context.signal }));
+            await compactSession(session.id, tenantId, model, db, config, (a) => context.callLLM({ ...a, signal: context.signal }), context.scopeKey);
             const freshRows = await s.messageRepo.listBySession(session.id);
             s.messages.splice(0, s.messages.length, ...freshRows.map(rowToMessage));
             s.totalContentSize = s.messages.reduce((sum, m) => sum + contentLen(m.content), 0);
