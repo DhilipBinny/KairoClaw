@@ -156,6 +156,8 @@ export type JobDeliverer = (
 // CronScheduler
 // ---------------------------------------------------------------------------
 
+export type CronAlertFn = (event: { type: string; severity: 'critical' | 'warning'; source: string; labels: Record<string, string>; title: string; message: string }) => void;
+
 export class CronScheduler {
   private jobs = new Map<string, CronJob>();
   private timers = new Map<string, { timer: ReturnType<typeof setTimeout>; type: 'timeout' | 'interval' }>();
@@ -167,6 +169,8 @@ export class CronScheduler {
   private deliverer?: JobDeliverer;
   private store?: CronJobStore;
   private tenantId: string;
+  private alertEmitter?: CronAlertFn;
+  private consecutiveFailures = new Map<string, number>();
 
   constructor(opts: {
     stateDir: string;
@@ -184,6 +188,10 @@ export class CronScheduler {
     if (opts.store) {
       this.store = opts.store;
     }
+  }
+
+  setAlertEmitter(fn: CronAlertFn): void {
+    this.alertEmitter = fn;
   }
 
   // -- Persistence ----------------------------------------------------------
@@ -489,6 +497,7 @@ export class CronScheduler {
       const responseMedia = result.media;
       job.lastResult = responseText.slice(0, 500);
       job.lastError = null;
+      this.consecutiveFailures.delete(job.id);
 
       // Deliver result to configured channel(s)
       if (delivery.mode === 'announce' && (responseText || responseMedia?.length) && this.deliverer) {
@@ -540,6 +549,20 @@ export class CronScheduler {
       const errMsg = e instanceof Error ? e.message : String(e);
       this.log.error({ jobId: job.id, err: errMsg }, 'Cron job execution failed');
       job.lastError = errMsg;
+
+      const count = (this.consecutiveFailures.get(job.id) ?? 0) + 1;
+      this.consecutiveFailures.set(job.id, count);
+      if (this.alertEmitter && count >= 3) {
+        this.alertEmitter({
+          type: 'cron.consecutive_failures',
+          severity: count >= 5 ? 'critical' : 'warning',
+          source: 'cron',
+          labels: { source: 'cron', jobId: job.id, jobName: job.name },
+          title: `Cron job failing: ${job.name}`,
+          message: `${count} consecutive failures. Last error: ${errMsg}`,
+        });
+      }
+
       this._saveJob(job).catch(e2 => this.log.error({ jobId: job.id, err: e2 instanceof Error ? e2.message : String(e2) }, 'Failed to persist job error'));
     } finally {
       this.runningJobs.delete(job.id);

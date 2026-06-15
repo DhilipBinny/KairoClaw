@@ -79,6 +79,11 @@ class WhatsAppChannel implements Channel {
   private lidToPhone = new Map<string, string>();
 
   private readonly pendingSenders: PendingSenderRepository;
+  private alertEmitter: AlertEmitFn | null = null;
+
+  setAlertEmitter(fn: AlertEmitFn): void {
+    this.alertEmitter = fn;
+  }
 
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string) {
     this.config = config;
@@ -139,6 +144,14 @@ class WhatsAppChannel implements Channel {
           log.info('WhatsApp: logged out — clearing credentials');
           this.reconnectAttempts = 0;
           this.clearAuth();
+          this.alertEmitter?.({
+            type: 'channel.auth_lost',
+            severity: 'critical',
+            source: 'whatsapp',
+            labels: { source: 'whatsapp', channel: 'whatsapp' },
+            title: 'WhatsApp logged out',
+            message: 'WhatsApp session was logged out — requires QR re-scan',
+          });
         } else if (shouldReconnect) {
           // Clear any existing timer to prevent storm
           if (this.reconnectTimer) {
@@ -908,6 +921,8 @@ class WhatsAppChannel implements Channel {
 
 // ─── Factory ────────────────────────────────────────────────
 
+export type AlertEmitFn = (event: { type: string; severity: 'critical' | 'warning'; source: string; labels: Record<string, string>; title: string; message: string }) => void;
+
 export interface WhatsAppChannelInstance extends Channel {
   sendToChat(text: string, jid?: string): Promise<void>;
   sendMediaToChat(media: import('@agw/types').MediaAttachment[], text: string, jid?: string): Promise<void>;
@@ -916,6 +931,7 @@ export interface WhatsAppChannelInstance extends Channel {
   getConnectedPhone(): string | null;
   getConnectedName(): string | null;
   unpair(): Promise<void>;
+  setAlertEmitter(fn: AlertEmitFn): void;
 }
 
 export function createWhatsAppChannel(

@@ -350,6 +350,49 @@ const hooksSchema = z.object({
   PostCompact: z.array(sessionHookSchema).default([]),
 });
 
+const alertEventOverrideSchema = z.object({
+  enabled: z.boolean().optional(),
+  severity: z.enum(['critical', 'warning']).optional(),
+  delivery: z.array(z.string()).optional(),
+  failureThreshold: z.number().int().min(1).optional(),
+  recoveryThreshold: z.number().int().min(1).optional(),
+});
+
+const alertsSchema = z.object({
+  enabled: z.boolean().default(false),
+  delivery: withObjectDefault(z.object({
+    telegram: withObjectDefault(z.object({
+      enabled: z.boolean().default(true),
+      chatIds: z.array(z.string()).default([]),
+    })),
+    whatsapp: withObjectDefault(z.object({
+      enabled: z.boolean().default(false),
+      jids: z.array(z.string()).default([]),
+    })),
+    websocket: withObjectDefault(z.object({
+      enabled: z.boolean().default(true),
+    })),
+    webhook: withObjectDefault(z.object({
+      enabled: z.boolean().default(false),
+      urls: z.array(z.string()).default([]),
+      secret: z.string().default(''),
+    })),
+  })),
+  timing: withObjectDefault(z.object({
+    groupWaitMs: z.number().int().min(0).default(30_000),
+    cooldownCriticalMs: z.number().int().min(0).default(3_600_000),
+    cooldownWarningMs: z.number().int().min(0).default(21_600_000),
+    repeatCriticalMs: z.number().int().min(0).default(14_400_000),
+    repeatWarningMs: z.number().int().min(0).default(86_400_000),
+    resolutionDelayMs: z.number().int().min(0).default(300_000),
+  })),
+  thresholds: withObjectDefault(z.object({
+    failureThreshold: z.number().int().min(1).default(2),
+    recoveryThreshold: z.number().int().min(1).default(3),
+  })),
+  events: z.record(z.string(), alertEventOverrideSchema).default({}),
+});
+
 export const configSchema = z.object({
   gateway: withObjectDefault(gatewayNetworkSchema),
   providers: withObjectDefault(providersSchema),
@@ -361,6 +404,7 @@ export const configSchema = z.object({
   models: withObjectDefault(modelsCatalogSchema),
   mcp: withObjectDefault(mcpSectionSchema),
   hooks: withObjectDefault(hooksSchema),
+  alerts: withObjectDefault(alertsSchema),
 }).passthrough();
 
 // ──────────────────────────────────────────────

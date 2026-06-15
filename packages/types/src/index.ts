@@ -19,3 +19,4 @@ export * from './api.js';
 export * from './db.js';
 export * from './logger.js';
 export * from './sandbox.js';
+export * from './alert.js';

@@ -61,3 +61,20 @@ export const LOGIN_MAP_MAX_SIZE = 10_000;
 // login route), so key-guessing can't bypass the login limiter via other routes.
 export const AUTH_FAIL_RATE_LIMIT = 20;
 export const AUTH_FAIL_RATE_WINDOW_MS = 60_000;
+
+// ── Alerts ─────────────────────────────────────────────────
+
+export const ALERT_GROUP_WAIT_MS = 30_000;
+export const ALERT_COOLDOWN_CRITICAL_MS = 60 * 60 * 1000;
+export const ALERT_COOLDOWN_WARNING_MS = 6 * 60 * 60 * 1000;
+export const ALERT_REPEAT_CRITICAL_MS = 4 * 60 * 60 * 1000;
+export const ALERT_REPEAT_WARNING_MS = 24 * 60 * 60 * 1000;
+export const ALERT_RESOLUTION_DELAY_MS = 5 * 60 * 1000;
+export const ALERT_FAILURE_THRESHOLD = 2;
+export const ALERT_RECOVERY_THRESHOLD = 3;
+export const ALERT_HEALTH_PROBE_INTERVAL_MS = 60_000;
+export const ALERT_PROVIDER_PROBE_INTERVAL_MS = 5 * 60 * 1000;
+export const ALERT_HISTORY_RETENTION_DAYS = 30;
+export const ALERT_MAX_INSTANCES = 200;
+export const ALERT_WEBHOOK_TIMEOUT_MS = 10_000;
+export const ALERT_WEBHOOK_MAX_RETRIES = 3;

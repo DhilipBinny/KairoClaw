@@ -42,6 +42,11 @@ import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
+import { AlertManager } from './alerts/index.js';
+import { WebSocketAlertChannel } from './alerts/channels/websocket.js';
+import { TelegramAlertChannel } from './alerts/channels/telegram.js';
+import { WebhookAlertChannel } from './alerts/channels/webhook.js';
+import { ChannelHealthProbe } from './alerts/health/channel-probe.js';
 import { broadcastToWeb, broadcastToUser, broadcastToAdmins, stopWebchatCleanup } from './channels/webchat.js';
 import { createTelegramChannel } from './channels/telegram.js';
 import type { TelegramChannelInstance } from './channels/telegram.js';
@@ -640,6 +645,7 @@ async function main(): Promise<void> {
       if (value && !channelRegistry.whatsapp) {
         const waChannel = createWhatsAppChannel(config, db, tenantId);
         await waChannel.start(createRunner);
+        waChannel.setAlertEmitter(emitFailure);
         channelRegistry.whatsapp = waChannel;
         server.log.info('WhatsApp channel started via Settings');
       } else if (!value && channelRegistry.whatsapp) {
@@ -737,6 +743,7 @@ async function main(): Promise<void> {
         const tgChannel = createTelegramChannel(config, db, tenantId, secretsStore);
         await tgChannel.start(createRunner);
         channelRegistry.telegram = tgChannel;
+        tgAlertChannel.setSender((chatId, text) => channelRegistry.telegram!.sendToChat(text, chatId));
         server.log.info('Telegram channel started via Settings');
       } else if (!value && channelRegistry.telegram) {
         await channelRegistry.telegram.stop();
@@ -920,11 +927,68 @@ async function main(): Promise<void> {
     channelRegistry.whatsapp = waChannel;
   }
 
+  // 15b. Alert system
+  const alertsConfig = (config as unknown as Record<string, unknown>).alerts as import('@agw/types').AlertsConfig;
+  const alertManager = new AlertManager({ config: alertsConfig, db });
+
+  const wsAlertChannel = new WebSocketAlertChannel();
+  alertManager.registerChannel(wsAlertChannel);
+
+  const tgAlertChannel = new TelegramAlertChannel();
+  if (channelRegistry.telegram) {
+    tgAlertChannel.setSender((chatId, text) => channelRegistry.telegram!.sendToChat(text, chatId));
+  }
+  const tgAdminIds = alertsConfig.delivery?.telegram?.chatIds?.length
+    ? alertsConfig.delivery.telegram.chatIds
+    : (config.channels?.telegram as any)?.allowFrom ?? [];
+  tgAlertChannel.setChatIds(tgAdminIds);
+  alertManager.registerChannel(tgAlertChannel);
+
+  const webhookAlertChannel = new WebhookAlertChannel();
+  if (alertsConfig.delivery?.webhook?.urls?.length) {
+    webhookAlertChannel.setConfig(alertsConfig.delivery.webhook.urls, alertsConfig.delivery.webhook.secret || '');
+  }
+  alertManager.registerChannel(webhookAlertChannel);
+
+  // Wire alert emitters
+  const emitFailure = alertManager.emitFailure.bind(alertManager);
+  if (channelRegistry.whatsapp) channelRegistry.whatsapp.setAlertEmitter(emitFailure);
+  providerRegistry.setAlertEmitter(emitFailure);
+  scheduler.setAlertEmitter(emitFailure);
+
+  // Start channel health probes
+  const channelProbe = new ChannelHealthProbe(alertManager, channelRegistry as any);
+  if (alertsConfig.enabled) channelProbe.start();
+
   // Register WhatsApp routes
   await server.register(registerWhatsAppRoutes, { channelRegistry });
 
   // Register unified channels status route
   await server.register(registerChannelRoutes, { channelRegistry, config, secretsStore });
+
+  // Alert test + status endpoint (admin only)
+  server.post('/api/v1/admin/alerts/test', { preHandler: [requireRole('admin')] }, async () => {
+    alertManager.emitFailure({
+      type: 'system.test',
+      severity: 'warning',
+      source: 'admin',
+      labels: { source: 'admin', trigger: 'manual-test' },
+      title: 'Test alert',
+      message: 'This is a test alert triggered from the admin panel',
+    });
+    alertManager.emitFailure({
+      type: 'system.test',
+      severity: 'warning',
+      source: 'admin',
+      labels: { source: 'admin', trigger: 'manual-test' },
+      title: 'Test alert',
+      message: 'This is a test alert triggered from the admin panel',
+    });
+    return { ok: true, message: 'Test alert fired (2 failures to exceed threshold)' };
+  });
+  server.get('/api/v1/admin/alerts', { preHandler: [requireRole('admin')] }, async () => {
+    return { firing: alertManager.getFiringAlerts(), all: alertManager.getStore().getAll() };
+  });
 
   // 16. Serve static UI files
   // Try SvelteKit build first, fall back to legacy public/index.html
@@ -1074,6 +1138,10 @@ async function main(): Promise<void> {
     // Stop memory consolidation timer
     clearInterval(consolidationTimer);
     if (backupTimer) clearInterval(backupTimer);
+
+    // Stop alerts
+    channelProbe.stop();
+    alertManager.stop();
 
     // Stop scheduler
     scheduler.stop();

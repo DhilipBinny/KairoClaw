@@ -20,6 +20,8 @@ interface FailoverEvent {
   error: string;
 }
 
+export type ProviderAlertFn = (event: { type: string; severity: 'critical' | 'warning'; source: string; labels: Record<string, string>; title: string; message: string }) => void;
+
 export class ProviderRegistry {
   private providers: Record<string, ProviderInterface> = {};
   private config: GatewayConfig;
@@ -28,6 +30,7 @@ export class ProviderRegistry {
   private secretsResolver?: SecretsResolver;
   private log: AgwLogger;
   private customProviderInit?: (registry: ProviderRegistry) => Promise<void>;
+  private alertEmitter?: ProviderAlertFn;
 
   constructor(config: GatewayConfig, logger?: AgwLogger) {
     this.config = config;
@@ -40,6 +43,10 @@ export class ProviderRegistry {
 
   setCustomProviderInit(init: (registry: ProviderRegistry) => Promise<void>): void {
     this.customProviderInit = init;
+  }
+
+  setAlertEmitter(fn: ProviderAlertFn): void {
+    this.alertEmitter = fn;
   }
 
   addProvider(name: string, provider: ProviderInterface): void {
@@ -231,10 +238,19 @@ export class ProviderRegistry {
       }
     }
 
-    // Everything failed. Prefer the primary error when it is an actionable
-    // config problem (e.g. a bad/missing API key) so the user still sees the
-    // "check your API key" message rather than a transient fallback error;
-    // otherwise surface the most recent attempt's error.
+    // Everything failed. Emit alert for all-providers-down.
+    this.alertEmitter?.({
+      type: 'provider.all_down',
+      severity: 'critical',
+      source: 'provider-bridge',
+      labels: { source: 'provider-bridge', primary: excludeProvider },
+      title: 'All LLM providers failed',
+      message: `Primary (${excludeProvider}) and all fallbacks failed: ${lastError.message}`,
+    });
+
+    // Prefer the primary error when it is an actionable config problem
+    // (e.g. a bad/missing API key) so the user still sees the "check your
+    // API key" message rather than a transient fallback error.
     if (classifyError(primaryError).type === 'auth_error') throw primaryError;
     throw lastError;
   }
@@ -267,6 +283,17 @@ export class ProviderRegistry {
         if (hasStreamed) {
           this.log.warn({ provider: provider.name, attempt }, 'Mid-stream failure — skipping retry to prevent duplicate output');
           throw e;
+        }
+
+        if (classified.type === 'auth_error') {
+          this.alertEmitter?.({
+            type: 'provider.auth_error',
+            severity: 'critical',
+            source: 'provider-bridge',
+            labels: { source: 'provider-bridge', provider: provider.name },
+            title: `Provider auth failed: ${provider.name}`,
+            message: classified.message || 'Authentication failed — check API key',
+          });
         }
 
         if (classified.retriable && attempt < maxRetries) {

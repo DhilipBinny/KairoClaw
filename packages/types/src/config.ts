@@ -553,6 +553,9 @@ export interface GatewayConfig {
   /** Hook configuration — shell commands triggered by agent events. */
   hooks?: HooksConfig;
 
+  /** System alerting configuration. */
+  alerts?: import('./alert.js').AlertsConfig;
+
   /** Internal: resolved path to the state directory (~/.agw). Set at runtime. */
   _stateDir?: string;
 }
