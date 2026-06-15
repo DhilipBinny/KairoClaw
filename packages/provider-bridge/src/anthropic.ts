@@ -60,7 +60,7 @@ export class AnthropicProvider implements ProviderInterface {
             }],
           };
         }
-        if (m.role === 'assistant' && m.tool_calls) {
+        if (m.role === 'assistant' && (m.tool_calls || m.thinking_blocks)) {
           const content: Anthropic.ContentBlockParam[] = [];
           if (m.thinking_blocks) {
             for (const tb of m.thinking_blocks) {
@@ -68,15 +68,17 @@ export class AnthropicProvider implements ProviderInterface {
             }
           }
           if (m.content) content.push({ type: 'text' as const, text: typeof m.content === 'string' ? m.content : '' });
-          for (const tc of m.tool_calls) {
-            let input: Record<string, unknown>;
-            try {
-              input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
-            } catch {
-              this.log.warn({ tool: tc.function.name, id: tc.id }, 'Malformed tool call arguments JSON, using empty object');
-              input = {};
+          if (m.tool_calls) {
+            for (const tc of m.tool_calls) {
+              let input: Record<string, unknown>;
+              try {
+                input = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+              } catch {
+                this.log.warn({ tool: tc.function.name, id: tc.id }, 'Malformed tool call arguments JSON, using empty object');
+                input = {};
+              }
+              content.push({ type: 'tool_use' as const, id: tc.id, name: tc.function.name, input });
             }
-            content.push({ type: 'tool_use' as const, id: tc.id, name: tc.function.name, input });
           }
           return { role: 'assistant' as const, content };
         }

@@ -119,14 +119,29 @@ export class SubAgentRegistry {
     return false;
   }
 
-  /** Wait for all running children to complete. Returns their results. */
+  /** Wait for all running children to complete (max 5 minutes per child). */
   async waitForAll(): Promise<Map<string, SubAgentEntry>> {
     const pending = [...this.children.values()].filter(e => e.status === 'running');
     if (pending.length === 0) return this.children;
 
     log.info({ count: pending.length }, 'Waiting for sub-agents to complete');
-    // Wait for all promises — they never reject (errors are caught internally)
-    await Promise.all(pending.map(e => e.promise));
+    const TIMEOUT_MS = 5 * 60 * 1000;
+    const withTimeout = pending.map(e =>
+      Promise.race([
+        e.promise,
+        new Promise<void>(resolve => setTimeout(() => {
+          if (e.status === 'running') {
+            log.warn({ childId: e.childId, task: e.task }, 'Sub-agent timed out after 5 minutes');
+            e.status = 'error';
+            e.error = 'Sub-agent timed out';
+            e.completedAt = Date.now();
+            e.abort.abort();
+          }
+          resolve();
+        }, TIMEOUT_MS)),
+      ]),
+    );
+    await Promise.all(withTimeout);
     return this.children;
   }
 
