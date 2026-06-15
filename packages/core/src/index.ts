@@ -1021,38 +1021,31 @@ async function main(): Promise<void> {
   }, CONSOLIDATION_INTERVAL_MS);
   consolidationTimer.unref();
 
-  // 19b. Daily SQLite backup — writes a timestamped copy next to the DB file
+  // 19b. Daily database backup — SQLite uses native backup(), PG uses pg_dump
+  const backupPrefix = dbDialect === 'sqlite' ? 'gateway.db.backup-' : 'gateway.pg.backup-';
   let backupTimer: ReturnType<typeof setInterval> | null = null;
-  if (dbDialect === 'sqlite') {
-    const BACKUP_INTERVAL_MS = DAILY_INTERVAL_MS;
-    backupTimer = setInterval(async () => {
+  {
+    const runBackup = async () => {
       try {
         const date = new Date().toISOString().slice(0, 10);
-        const backupPath = path.join(stateDir, `gateway.db.backup-${date}`);
+        const ext = dbDialect === 'sqlite' ? '' : '.dump';
+        const backupPath = path.join(stateDir, `${backupPrefix}${date}${ext}`);
+        if (fs.existsSync(backupPath)) return;
         await db.backup(backupPath);
-        console.log(`  SQLite backup: ${backupPath}`);
-        // Keep only last 7 daily backups
-        const files = fs.readdirSync(stateDir).filter(f => f.startsWith('gateway.db.backup-')).sort();
+        console.log(`  DB backup: ${backupPath}`);
+        const files = fs.readdirSync(stateDir).filter(f => f.startsWith(backupPrefix)).sort();
         while (files.length > SQLITE_BACKUP_RETENTION) {
           const old = files.shift()!;
           try { fs.unlinkSync(path.join(stateDir, old)); } catch { /* ignore */ }
         }
       } catch (e) {
-        console.error('SQLite backup failed:', e instanceof Error ? e.message : e);
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes('not found')) console.error('DB backup failed:', msg);
       }
-    }, BACKUP_INTERVAL_MS);
+    };
+    backupTimer = setInterval(runBackup, DAILY_INTERVAL_MS);
     backupTimer.unref();
-    // Run first backup on startup (after a delay to not slow boot)
-    setTimeout(async () => {
-      try {
-        const date = new Date().toISOString().slice(0, 10);
-        const backupPath = path.join(stateDir, `gateway.db.backup-${date}`);
-        if (!fs.existsSync(backupPath)) {
-          await db.backup(backupPath);
-          console.log(`  SQLite backup: ${backupPath}`);
-        }
-      } catch { /* non-critical */ }
-    }, SQLITE_BACKUP_STARTUP_DELAY_MS);
+    setTimeout(runBackup, SQLITE_BACKUP_STARTUP_DELAY_MS);
   }
 
   // 20. Graceful shutdown
