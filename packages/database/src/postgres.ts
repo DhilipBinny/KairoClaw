@@ -40,8 +40,10 @@ const txStorage = new AsyncLocalStorage<PoolClient>();
 
 export class PostgresAdapter implements DatabaseAdapter {
   private pool: pg.Pool;
+  private connectionString: string;
 
   constructor(connectionString: string, poolConfig?: Partial<PoolConfig>) {
+    this.connectionString = connectionString;
     this.pool = new Pool({
       connectionString,
       max: poolConfig?.max ?? 10,
@@ -102,7 +104,34 @@ export class PostgresAdapter implements DatabaseAdapter {
     await this.pool.end();
   }
 
-  async backup(_path: string): Promise<void> {
-    console.warn('[db] PostgreSQL backup not implemented. Use pg_dump manually.');
+  async backup(outputPath: string): Promise<void> {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    try {
+      const connStr = this.connectionString;
+      if (!connStr) {
+        console.warn('[db] PostgreSQL backup: no connection string available');
+        return;
+      }
+      const u = new URL(connStr);
+      const args = [
+        '--format=custom',
+        '--file', outputPath,
+        '--host', u.hostname,
+        '--port', u.port || '5432',
+        '--username', decodeURIComponent(u.username),
+        '--dbname', u.pathname.slice(1),
+      ];
+      const env = { ...process.env, PGPASSWORD: decodeURIComponent(u.password) };
+      await execFileAsync('pg_dump', args, { timeout: 120_000, env });
+    } catch (e) {
+      const msg = (e as Error).message || '';
+      if (msg.includes('ENOENT') || msg.includes('not found')) {
+        console.warn('[db] PostgreSQL backup: pg_dump not found. Install postgresql-client for automated backups.');
+      } else {
+        throw e;
+      }
+    }
   }
 }
