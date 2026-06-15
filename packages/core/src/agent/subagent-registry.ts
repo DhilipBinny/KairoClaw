@@ -12,7 +12,7 @@
 
 import type { AgentResult } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
-import { SUBAGENT_TIMEOUT_MS } from '../constants.js';
+import { SUBAGENT_TIMEOUT_MS, MAX_IN_TURN_SUBAGENTS } from '../constants.js';
 
 const log = createModuleLogger('tool');
 
@@ -43,8 +43,6 @@ export interface SubAgentEntry {
  * execution context. Garbage-collected when the parent request ends
  * (the registry is a local variable, not a global singleton).
  */
-const MAX_IN_TURN_SUBAGENTS = 10;
-
 export class SubAgentRegistry {
   private children = new Map<string, SubAgentEntry>();
 

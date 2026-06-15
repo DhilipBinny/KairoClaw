@@ -81,6 +81,7 @@ import { registerChannelRoutes } from './routes/channels.js';
 import { registerUserRoutes } from './routes/users.js';
 import { webchatPlugin } from './channels/webchat.js';
 import { AuditService } from './security/audit.js';
+import { DAILY_INTERVAL_MS, SQLITE_BACKUP_RETENTION, SQLITE_BACKUP_STARTUP_DELAY_MS } from './constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = path.resolve(__dirname, '..', '..', '..');
@@ -982,7 +983,7 @@ async function main(): Promise<void> {
   console.log(`  MCP servers: connecting in background`);
 
   // 19. Daily memory consolidation — runs every 24h, consolidates session notes → PROFILE.md
-  const CONSOLIDATION_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const CONSOLIDATION_INTERVAL_MS = DAILY_INTERVAL_MS;
   const consolidationTimer = setInterval(async () => {
     try {
       const { consolidateMemory } = await import('./agent/auto-memory.js');
@@ -1018,7 +1019,41 @@ async function main(): Promise<void> {
       console.error('Memory consolidation error:', e);
     }
   }, CONSOLIDATION_INTERVAL_MS);
-  consolidationTimer.unref(); // Don't keep process alive just for this
+  consolidationTimer.unref();
+
+  // 19b. Daily SQLite backup — writes a timestamped copy next to the DB file
+  let backupTimer: ReturnType<typeof setInterval> | null = null;
+  if (dbDialect === 'sqlite') {
+    const BACKUP_INTERVAL_MS = DAILY_INTERVAL_MS;
+    backupTimer = setInterval(async () => {
+      try {
+        const date = new Date().toISOString().slice(0, 10);
+        const backupPath = path.join(stateDir, `gateway.db.backup-${date}`);
+        await db.backup(backupPath);
+        console.log(`  SQLite backup: ${backupPath}`);
+        // Keep only last 7 daily backups
+        const files = fs.readdirSync(stateDir).filter(f => f.startsWith('gateway.db.backup-')).sort();
+        while (files.length > SQLITE_BACKUP_RETENTION) {
+          const old = files.shift()!;
+          try { fs.unlinkSync(path.join(stateDir, old)); } catch { /* ignore */ }
+        }
+      } catch (e) {
+        console.error('SQLite backup failed:', e instanceof Error ? e.message : e);
+      }
+    }, BACKUP_INTERVAL_MS);
+    backupTimer.unref();
+    // Run first backup on startup (after a delay to not slow boot)
+    setTimeout(async () => {
+      try {
+        const date = new Date().toISOString().slice(0, 10);
+        const backupPath = path.join(stateDir, `gateway.db.backup-${date}`);
+        if (!fs.existsSync(backupPath)) {
+          await db.backup(backupPath);
+          console.log(`  SQLite backup: ${backupPath}`);
+        }
+      } catch { /* non-critical */ }
+    }, SQLITE_BACKUP_STARTUP_DELAY_MS);
+  }
 
   // 20. Graceful shutdown
   const shutdown = async (): Promise<void> => {
@@ -1045,6 +1080,7 @@ async function main(): Promise<void> {
 
     // Stop memory consolidation timer
     clearInterval(consolidationTimer);
+    if (backupTimer) clearInterval(backupTimer);
 
     // Stop scheduler
     scheduler.stop();

@@ -33,6 +33,9 @@ export const PENDING_PENDING_CAP = 20;
 
 export const MEDIA_RETENTION_DAYS = 7;
 export const MEDIA_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+export const DAILY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+export const SQLITE_BACKUP_RETENTION = 7;
+export const SQLITE_BACKUP_STARTUP_DELAY_MS = 30_000;
 /**
  * Lifetime of a signed media URL. Matched to the retention window so a signed
  * link stays valid for as long as the file exists but no longer.
@@ -46,6 +49,7 @@ export const ANTHROPIC_API_VERSION = '2023-06-01';
 // ── Sub-Agents ──────────────────────────────────────────────
 
 export const SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
+export const MAX_IN_TURN_SUBAGENTS = 10;
 
 // ── Rate Limiting ───────────────────────────────────────────
 
