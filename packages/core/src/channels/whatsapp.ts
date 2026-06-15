@@ -806,7 +806,7 @@ class WhatsAppChannel implements Channel {
   }
 
   async sendToChat(text: string, jid?: string): Promise<void> {
-    if (!this.sock) throw new Error('WhatsApp not connected');
+    if (!this.sock || this.connectionStatus !== 'connected') throw new Error(`WhatsApp not connected (status: ${this.connectionStatus})`);
     if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID (delivery.to). No silent fallback.');
 
     const chunks = splitMessage(markdownToWhatsAppFmt(text), 4000);
@@ -817,7 +817,7 @@ class WhatsAppChannel implements Channel {
 
   /** Send media attachments with optional text to a WhatsApp chat. */
   async sendMediaToChat(media: MediaAttachment[], text: string, jid?: string): Promise<void> {
-    if (!this.sock) throw new Error('WhatsApp not connected');
+    if (!this.sock || this.connectionStatus !== 'connected') throw new Error(`WhatsApp not connected (status: ${this.connectionStatus})`);
     if (!jid) throw new Error('WhatsApp delivery requires an explicit chat JID');
 
     text = markdownToWhatsAppFmt(text);
@@ -825,9 +825,14 @@ class WhatsAppChannel implements Channel {
     const workspace = this.config.agent.workspace;
 
     // Convert MediaAttachment[] → MediaItem[] and send
-    const items: MediaItem[] = media
-      .filter(a => fs.existsSync(a.filePath))
-      .map(a => ({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' }));
+    const items: MediaItem[] = [];
+    for (const a of media) {
+      if (fs.existsSync(a.filePath)) {
+        items.push({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' });
+      } else {
+        log.warn({ filePath: a.filePath, fileName: a.fileName }, 'Media attachment file not found at delivery time — skipping');
+      }
+    }
 
     // Also extract from text as fallback
     if (items.length === 0) {

@@ -369,16 +369,22 @@ async function executeSingleTool(
       for (const item of mediaArr) {
         if (!item || typeof item !== 'object') continue;
         const m = item as Record<string, unknown>;
-        if (typeof m.filePath === 'string' && typeof m.fileName === 'string' &&
-            typeof m.mimeType === 'string' && typeof m.type === 'string' && fs.existsSync(m.filePath)) {
-          const stateDir = context.config._stateDir || process.env.AGW_STATE_DIR || '';
-          const resolvedMedia = path.resolve(m.filePath);
-          if (stateDir && !resolvedMedia.startsWith(path.resolve(stateDir))) continue;
-          const attachment = item as MediaAttachment;
-          s.collectedMedia.push(attachment);
-          if (callbacks.onMedia) {
-            try { callbacks.onMedia(attachment); } catch { /* ignore */ }
-          }
+        if (typeof m.filePath !== 'string' || typeof m.fileName !== 'string' ||
+            typeof m.mimeType !== 'string' || typeof m.type !== 'string') continue;
+        if (!fs.existsSync(m.filePath)) {
+          s.reqLog.warn({ filePath: m.filePath, tool: p.toolName }, 'Media attachment file not found — skipping');
+          continue;
+        }
+        const stateDir = context.config._stateDir || process.env.AGW_STATE_DIR || '';
+        const resolvedMedia = path.resolve(m.filePath);
+        if (stateDir && !resolvedMedia.startsWith(path.resolve(stateDir))) {
+          s.reqLog.warn({ filePath: m.filePath, stateDir, tool: p.toolName }, 'Media attachment outside stateDir — skipping');
+          continue;
+        }
+        const attachment = item as MediaAttachment;
+        s.collectedMedia.push(attachment);
+        if (callbacks.onMedia) {
+          try { callbacks.onMedia(attachment); } catch { /* ignore */ }
         }
       }
       delete resultObj._media;

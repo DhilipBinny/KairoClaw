@@ -44,7 +44,8 @@ export class MediaStore {
    * Returns the filename (uuid.ext).
    */
   saveBase64(base64Data: string, ext: string): string {
-    const buffer = Buffer.from(base64Data, 'base64');
+    const cleaned = base64Data.replace(/^data:image\/[a-z+]+;base64,/i, '');
+    const buffer = Buffer.from(cleaned, 'base64');
     return this.save(buffer, ext);
   }
 
@@ -161,7 +162,8 @@ const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string
  */
 export function detectBase64Image(value: string): { ext: string; mime: string } | null {
   if (typeof value !== 'string' || value.length < 1000) return null;
-  return sniffBase64Mime(value);
+  const cleaned = value.replace(/^data:image\/[a-z+]+;base64,/i, '');
+  return sniffBase64Mime(cleaned);
 }
 
 /**

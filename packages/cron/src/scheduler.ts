@@ -511,11 +511,19 @@ export class CronScheduler {
         } else {
           const delivered: string[] = [];
           for (const target of targets) {
-            try {
-              await this.deliverer(responseText, target.channel, target.to, responseMedia, job.userId ?? null);
-              delivered.push(target.channel);
-            } catch (e) {
-              this.log.error({ jobId: job.id, channel: target.channel, err: e instanceof Error ? e.message : String(e) }, 'Cron delivery to channel failed');
+            let sent = false;
+            for (let attempt = 0; attempt < 2 && !sent; attempt++) {
+              try {
+                if (attempt > 0) {
+                  this.log.info({ jobId: job.id, channel: target.channel, attempt }, 'Retrying cron delivery');
+                  await new Promise(r => setTimeout(r, 3000));
+                }
+                await this.deliverer(responseText, target.channel, target.to, responseMedia, job.userId ?? null);
+                delivered.push(target.channel);
+                sent = true;
+              } catch (e) {
+                this.log.error({ jobId: job.id, channel: target.channel, attempt, err: e instanceof Error ? e.message : String(e) }, 'Cron delivery to channel failed');
+              }
             }
           }
           job.lastDelivered = delivered.length > 0;
