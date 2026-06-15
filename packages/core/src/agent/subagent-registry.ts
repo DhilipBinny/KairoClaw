@@ -12,6 +12,7 @@
 
 import type { AgentResult } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
+import { SUBAGENT_TIMEOUT_MS } from '../constants.js';
 
 const log = createModuleLogger('tool');
 
@@ -125,7 +126,7 @@ export class SubAgentRegistry {
     if (pending.length === 0) return this.children;
 
     log.info({ count: pending.length }, 'Waiting for sub-agents to complete');
-    const TIMEOUT_MS = 5 * 60 * 1000;
+    const TIMEOUT_MS = SUBAGENT_TIMEOUT_MS;
     const withTimeout = pending.map(e =>
       Promise.race([
         e.promise,
