@@ -393,8 +393,12 @@ ${formattedMessages}
     return state;
   }
 
-  // 5. Write updated file
-  writeSessionMemory(workspace, scopeKey, sessionId, updatedMemory);
+  // 5. Write updated file (cap to prevent unbounded growth)
+  const MAX_MEMORY_SIZE = 20_000;
+  const cappedMemory = updatedMemory.length > MAX_MEMORY_SIZE
+    ? updatedMemory.slice(0, MAX_MEMORY_SIZE) + '\n\n[... truncated to prevent unbounded growth]'
+    : updatedMemory;
+  writeSessionMemory(workspace, scopeKey, sessionId, cappedMemory);
 
   const lastMsg = newMessages[newMessages.length - 1]!;
   const newState: SessionMemoryState = {

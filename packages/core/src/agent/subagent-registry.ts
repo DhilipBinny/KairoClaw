@@ -43,15 +43,22 @@ export interface SubAgentEntry {
  * execution context. Garbage-collected when the parent request ends
  * (the registry is a local variable, not a global singleton).
  */
+const MAX_IN_TURN_SUBAGENTS = 10;
+
 export class SubAgentRegistry {
   private children = new Map<string, SubAgentEntry>();
 
-  /** Register a new child. Called by spawn_agent tool. */
+  /** Register a new child. Called by spawn_agent tool. Throws if at capacity. */
   register(
     childId: string,
     task: string,
     runFn: (signal: AbortSignal) => Promise<AgentResult>,
   ): SubAgentEntry {
+    const running = [...this.children.values()].filter(e => e.status === 'running').length;
+    if (running >= MAX_IN_TURN_SUBAGENTS) {
+      throw new Error(`Sub-agent limit reached (${MAX_IN_TURN_SUBAGENTS} concurrent). Wait for existing agents to complete or kill one.`);
+    }
+
     const abort = new AbortController();
 
     const promise = runFn(abort.signal)
