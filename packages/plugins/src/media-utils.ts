@@ -11,6 +11,8 @@ const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string
   { prefix: 'UklG', ext: 'webp', mime: 'image/webp' },
 ];
 
+const DATA_URI_RE = /^data:image\/[a-z+]+;base64,/i;
+
 /**
  * Detect if a string value is likely a base64-encoded image.
  * Returns the format info if detected, null otherwise.
@@ -18,7 +20,7 @@ const BASE64_IMAGE_SIGNATURES: Array<{ prefix: string; ext: string; mime: string
  */
 export function detectBase64Image(value: string): { ext: string; mime: string } | null {
   if (typeof value !== 'string' || value.length < 1000) return null;
-  return sniffBase64Mime(value);
+  return sniffBase64Mime(stripDataUri(value));
 }
 
 /**
@@ -54,5 +56,14 @@ export function extFromContentType(contentType: string): string | null {
   for (const [mime, ext] of Object.entries(map)) {
     if (contentType.includes(mime)) return ext;
   }
+  if (contentType.startsWith('image/')) return contentType.split('/')[1]?.split(';')[0] || 'bin';
   return null;
+}
+
+/**
+ * Strip data URI prefix (e.g., "data:image/png;base64,") from a base64 string.
+ * Many image generation APIs return base64 with this prefix.
+ */
+export function stripDataUri(value: string): string {
+  return value.replace(DATA_URI_RE, '');
 }

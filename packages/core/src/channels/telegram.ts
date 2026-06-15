@@ -739,9 +739,14 @@ class TelegramChannel implements Channel {
     const stateDir = this.config._stateDir || '';
     const workspace = this.config.agent.workspace;
 
-    const items: MediaItem[] = media
-      .filter(a => fs.existsSync(a.filePath))
-      .map(a => ({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' }));
+    const items: MediaItem[] = [];
+    for (const a of media) {
+      if (fs.existsSync(a.filePath)) {
+        items.push({ type: a.type, filePath: a.filePath, fileName: a.fileName, mimeType: a.mimeType, caption: a.caption, match: '' });
+      } else {
+        log.warn({ filePath: a.filePath, fileName: a.fileName }, 'Media attachment file not found at delivery time — skipping');
+      }
+    }
 
     if (items.length === 0) {
       const extracted = extractMedia(text, stateDir, workspace);
