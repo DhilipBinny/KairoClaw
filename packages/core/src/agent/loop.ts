@@ -600,6 +600,7 @@ async function persistRoundMessages(s: RunState, context: AgentContext, fromInde
           content,
           toolCalls: m.tool_calls ? JSON.stringify(m.tool_calls) : undefined,
           toolCallId: m.tool_call_id ?? undefined,
+          thinkingBlocks: m.thinking_blocks ? JSON.stringify(m.thinking_blocks) : undefined,
         });
       }
     });
