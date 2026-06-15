@@ -59,6 +59,9 @@ const GREETING_PATTERN = /^(hi|hello|hey|hola|salaam|marhaba|good\s*(morning|aft
 /** User model override prefix pattern. */
 const MODEL_OVERRIDE_PATTERN = /^@(haiku|sonnet|opus)\s+/i;
 
+/** Imperative action verbs that indicate a real task, not a casual short message. */
+const IMPERATIVE_RE = /^(translate|summarize|summarise|explain|analyze|analyse|compare|create|write|generate|build|implement|design|fix|debug|refactor|review|research|find|search|calculate|convert|extract|list|describe|outline)\b/i;
+
 // ─── Stage 1: Rule-Based Classification ────────────────────
 
 /**
@@ -113,7 +116,6 @@ export function classifyByRules(
   // ── Short messages without question marks or imperative verbs → fast ──
   const threshold = routing.shortMessageThreshold ?? 50;
   if (text.length < threshold && !text.includes('?')) {
-    const IMPERATIVE_RE = /^(translate|summarize|summarise|explain|analyze|analyse|compare|create|write|generate|build|implement|design|fix|debug|refactor|review|research|find|search|calculate|convert|extract|list|describe|outline)\b/i;
     if (!IMPERATIVE_RE.test(text.trim())) {
       return { tier: 'fast', reason: 'short message' };
     }
