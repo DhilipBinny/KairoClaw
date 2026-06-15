@@ -110,10 +110,13 @@ export function classifyByRules(
     return { tier: 'fast', reason: 'greeting/acknowledgment' };
   }
 
-  // ── Short messages without question marks → fast ──
+  // ── Short messages without question marks or imperative verbs → fast ──
   const threshold = routing.shortMessageThreshold ?? 50;
   if (text.length < threshold && !text.includes('?')) {
-    return { tier: 'fast', reason: 'short message' };
+    const IMPERATIVE_RE = /^(translate|summarize|summarise|explain|analyze|analyse|compare|create|write|generate|build|implement|design|fix|debug|refactor|review|research|find|search|calculate|convert|extract|list|describe|outline)\b/i;
+    if (!IMPERATIVE_RE.test(text.trim())) {
+      return { tier: 'fast', reason: 'short message' };
+    }
   }
 
   // No rule matched → ambiguous

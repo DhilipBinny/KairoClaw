@@ -125,21 +125,29 @@ export async function handleSlashCommand(
   if (action === 'model') {
     const newModel = text.trim();
     if (!newModel) {
-      const metadata = JSON.parse(session.metadata || '{}');
+      let metadata: Record<string, unknown> = {};
+      try { metadata = JSON.parse(session.metadata || '{}'); } catch { /* corrupt metadata, use empty */ }
       const sessionOverride = metadata.model_override || null;
       return {
         text: `Current model: \`${sessionOverride || config.model.primary}\`${sessionOverride ? ' (session override)' : ''}\nUsage: \`/model provider/model-name\``,
       };
     }
-    // Validate against known models from fallback chain + primary
-    const knownModels = [config.model.primary, ...(config.model.fallbackChain || [])];
+    // Validate against known models from fallback chain + primary + routing models
+    const routing = config.agent?.routing;
+    const knownModels = [
+      config.model.primary,
+      ...(config.model.fallbackChain || []),
+      ...(routing?.fastModel ? [routing.fastModel] : []),
+      ...(routing?.powerfulModel ? [routing.powerfulModel] : []),
+    ].filter(Boolean);
     if (!knownModels.includes(newModel)) {
       return {
         text: `Unknown model: \`${newModel}\`\nAvailable: ${knownModels.map(m => `\`${m}\``).join(', ')}`,
       };
     }
     // Store per-session override in metadata instead of mutating global config
-    const meta = JSON.parse(session.metadata || '{}');
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(session.metadata || '{}'); } catch { /* corrupt metadata */ }
     meta.model_override = newModel;
     await sessionStore.update(session.id, { metadata: JSON.stringify(meta) });
     return {
