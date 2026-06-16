@@ -113,7 +113,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 | Role | Access |
 |------|--------|
 | **Admin** | Full dashboard, all tools unrestricted, manage users |
-| **Power User** | All tools — host exec, file writes, cron with scoped access |
+| **Power User** | All tools — sandbox exec, file writes, cron with scoped access |
 | **User** | Safe tools + sandbox — code runs in isolated Docker containers. No host exec |
 
 **One person, all channels** — link Telegram + WhatsApp to the same user. One memory, one scope.
