@@ -27,6 +27,43 @@
 
 ---
 
+## Architecture Overview
+
+### High-Level System Architecture
+
+KairoClaw is a single-process Node.js application built as a pnpm monorepo with 18 packages. All packages share the `@agw/*` namespace. The `@agw/types` package is the dependency root (zero deps), and `@agw/core` is the application shell that wires everything together.
+
+**Inbound path:** User → Channel (Telegram/WhatsApp/WebChat/API) → Agent Queue → Agent Loop → LLM Provider → Tool Execution → Response → Channel → User
+
+**Tool execution:** Agent Loop → Tool Platform (permission check) → Tool Implementation (38 built-in + plugins) → Tool Result → back to Agent Loop for next LLM round
+
+**Memory path:** After each conversation turn → Auto-memory extraction (fire-and-forget) → Session notes + User profile → Persisted to file system per-user scope
+
+**Provider failover:** Primary provider fails → classify error → if retriable: backoff + retry (max 3) → if not: walk fallback chain → if all fail: emit alert + return error
+
+### Build & Package Dependency Order
+
+```
+Layer 0 (foundation):  types
+Layer 1 (utilities):   logger, schemas, security, database, mcp-client
+Layer 2 (platform):    tool-platform, tools-common, provider-bridge, sandbox
+Layer 3 (intelligence): cron, memory-engine, agent-core, plugins
+Layer 4 (application):  core (main server — imports all above)
+Layer 5 (presentation): ui (SvelteKit — independent build)
+```
+
+Each package owns its own constants, types, and tests. No circular dependencies. Types must build first; all others can build in parallel within their layer.
+
+### Key Design Patterns
+
+- **Adapter pattern:** DatabaseAdapter interface → SQLiteAdapter or PostgresAdapter (same API, different backends)
+- **Registry pattern:** ToolRegistry (tool definitions, permissions, execution), ProviderRegistry (LLM providers, failover)
+- **Observer/callback pattern:** AlertManager emitters, progress bus, WebSocket broadcast
+- **Queue pattern:** AgentQueue serializes requests per session (prevents concurrent agent runs for same user)
+- **State machine:** Alert lifecycle (INACTIVE → PENDING → FIRING → RESOLVED) with timer-based transitions
+
+---
+
 ## 1. Agent System (ReAct Loop)
 
 The core of KairoClaw — a multi-round agent that calls LLMs, executes tools, and manages context.

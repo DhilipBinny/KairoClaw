@@ -175,6 +175,28 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 
 ---
 
+## Architecture
+
+```
+User → Telegram / WhatsApp / WebChat / API
+         │
+    Agent Queue (per-session)
+         │
+    Agent Loop (ReAct: LLM → tools → LLM → ...)
+         │
+    ┌────┴────┐
+    ▼         ▼
+ Providers   Tools (38 built-in + MCP/CLI/HTTP plugins)
+    │         │
+ Anthropic   File ops, exec, sandbox, web, email,
+ OpenAI      memory, cron, sub-agents, browse...
+ Ollama
+```
+
+**18 packages** · `@agw/types` → `@agw/core` → `@agw/ui` · TypeScript strict · SQLite or PostgreSQL · 900+ tests
+
+---
+
 ## Docs
 
 | Document | Description |
