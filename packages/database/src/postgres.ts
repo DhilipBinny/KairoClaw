@@ -23,7 +23,12 @@ function convertPlaceholders(sql: string): string {
   let result = '';
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
-    if (ch === "'" && sql[i - 1] !== '\\') {
+    if (ch === "'" && sql[i + 1] === "'") {
+      result += "''";
+      i++;
+      continue;
+    }
+    if (ch === "'" ) {
       inString = !inString;
       result += ch;
     } else if (ch === '?' && !inString) {

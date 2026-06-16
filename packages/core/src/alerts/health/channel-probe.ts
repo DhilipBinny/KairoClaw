@@ -1,4 +1,5 @@
 import type { AlertManager } from '../index.js';
+import { ALERT_TYPES } from '@agw/types';
 import { createModuleLogger } from '../../observability/logger.js';
 import { ALERT_HEALTH_PROBE_INTERVAL_MS } from '../../constants.js';
 
@@ -47,10 +48,10 @@ export class ChannelHealthProbe {
     const labels = { source: 'whatsapp', channel: 'whatsapp' };
 
     if (status === 'connected') {
-      this.alertManager.emitSuccess('channel.disconnected', labels);
+      this.alertManager.emitSuccess(ALERT_TYPES.CHANNEL_DISCONNECTED, labels);
     } else {
       this.alertManager.emitFailure({
-        type: 'channel.disconnected',
+        type: ALERT_TYPES.CHANNEL_DISCONNECTED,
         severity: 'critical',
         source: 'whatsapp',
         labels,
@@ -68,10 +69,10 @@ export class ChannelHealthProbe {
     const hasBot = !!tg.bot;
 
     if (hasBot) {
-      this.alertManager.emitSuccess('channel.disconnected', labels);
+      this.alertManager.emitSuccess(ALERT_TYPES.CHANNEL_DISCONNECTED, labels);
     } else {
       this.alertManager.emitFailure({
-        type: 'channel.disconnected',
+        type: ALERT_TYPES.CHANNEL_DISCONNECTED,
         severity: 'critical',
         source: 'telegram',
         labels,

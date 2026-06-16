@@ -42,6 +42,7 @@ import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
+import { ALERT_TYPES } from '@agw/types';
 import { AlertManager } from './alerts/index.js';
 import { WebSocketAlertChannel } from './alerts/channels/websocket.js';
 import { TelegramAlertChannel } from './alerts/channels/telegram.js';
@@ -974,7 +975,7 @@ async function main(): Promise<void> {
   // Alert test + status endpoint (admin only)
   server.post('/api/v1/admin/alerts/test', { preHandler: [requireRole('admin')] }, async () => {
     alertManager.emitFailure({
-      type: 'system.test',
+      type: ALERT_TYPES.SYSTEM_TEST,
       severity: 'warning',
       source: 'admin',
       labels: { source: 'admin', trigger: 'manual-test' },
@@ -982,7 +983,7 @@ async function main(): Promise<void> {
       message: 'This is a test alert triggered from the admin panel',
     });
     alertManager.emitFailure({
-      type: 'system.test',
+      type: ALERT_TYPES.SYSTEM_TEST,
       severity: 'warning',
       source: 'admin',
       labels: { source: 'admin', trigger: 'manual-test' },
@@ -1112,7 +1113,7 @@ async function main(): Promise<void> {
         if (!msg.includes('not found')) {
           console.error('DB backup failed:', msg);
           emitFailure({
-            type: 'system.backup_failed',
+            type: ALERT_TYPES.SYSTEM_BACKUP_FAILED,
             severity: 'warning',
             source: 'core',
             labels: { source: 'core', dialect: dbDialect },

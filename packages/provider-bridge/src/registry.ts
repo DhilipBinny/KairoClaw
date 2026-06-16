@@ -1,5 +1,5 @@
 import type { GatewayConfig, ProviderInterface, ProviderResponse, ChatArgs, AgwLogger } from '@agw/types';
-import { noopLogger } from '@agw/types';
+import { noopLogger, ALERT_TYPES } from '@agw/types';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
 import { classifyError, logClassifiedError, CompactionNeededError } from './errors.js';
@@ -240,7 +240,7 @@ export class ProviderRegistry {
 
     // Everything failed. Emit alert for all-providers-down.
     this.alertEmitter?.({
-      type: 'provider.all_down',
+      type: ALERT_TYPES.PROVIDER_ALL_DOWN,
       severity: 'critical',
       source: 'provider-bridge',
       labels: { source: 'provider-bridge', primary: excludeProvider },
@@ -287,7 +287,7 @@ export class ProviderRegistry {
 
         if (classified.type === 'auth_error') {
           this.alertEmitter?.({
-            type: 'provider.auth_error',
+            type: ALERT_TYPES.PROVIDER_AUTH_ERROR,
             severity: 'critical',
             source: 'provider-bridge',
             labels: { source: 'provider-bridge', provider: provider.name },
