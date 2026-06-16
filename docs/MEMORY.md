@@ -105,11 +105,15 @@ There are four memory layers, from most persistent to most ephemeral:
 
 **Key benefit:** Session memory doubles as a free compaction summary. When the context window fills up, the agent uses these structured notes instead of making an extra LLM call for summarization.
 
+**Output cap (20K chars):** The extraction output is hard-capped at 20,000 characters. If the LLM produces a longer response, it is truncated to prevent unbounded growth of session memory files. The input messages fed to the extraction LLM are also capped at 20,000 characters.
+
 ### 2. Auto-Summarize (after each conversation)
 
 **When:** After every real conversation with 3+ user turns (configurable, default overridden to 5 at the call site).
 
 **Skips:** Cron job executions, internal/sub-agent sessions, single-turn interactions.
+
+**Sub-agent memory isolation:** Sub-agents run with `channel: 'internal'`, which is explicitly skipped by both auto-summarize and session memory extraction. This means sub-agents never write to the parent user's memory. The parent session's memory remains uncontaminated by sub-agent tool calls, intermediate reasoning, or ephemeral task outputs.
 
 **Process:**
 1. Collect all user + assistant messages from the session (capped at 8,000 chars)
@@ -131,6 +135,8 @@ There are four memory layers, from most persistent to most ephemeral:
 4. Write new `PROFILE.md` (replaces old one)
 
 **Result:** Session-level details get distilled into permanent profile facts. Temporary details naturally fall away.
+
+**Daily consolidation cleanup:** After the LLM produces the updated profile, all session files older than today are deleted. Only today's session notes survive, so consolidated information is not double-counted on the next run. This pruning keeps the sessions directory lean and prevents stale notes from re-entering future consolidation prompts.
 
 ### 4. Cleanup (automatic)
 
@@ -232,9 +238,12 @@ The search system uses composite scoring: profile matches get a 1.5x boost, rece
 | Session memory max in prompt | 3,000 chars | `agent-core/prompt.ts` |
 | Daily session notes max in prompt | 1,500 chars x 3 days | `agent-core/prompt.ts` |
 | Conversation text cap for extraction | 8,000 chars | `memory-engine/auto-memory.ts` |
+| Session memory output cap | 20,000 chars | `memory-engine/session-memory.ts` |
+| Session memory input message cap | 20,000 chars | `memory-engine/session-memory.ts` |
+| Session memory existing content cap | 12,000 chars | `memory-engine/session-memory.ts` |
 | Session memory init threshold | 8,000 tokens | `memory-engine/session-memory.ts` |
 | Session memory growth threshold | 4,000 tokens | `memory-engine/session-memory.ts` |
-| Skipped channels | `cron`, `internal` | `memory-engine/auto-memory.ts` |
+| Skipped channels | `cron`, `internal` (sub-agents use `internal`) | `memory-engine/auto-memory.ts` |
 
 All memory injection limits can be overridden via `config.agent.contextInjection`:
 - `profileMaxChars`, `sessionMemoryMaxChars`, `dailySessionDays`, `dailySessionMaxChars`

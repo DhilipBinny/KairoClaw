@@ -34,7 +34,7 @@ KairoClaw supports multiple users on a single deployment. Each user gets their o
 | **Configure providers/models** | Yes | No | No |
 | **Install plugins/MCP** | Yes | No | No |
 | **Tool permissions** | Full control | N/A | N/A |
-| **Shell commands (exec)** | Unrestricted | Sandboxed | Denied |
+| **Shell commands (exec)** | Unrestricted | Sandboxed (`sandbox_exec`) | Denied |
 | **Write/create files** | Unrestricted | Scoped | Denied |
 | **Edit files** | Unrestricted | Scoped | Denied |
 | **Manage cron jobs** | All crons | Own crons | Denied |
@@ -162,7 +162,8 @@ Admin controls which tools each role can use from **Settings → Tool Permission
 
 | Tool | Default for "User" role |
 |---|---|
-| `exec` | Power User only |
+| `exec` | Admin only |
+| `sandbox_exec` | Allow (safe — runs in Docker container) |
 | `write_file` | Power User only |
 | `edit_file` | Power User only |
 | `manage_cron` | Power User only |
@@ -179,11 +180,13 @@ Admin controls which tools each role can use from **Settings → Tool Permission
 
 ### Exec safety modes
 
-| User type | Exec mode | What's blocked |
-|---|---|---|
-| **Admin** | Unrestricted | Only catastrophic commands (rm -rf /, shutdown, curl\|sh) |
-| **Power User** | Sandboxed | Above + persona files + source code + secrets + cross-scope access + confirmation for risky commands |
-| **Regular User** | Denied | Cannot use exec at all |
+| User type | Tool | Exec mode | What's blocked |
+|---|---|---|---|
+| **Admin** | `exec` + `sandbox_exec` | Unrestricted host + sandbox | Full access to both host and container execution |
+| **Power User** | `sandbox_exec` | Docker sandbox | Isolated container. Pre-installed: Node.js 22, Python 3.12, npm, pnpm, pip, git, curl, jq. No host access. |
+| **Regular User** | `sandbox_exec` | Docker sandbox | Same sandbox as Power User. Host `exec` denied. |
+
+> **Note:** `sandbox_exec` requires Docker to be running and sandbox enabled in config. If Docker is unavailable, the tool returns an error rather than falling back to host execution.
 
 ---
 
@@ -212,7 +215,7 @@ Non-admin users see a personal dashboard instead of the admin panel:
 | **My Usage** (`/my/usage`) | Token breakdown by model, input/output, cost |
 | **My Cron Jobs** (`/my/cron`) | Cron jobs created via the agent |
 
-- **Admin** → chat sidebar shows "Admin Dashboard" → `/admin/` (14 pages)
+- **Admin** → chat sidebar shows "Admin Dashboard" → `/admin/` (19 pages)
 - **Non-admin** → chat sidebar shows "My Dashboard" → `/my/` (4 pages)
 
 ---
@@ -259,6 +262,87 @@ The bot remembers group context across sessions ("last week we discussed X in th
 
 ---
 
+## Alert System
+
+Admin-only system alerting that monitors channel health, provider availability, cron failures, and backup status. Alerts follow a state machine: `inactive` -> `pending` -> `firing` -> `resolved`.
+
+### Alert types
+
+| Type | Severity | Triggers when |
+|---|---|---|
+| `channel.disconnected` | critical | A messaging channel loses connection |
+| `channel.auth_lost` | critical | Channel authentication expires or is revoked |
+| `provider.auth_error` | critical | LLM provider API key is invalid or expired |
+| `provider.all_down` | critical | All configured providers are unreachable |
+| `cron.consecutive_failures` | warning | A cron job fails multiple times in a row |
+| `system.backup_failed` | warning | Automated database backup fails |
+| `system.test` | warning | Manual test alert (for verifying delivery) |
+
+### Delivery channels
+
+| Channel | Description |
+|---|---|
+| **Telegram** | Sends alert messages to configured admin chat IDs |
+| **WebSocket** | Real-time push to connected admin dashboard sessions |
+| **Webhook** | HTTP POST to configured URLs with HMAC signature |
+
+### Configuration
+
+Alerts are configured in the main config under `alerts`:
+
+- `enabled` — master on/off switch
+- `delivery.telegram` / `delivery.websocket` / `delivery.webhook` — per-channel enable + targets
+- `thresholds.failureThreshold` — failures before firing (default: configurable per event type)
+- `thresholds.recoveryThreshold` — consecutive successes before resolving
+- `timing` — group wait, cooldowns, repeat intervals, resolution delay
+- `events` — per-event-type overrides for severity, thresholds, and delivery routing
+
+### Behavior
+
+- **Deduplication**: alerts are fingerprinted by type + labels (SHA-256 hash), so the same failure does not create duplicate alerts
+- **Cooldown**: after notifying, repeat notifications are rate-limited (configurable per severity)
+- **Auto-resolve**: when the underlying condition clears (enough consecutive successes), the alert transitions to resolved and sends a recovery notification
+- **Circular delivery prevention**: a `channel.disconnected` alert for Telegram will not attempt delivery via Telegram
+- **Persistence**: alert history is stored in the database (`alert_history` table) with configurable retention cleanup
+
+### Access control
+
+| Role | Can view alerts? | Receives notifications? |
+|---|---|---|
+| **Admin** | Yes (via dashboard + delivery channels) | Yes |
+| **Power User** | No | No |
+| **Regular User** | No | No |
+
+---
+
+## Admin Pages
+
+The admin dashboard has 19 pages (non-admin users see the 4-page user portal instead):
+
+| Page | Route | Description |
+|---|---|---|
+| **Dashboard** | `/admin/` | System overview — sessions, users, token usage |
+| **Channels** | `/admin/channels` | Pending senders, approved channels, group management |
+| **Cron Jobs** | `/admin/cron` | All scheduled jobs across all users |
+| **Database** | `/admin/database` | Database info, backups, maintenance |
+| **Extension** | `/admin/extension` | Chrome extension remote browser bridge config |
+| **Logs** | `/admin/logs` | Structured log viewer with filtering |
+| **MCP** | `/admin/mcp` | MCP server connections and tool discovery |
+| **Model** | `/admin/model` | Model configuration and defaults |
+| **Personas** | `/admin/personas` | Bot personality files (IDENTITY.md, SOUL.md, RULES.md) |
+| **Plugins** | `/admin/plugins` | Plugin installation and management |
+| **Progress** | `/admin/progress` | Real-time tool execution progress bus |
+| **Providers** | `/admin/providers` | LLM provider configuration and failover |
+| **Scoped Channels** | `/admin/scoped-channels` | Per-user channel identity mappings |
+| **Sessions** | `/admin/sessions` | All chat sessions across all users |
+| **Settings** | `/admin/settings` | Tool permissions, system config |
+| **Tasks** | `/admin/tasks` | Background task monitoring |
+| **Usage** | `/admin/usage` | Token usage and cost tracking |
+| **Users** | `/admin/users` | User CRUD, role assignment, API key management |
+| **WhatsApp** | `/admin/whatsapp` | WhatsApp connection status and QR pairing |
+
+---
+
 ## Security Summary
 
 | Layer | What it does |
@@ -267,11 +351,12 @@ The bot remembers group context across sessions ("last week we discussed X in th
 | **Active check** | Deactivated users blocked at middleware + WebSocket + login |
 | **Admin guard** | Non-admin redirected from `/admin/*` pages |
 | **scopedSafePath** | File tools enforce per-user scope boundaries |
-| **Exec sandboxing** | Admin=unrestricted, Power User=pattern blocks+scoped cwd, User=denied |
+| **Exec sandboxing** | Admin=unrestricted `exec`, Power User=Docker `sandbox_exec`, User=denied |
 | **Memory isolation** | Search returns only own scope + global memory |
 | **Tool permissions** | DB-driven, double-enforced (prompt + execution), admin-configurable |
 | **Output redaction** | API keys, tokens, secrets auto-stripped from agent responses |
 | **Audit trail** | Every tool call logged with tamper-evident hash chain |
+| **System alerting** | Channel health, provider errors, cron failures — admin-only via Telegram/WebSocket/webhook |
 
 ---
 
