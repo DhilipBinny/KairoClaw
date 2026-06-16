@@ -30,10 +30,20 @@ One agent. Every channel. Full control.
 ---
 
 <p align="center">
-  <img src="assets/screenshots/login.png" alt="KairoClaw Login" width="600" />
+  <img src="assets/screenshots/admin-dashboard.png" alt="Admin Dashboard" width="800" />
 </p>
 
-<!-- TODO: Add authenticated screenshots: admin dashboard, chat conversation, tool execution -->
+<details>
+<summary>More screenshots</summary>
+
+| | |
+|---|---|
+| <img src="assets/screenshots/chat.png" alt="Chat" width="400" /> | <img src="assets/screenshots/providers.png" alt="Providers" width="400" /> |
+| <img src="assets/screenshots/users.png" alt="Users" width="400" /> | <img src="assets/screenshots/sessions.png" alt="Sessions" width="400" /> |
+| <img src="assets/screenshots/channels.png" alt="Channels" width="400" /> | <img src="assets/screenshots/settings.png" alt="Settings" width="400" /> |
+| <img src="assets/screenshots/cron.png" alt="Cron Jobs" width="400" /> | <img src="assets/screenshots/usage.png" alt="Usage" width="400" /> |
+
+</details>
 
 ---
 
