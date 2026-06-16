@@ -94,10 +94,10 @@ Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build`, `dev`, `
 | **Model Router** | Auto-selects fast/balanced/powerful model per message complexity. Save costs on simple messages |
 | **Smart Compaction** | Two-stage context management — session notes as free compaction summary, eliminates redundant LLM calls |
 | **Sandbox Execution** | Docker-based isolated code execution — Node.js, Python, git pre-installed. Per-session persistent containers with network tiers and workspace isolation |
-| **38 Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader, browse |
+| **Agentic Tool Suite** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader, browse |
 | **Plugin System** | MCP servers, CLI wrappers, HTTP APIs, OpenAPI auto-discovery — extend without code |
 | **Cron Scheduling** | Cron, interval, one-shot tasks with multi-channel delivery |
-| **Admin Dashboard** | 19 admin pages — providers, models, users, sessions, logs, usage, cron, plugins, MCP, settings, and more |
+| **Admin Dashboard** | Providers, models, users, channels, sessions, cron, plugins, MCP, logs, usage, settings — full operational control |
 | **Encrypted Secrets** | AES-256-GCM envelope encryption for all API keys and tokens |
 | **Database** | SQLite (default) or PostgreSQL — auto-migration between them |
 | **System Alerting** | Channel health, provider errors, cron failures — alerts via Telegram, WebSocket, webhook |
@@ -125,7 +125,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 
 ## Tools & Plugins
 
-**38 built-in tools** — file read/write/edit, shell exec, sandbox exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection, browsing.
+**Built-in tool suite** — file read/write/edit, shell exec, sandbox exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection, browsing.
 
 **Tool permissions** per role from Settings:
 
@@ -164,7 +164,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 
 ## Admin Dashboard
 
-19 admin pages + 4 user portal pages.
+Full admin dashboard + user portal.
 
 | Admin | User Portal (`/my/`) |
 |---|---|
@@ -187,7 +187,7 @@ User → Telegram / WhatsApp / WebChat / API
          │
     ┌────┴────┐
     ▼         ▼
- Providers   Tools (38 built-in + MCP/CLI/HTTP plugins)
+ Providers   Tools (built-in + MCP/CLI/HTTP plugins)
     │         │
  Anthropic   File ops, exec, sandbox, web, email,
  OpenAI      memory, cron, sub-agents, browse...
