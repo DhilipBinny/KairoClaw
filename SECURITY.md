@@ -6,7 +6,7 @@ If you discover a security vulnerability in KairoClaw, please report it responsi
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, email: **security@bsigma.ai**
+Instead, email: **contact@bsigma.ai**
 
 Include:
 - Description of the vulnerability

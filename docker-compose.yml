@@ -1,3 +1,5 @@
+# Upgrading from agw-data? Rename your data directory:
+#   mv agw-data kairoclaw-data
 services:
   kairoclaw:
     build: .
