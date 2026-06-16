@@ -50,7 +50,7 @@ describe('streamed-output redaction (#185)', () => {
       },
     }));
     expect(streamed.join('')).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(streamed.join('')).toContain('***REDACTED***');
+    expect(streamed.join('')).toContain('REDACTED');
   });
 
   it('redacts a secret echoed in streamed thinking deltas', async () => {
@@ -64,7 +64,7 @@ describe('streamed-output redaction (#185)', () => {
       },
     }));
     expect(thoughts.join('')).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(thoughts.join('')).toContain('***REDACTED***');
+    expect(thoughts.join('')).toContain('REDACTED');
   });
 
   it('redacts the final thinking trace returned to non-streaming consumers', async () => {
@@ -76,6 +76,6 @@ describe('streamed-output redaction (#185)', () => {
       } as unknown as ProviderResponse),
     }));
     expect(result.thinkingText).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(result.thinkingText).toContain('***REDACTED***');
+    expect(result.thinkingText).toContain('REDACTED');
   });
 });

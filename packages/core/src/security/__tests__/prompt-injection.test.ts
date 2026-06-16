@@ -200,15 +200,15 @@ describe('prefixInjectionWarning', () => {
 describe('filterOutput', () => {
   it('redacts Kairo API keys', () => {
     const key = 'agw_sk_' + 'a'.repeat(64);
-    expect(filterOutput(`Your key is ${key}`)).toContain('agw_sk_***REDACTED***');
+    expect(filterOutput(`Your key is ${key}`)).toContain('***AGW_KEY_REDACTED***');
   });
 
   it('redacts OpenAI keys', () => {
-    expect(filterOutput('Key: sk-abcdefghijklmnopqrstuvwxyz')).toContain('sk-***REDACTED***');
+    expect(filterOutput('Key: sk-abcdefghijklmnopqrstuvwxyz')).toContain('***SK_REDACTED***');
   });
 
   it('redacts Anthropic tokens', () => {
-    expect(filterOutput('Key is ant-abc123def456ghi789xyzabc here')).toContain('ant-***REDACTED***');
+    expect(filterOutput('Key is ant-abc123def456ghi789xyzabc here')).toContain('***SK_REDACTED***');
   });
 
   it('redacts Bearer tokens', () => {
