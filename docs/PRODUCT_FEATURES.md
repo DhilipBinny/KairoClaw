@@ -534,7 +534,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 | Usage | Personal token usage and cost tracking |
 | Cron | View and manage own cron jobs |
 
-**Total: 14 admin + 4 user portal = 18 pages**
+**Total: 19 admin + 4 user portal = 23 pages**
 
 ### Design
 - SvelteKit SPA with dark theme (warm indigo-black palette)

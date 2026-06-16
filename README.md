@@ -124,7 +124,7 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 
 ## Tools & Plugins
 
-**35+ built-in tools** — file read/write/edit, shell exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection, browsing.
+**38 built-in tools** — file read/write/edit, shell exec, sandbox exec, web search/fetch, email, messaging, cron, memory search, sub-agents, PDF reader, image inspection, browsing.
 
 **Tool permissions** per role from Settings:
 
