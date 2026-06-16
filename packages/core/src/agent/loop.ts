@@ -636,6 +636,7 @@ function triggerMemoryExtraction(s: RunState, context: AgentContext): void {
   _activeExtractions.add(context.session.id);
   const state = s.sessionMemoryState;
 
+  try {
   extractSessionMemory({
     sessionId: context.session.id,
     scopeKey: context.scopeKey ?? null,
@@ -658,6 +659,10 @@ function triggerMemoryExtraction(s: RunState, context: AgentContext): void {
   }).finally(() => {
     _activeExtractions.delete(context.session.id);
   });
+  } catch (e) {
+    _activeExtractions.delete(context.session.id);
+    s.reqLog.warn({ err: e instanceof Error ? e.message : String(e), category: 'memory' }, 'Session memory extraction setup failed');
+  }
 }
 
 // ─── Agent loop ─────────────────────────────────────────────

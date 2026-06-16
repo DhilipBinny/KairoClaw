@@ -551,7 +551,9 @@ async function main(): Promise<void> {
       ? () => toolRegistry.getDefinitionsForSession(sessionRow.id, toolOpts)
       : undefined;
 
-    return runAgent(inbound, callbacks || {}, {
+    const sessionId = sessionRow.id;
+    try {
+    return await runAgent(inbound, callbacks || {}, {
       db,
       config,
       session: sessionRow,
@@ -631,6 +633,9 @@ async function main(): Promise<void> {
       },
       isToolConcurrencySafe: (name) => toolRegistry.isConcurrencySafe(name),
     });
+    } finally {
+      toolRegistry.cleanupSession(sessionId);
+    }
   };
 
   // 11. Register auth plugin (BEFORE routes)
