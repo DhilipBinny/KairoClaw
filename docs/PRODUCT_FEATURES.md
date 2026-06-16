@@ -2,7 +2,7 @@
 
 > **KairoClaw** — A self-hosted personal AI gateway that connects LLMs to messaging channels, tools, and scheduled tasks. Multi-user, multi-channel, fully self-hosted.
 >
-> Version: 2.2 | Updated: 2026-06-06 | Audited from source code
+> Version: 3.0 | Updated: 2026-06-16 | Audited from source code
 
 ---
 
@@ -10,18 +10,20 @@
 
 | Metric | Value |
 |--------|-------|
-| API endpoints | 55+ REST + 1 WebSocket |
-| Built-in tools | 35 (files, exec, web, browser, messaging, memory, email, agents, PDF, plugins, grep, glob, todo, sleep, plan mode) |
+| API endpoints | 104 REST + 1 WebSocket |
+| Built-in tools | 38 (files, exec, sandbox, web, browser, messaging, memory, email, agents, PDF, plugins, grep, glob, todo, sleep, plan mode) |
 | Channels | 4 (Telegram, WhatsApp, Web Chat, REST API) |
 | LLM providers | 4+ (Anthropic, OpenAI, Ollama, plus any OpenAI-compatible via baseUrl — NVIDIA, Azure, Together, vLLM) |
 | Known models | Auto-discovered from providers + unlimited custom |
-| Database tables | 13 data + 1 schema_migrations |
-| Config options | 20+ across 8 sections |
+| Database tables | 18 data + 1 schema_migrations |
+| Config options | 30+ across 10 sections |
 | Slash commands | 8 (7 unique actions) |
 | Log categories | 15 structured categories |
-| Monorepo packages | 15 (@agw/* packages) |
-| SQLite migrations | 13 |
-| PostgreSQL migrations | 7 |
+| Monorepo packages | 18 (@agw/* packages) |
+| Tests | 900+ (vitest) |
+| SQLite migrations | 16 |
+| PostgreSQL migrations | 10 |
+| Lines of TypeScript | ~51,000 |
 
 ---
 
@@ -514,10 +516,11 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 ## 10. Infrastructure
 
 ### Stack
-- **Runtime**: Node.js + TypeScript
-- **Framework**: Fastify (HTTP) + SvelteKit (UI)
-- **Database**: SQLite (default) or PostgreSQL — 13 data tables, 13 SQLite + 7 Postgres migrations
-- **Monorepo**: pnpm workspaces — 15 packages (`@agw/types`, `@agw/core`, `@agw/agent-core`, `@agw/provider-bridge`, `@agw/tool-platform`, `@agw/tools-common`, `@agw/database`, `@agw/logger`, `@agw/security`, `@agw/memory-engine`, `@agw/plugins`, `@agw/mcp-client`, `@agw/cron`, `@agw/schemas`, `@agw/ui`)
+- **Runtime**: Node.js 22+ (ES modules, strict TypeScript)
+- **Framework**: Fastify 5 (HTTP) + SvelteKit 2 (UI)
+- **Database**: SQLite (default) or PostgreSQL — 18 data tables, 16 SQLite + 10 Postgres migrations
+- **Monorepo**: pnpm workspaces — 18 packages (`@agw/types`, `@agw/core`, `@agw/agent-core`, `@agw/provider-bridge`, `@agw/tool-platform`, `@agw/tools-common`, `@agw/database`, `@agw/logger`, `@agw/security`, `@agw/memory-engine`, `@agw/plugins`, `@agw/mcp-client`, `@agw/cron`, `@agw/schemas`, `@agw/sandbox`, `@agw/agent-config`, `@agw/extension`, `@agw/ui`)
+- **Testing**: 900+ tests (vitest), ~51K lines TypeScript
 
 ### Deployment
 - Single process, single `start.sh` command
@@ -541,6 +544,83 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 - SQLite: ~4 concurrent writers (use PostgreSQL for teams or higher concurrency)
 - No horizontal scaling
 - No zero-downtime restart
+
+---
+
+## 11. System Alerting
+
+4-stage alert pipeline for operational monitoring: Event Detection → State Machine → Dedup/Throttle → Delivery.
+
+### Alert State Machine
+- **INACTIVE → PENDING → FIRING → RESOLVED** lifecycle per alert fingerprint
+- Sustained-breach threshold: 2 consecutive failures before firing (configurable)
+- Asymmetric recovery: 3 consecutive successes before resolving (anti-flap)
+- Cooldown: 1h critical, 6h warning — prevents alert fatigue
+- Repeat interval: 4h critical, 24h warning for persistent alerts
+
+### Delivery Channels
+- **Telegram self-delivery**: alerts sent directly via the bot to admin chat IDs
+- **WebSocket banner**: persistent alert bar in admin UI
+- **Generic webhook**: HTTP POST with HMAC-SHA256 signature (Slack, Discord, PagerDuty)
+- Circular dependency guard: WhatsApp disconnect alerts never delivered via WhatsApp
+
+### Monitored Events
+- Channel disconnected (WhatsApp, Telegram) — 60s periodic health probes
+- Channel auth lost (WhatsApp logged out)
+- Provider auth error (401 from LLM API)
+- All providers down (fallback chain exhausted)
+- Cron consecutive failures (3+ in a row)
+- Database backup failures
+
+### Configuration
+- Zod-validated config section with per-event overrides
+- Enabled/disabled per delivery channel
+- Per-event severity, threshold, and routing overrides
+- Alert history persisted to database (30-day retention)
+- Test endpoint: `POST /api/v1/admin/alerts/test`
+
+---
+
+## 12. Automated Backups
+
+- **Daily automated backups** for both SQLite and PostgreSQL
+- SQLite: native `backup()` API → `gateway.db.backup-YYYY-MM-DD`
+- PostgreSQL: `pg_dump` with `PGPASSWORD` env var (never in argv) → `gateway.pg.backup-YYYY-MM-DD.dump`
+- 7-day retention with automatic rotation
+- Backup failures emit system alerts
+
+---
+
+## 13. Thinking Blocks
+
+- Persist and restore Claude's thinking blocks across session reloads
+- Thinking blocks serialized to database (migration 015)
+- Configurable per channel: show/hide thinking in Telegram, WhatsApp, Web
+- Adaptive mode: thinking enabled only for complex queries
+
+---
+
+## 14. Advanced Security
+
+### API Key Security
+- HMAC-SHA256 keyed hashing for API keys (not plain SHA-256)
+- Lazy migration from legacy hashes on first auth
+- Per-IP auth failure rate limiting (20 attempts/minute)
+
+### Media Security
+- Signed media URLs with HMAC-SHA256 (time-limited, per-file)
+- Media retention: 7-day auto-cleanup
+
+### Secret Redaction
+- Span-based redaction engine with 22 pattern types and priority-based overlap resolution
+- Handles: API keys (agw, sk-, AKIA, AIza, ghp_, xox-), JWTs, PEM keys, DB URLs, Bearer tokens, OAuth tokens, master keys, Telegram/Brave/Stripe/Slack tokens
+- Streaming-safe: holdback buffer + PEM/JWT state machines for token streams
+- Key=value catch-all for generic secrets (`password=...`, `token=...`)
+
+### Prompt Injection Defense
+- 7 detection patterns (instruction override, role reassignment, prompt extraction, jailbreak, mode switch)
+- Tool result boundary neutralization (prevents `</tool_result>` escape)
+- Tool name sanitization for MCP servers
 
 ---
 

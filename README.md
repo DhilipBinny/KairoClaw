@@ -29,6 +29,14 @@ One agent. Every channel. Full control.
 
 ---
 
+<p align="center">
+  <img src="assets/screenshots/login.png" alt="KairoClaw Login" width="600" />
+</p>
+
+<!-- TODO: Add authenticated screenshots: admin dashboard, chat conversation, tool execution -->
+
+---
+
 ## Why KairoClaw
 
 Most AI tools lock you into one chat window, one provider, one user. KairoClaw is different:
@@ -75,12 +83,15 @@ Creates a `kairo` CLI with `start`, `stop`, `restart`, `logs`, `build`, `dev`, `
 | **Model Router** | Auto-selects fast/balanced/powerful model per message complexity. Save costs on simple messages |
 | **Smart Compaction** | Two-stage context management — session notes as free compaction summary, eliminates redundant LLM calls |
 | **Sandbox Execution** | Docker-based isolated code execution — Node.js, Python, git pre-installed. Per-session persistent containers with network tiers and workspace isolation |
-| **35+ Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader |
+| **38 Built-in Tools** | Shell exec, file ops, web search/fetch, email, cron, sub-agents, PDF reader, browse |
 | **Plugin System** | MCP servers, CLI wrappers, HTTP APIs, OpenAPI auto-discovery — extend without code |
 | **Cron Scheduling** | Cron, interval, one-shot tasks with multi-channel delivery |
 | **Admin Dashboard** | 19 admin pages — providers, models, users, sessions, logs, usage, cron, plugins, MCP, settings, and more |
 | **Encrypted Secrets** | AES-256-GCM envelope encryption for all API keys and tokens |
 | **Database** | SQLite (default) or PostgreSQL — auto-migration between them |
+| **System Alerting** | Channel health, provider errors, cron failures — alerts via Telegram, WebSocket, webhook |
+| **Automated Backups** | Daily SQLite/PostgreSQL backups with 7-day retention |
+| **Thinking Blocks** | Persist and restore Claude's reasoning across session reloads |
 | **Model Indicator** | See which model responded per message — configurable per channel and role |
 
 ---
@@ -133,7 +144,9 @@ Add your team, family, or clients. Each person gets isolated memory, files, and 
 | **Scope isolation** | File tools, exec, and memory enforce per-user boundaries |
 | **Tool RBAC** | DB-driven, admin-configurable, double-enforced (prompt + execution) |
 | **Sandbox Execution** | Docker containers with CapDrop ALL, non-root, PID/memory limits. Users get sandbox only, admin gets host exec |
-| **Output redaction** | API keys, tokens, secrets auto-stripped from agent responses |
+| **Output redaction** | Span-based engine with 22 secret patterns, priority-based overlap resolution |
+| **HMAC API keys** | Keyed hashing for stored API keys (not plain SHA-256) |
+| **Signed media URLs** | HMAC-SHA256 time-limited per-file media access |
 | **Audit trail** | Tamper-evident hash chain on all tool calls and admin actions |
 
 ---

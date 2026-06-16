@@ -28,6 +28,7 @@ docs/_local_reference/
 
 # ── Runtime data (app-managed) ──
 agw-data/
+kairoclaw-data/
 local_data/
 docker-compose.dev.yml
 *.sqlite
