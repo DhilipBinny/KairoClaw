@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { AgwLogger } from '@agw/types';
-import { noopLogger } from '@agw/types';
+import { noopLogger, ALERT_TYPES } from '@agw/types';
 
 // ---------------------------------------------------------------------------
 // Cron expression parser
@@ -413,6 +413,8 @@ export class CronScheduler {
     // 'cron' type handled by _checkCronJobs
   }
 
+  private lastCronMinute = new Map<string, string>();
+
   private _checkCronJobs(): void {
     for (const job of this.jobs.values()) {
       if (job.enabled === false) continue;
@@ -434,11 +436,12 @@ export class CronScheduler {
         const parts = formatter.formatToParts(new Date());
         const get = (type: string) =>
           parseInt(parts.find((p) => p.type === type)?.value || '0');
+        const hour = get('hour') % 24;
         now = new Date(
           get('year'),
           get('month') - 1,
           get('day'),
-          get('hour'),
+          hour,
           get('minute'),
           get('second'),
         );
@@ -448,6 +451,9 @@ export class CronScheduler {
       }
 
       if (cronMatches(String(job.schedule.value), now)) {
+        const minuteKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}-${now.getHours()}-${now.getMinutes()}`;
+        if (this.lastCronMinute.get(job.id) === minuteKey) continue;
+        this.lastCronMinute.set(job.id, minuteKey);
         void this._executeJob(job);
       }
     }
@@ -554,7 +560,7 @@ export class CronScheduler {
       this.consecutiveFailures.set(job.id, count);
       if (this.alertEmitter && count >= 3) {
         this.alertEmitter({
-          type: 'cron.consecutive_failures',
+          type: ALERT_TYPES.CRON_CONSECUTIVE_FAILURES,
           severity: count >= 5 ? 'critical' : 'warning',
           source: 'cron',
           labels: { source: 'cron', jobId: job.id, jobName: job.name },

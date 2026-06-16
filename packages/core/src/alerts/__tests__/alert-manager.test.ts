@@ -266,4 +266,94 @@ describe('AlertManager', () => {
       expect(manager.getFiringAlerts().length).toBe(1);
     });
   });
+
+  describe('warning severity', () => {
+    const warnEvent = { ...event, severity: 'warning' as const, title: 'Warning test' };
+
+    it('fires warning alerts with warning cooldown', () => {
+      manager.emitFailure(warnEvent);
+      manager.emitFailure(warnEvent);
+      expect(channel.calls.length).toBe(1);
+      expect(channel.calls[0].event.severity).toBe('warning');
+    });
+  });
+
+  describe('resolved-to-inactive lifecycle', () => {
+    it('transitions resolved → inactive after delay', () => {
+      manager.emitFailure(event);
+      manager.emitFailure(event);
+      manager.emitSuccess(event.type, event.labels);
+      manager.emitSuccess(event.type, event.labels);
+      vi.advanceTimersByTime(200);
+      expect(manager.getStore().getAll()[0].state).toBe('resolved');
+
+      vi.advanceTimersByTime(65_000);
+      expect(manager.getStore().getAll()[0].state).toBe('inactive');
+    });
+  });
+
+  describe('emitSuccess on non-existent fingerprint', () => {
+    it('does nothing when no alert exists', () => {
+      manager.emitSuccess('nonexistent.type', { source: 'test' });
+      expect(manager.getStore().getAll().length).toBe(0);
+    });
+  });
+
+  describe('resolution timer not reset on repeated success', () => {
+    it('does not restart resolution timer on every health probe success', () => {
+      manager.emitFailure(event);
+      manager.emitFailure(event);
+
+      manager.emitSuccess(event.type, event.labels);
+      manager.emitSuccess(event.type, event.labels);
+      // Resolution timer scheduled, advance partially
+      vi.advanceTimersByTime(50);
+      // More successes should NOT restart the timer
+      manager.emitSuccess(event.type, event.labels);
+      manager.emitSuccess(event.type, event.labels);
+      // Advance past original timer
+      vi.advanceTimersByTime(150);
+      expect(manager.getStore().getAll()[0].state).toBe('resolved');
+    });
+  });
+
+  describe('channel delivery filtering', () => {
+    it('respects per-event delivery channel override', () => {
+      const ch2 = mockChannel();
+      (ch2 as any).name = 'telegram';
+      const mgr = new AlertManager({
+        config: makeConfig({
+          delivery: {
+            telegram: { enabled: true, chatIds: [] },
+            whatsapp: { enabled: false, jids: [] },
+            websocket: { enabled: true },
+            webhook: { enabled: false, urls: [], secret: '' },
+          },
+          events: { 'channel.disconnected': { delivery: ['telegram'] } },
+        }),
+      });
+      mgr.registerChannel(channel);
+      mgr.registerChannel(ch2);
+
+      mgr.emitFailure(event);
+      mgr.emitFailure(event);
+
+      expect(channel.calls.length).toBe(0);
+      expect(ch2.calls.length).toBe(1);
+    });
+  });
+
+  describe('global disable clears notifications', () => {
+    it('notifyFiring respects enabled flag after updateConfig', () => {
+      manager.emitFailure(event);
+      manager.emitFailure(event);
+      expect(channel.calls.length).toBe(1);
+
+      manager.updateConfig(makeConfig({ enabled: false }));
+      vi.advanceTimersByTime(2100);
+      manager.emitFailure(event);
+      // Should not send because globally disabled
+      expect(channel.calls.length).toBe(1);
+    });
+  });
 });

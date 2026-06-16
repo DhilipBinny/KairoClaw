@@ -25,6 +25,7 @@ import {
   type WAMessage,
 } from 'baileys';
 import type { GatewayConfig, InboundMessage } from '@agw/types';
+import { ALERT_TYPES } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import { PendingSenderRepository } from '../db/repositories/pending-sender.js';
 import type { Channel, AgentRunner } from './types.js';
@@ -145,7 +146,7 @@ class WhatsAppChannel implements Channel {
           this.reconnectAttempts = 0;
           this.clearAuth();
           this.alertEmitter?.({
-            type: 'channel.auth_lost',
+            type: ALERT_TYPES.CHANNEL_AUTH_LOST,
             severity: 'critical',
             source: 'whatsapp',
             labels: { source: 'whatsapp', channel: 'whatsapp' },

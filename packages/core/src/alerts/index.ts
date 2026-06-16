@@ -4,6 +4,7 @@ import type {
   AlertsConfig, AlertTimingConfig, AlertThresholdsConfig,
   DatabaseAdapter,
 } from '@agw/types';
+import { ALERT_TYPES } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 import { AlertStateStore } from './state.js';
 import { ALERT_HISTORY_RETENTION_DAYS } from '../constants.js';
@@ -190,13 +191,14 @@ export class AlertManager {
       if (!current || current.state !== 'firing') return;
       this.store.transition(fp, 'resolved');
       this.notifyResolved(current);
+      const RESOLVED_TO_INACTIVE_MS = 60_000;
       const inactiveTimer = setTimeout(() => {
         this.inactiveTimers.delete(fp);
         const c = this.store.get(fp);
         if (c && c.state === 'resolved') {
           this.store.transition(fp, 'inactive');
         }
-      }, 60_000);
+      }, RESOLVED_TO_INACTIVE_MS);
       this.inactiveTimers.set(fp, inactiveTimer);
     }, this.getTiming().resolutionDelayMs);
     this.resolutionTimers.set(fp, timer);
@@ -307,7 +309,7 @@ export class AlertManager {
   }
 
   private isCircularDelivery(event: AlertEvent, channelName: string): boolean {
-    if (event.type === 'channel.disconnected' || event.type === 'channel.auth_lost') {
+    if (event.type === ALERT_TYPES.CHANNEL_DISCONNECTED || event.type === ALERT_TYPES.CHANNEL_AUTH_LOST) {
       return event.labels['channel'] === channelName;
     }
     return false;

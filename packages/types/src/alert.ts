@@ -2,6 +2,18 @@
  * System alerting types — alert events, state machine, delivery, and config.
  */
 
+export const ALERT_TYPES = {
+  CHANNEL_DISCONNECTED: 'channel.disconnected',
+  CHANNEL_AUTH_LOST: 'channel.auth_lost',
+  PROVIDER_AUTH_ERROR: 'provider.auth_error',
+  PROVIDER_ALL_DOWN: 'provider.all_down',
+  CRON_CONSECUTIVE_FAILURES: 'cron.consecutive_failures',
+  SYSTEM_TEST: 'system.test',
+  SYSTEM_BACKUP_FAILED: 'system.backup_failed',
+} as const;
+
+export type AlertType = typeof ALERT_TYPES[keyof typeof ALERT_TYPES];
+
 export type AlertSeverity = 'critical' | 'warning';
 
 export type AlertState = 'inactive' | 'pending' | 'firing' | 'resolved';
@@ -73,19 +85,4 @@ export interface AlertsConfig {
 export interface AlertDeliveryChannel {
   readonly name: string;
   send(alert: AlertEvent, instance: AlertInstance, kind: 'firing' | 'resolved'): Promise<void>;
-}
-
-export interface AlertHistoryRow {
-  id: string;
-  fingerprint: string;
-  type: string;
-  severity: AlertSeverity;
-  state: string;
-  title: string;
-  message: string;
-  labels: string;
-  fired_at: string | null;
-  resolved_at: string | null;
-  duration_ms: number | null;
-  created_at: string;
 }
