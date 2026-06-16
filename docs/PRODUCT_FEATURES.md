@@ -534,7 +534,7 @@ Agent calls: click(ref=2) → unambiguous, no text matching
 | Usage | Personal token usage and cost tracking |
 | Cron | View and manage own cron jobs |
 
-**Total: 19 admin + 4 user portal = 23 pages**
+Admin dashboard covers full operational control. User portal provides personal dashboard, sessions, usage, and cron management.
 
 ### Design
 - SvelteKit SPA with dark theme (warm indigo-black palette)
