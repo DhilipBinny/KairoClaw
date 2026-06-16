@@ -6,6 +6,7 @@ import type {
 } from '@agw/types';
 import { createModuleLogger } from '../observability/logger.js';
 import { AlertStateStore } from './state.js';
+import { ALERT_HISTORY_RETENTION_DAYS } from '../constants.js';
 
 const log = createModuleLogger('alert');
 
@@ -78,7 +79,7 @@ export class AlertManager {
     if (inst.state === 'inactive' || inst.state === 'resolved') {
       if (inst.failureCount >= thresholds.failureThreshold) {
         this.store.transition(fp, 'firing');
-        this.notifyFiring(full, inst);
+        this.notifyFiring(full, inst).catch(e => log.error({ err: e instanceof Error ? e.message : String(e) }, 'notifyFiring failed'));
       } else {
         this.store.transition(fp, 'pending');
         this.schedulePendingCheck(fp, full, thresholds);
@@ -87,7 +88,7 @@ export class AlertManager {
       if (inst.failureCount >= thresholds.failureThreshold) {
         this.clearPendingTimer(fp);
         this.store.transition(fp, 'firing');
-        this.notifyFiring(full, inst);
+        this.notifyFiring(full, inst).catch(e => log.error({ err: e instanceof Error ? e.message : String(e) }, 'notifyFiring failed'));
       }
     } else if (inst.state === 'firing') {
       this.maybeRepeatNotify(full, inst);
@@ -113,7 +114,7 @@ export class AlertManager {
       this.clearPendingTimer(fp);
       this.store.transition(fp, 'inactive');
     } else if (inst.state === 'firing') {
-      if (inst.successCount >= thresholds.recoveryThreshold) {
+      if (inst.successCount >= thresholds.recoveryThreshold && !this.resolutionTimers.has(fp)) {
         this.scheduleResolution(fp, inst);
       }
     }
@@ -126,6 +127,19 @@ export class AlertManager {
     this.pendingTimers.clear();
     this.resolutionTimers.clear();
     this.inactiveTimers.clear();
+  }
+
+  async cleanupHistory(): Promise<void> {
+    if (!this.db) return;
+    try {
+      const cutoff = new Date(Date.now() - ALERT_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      const result = await this.db.run('DELETE FROM alert_history WHERE created_at < ?', [cutoff]);
+      if (result.changes > 0) {
+        log.info({ deleted: result.changes, retentionDays: ALERT_HISTORY_RETENTION_DAYS }, 'Alert history cleanup');
+      }
+    } catch (e) {
+      log.error({ err: e instanceof Error ? e.message : String(e) }, 'Alert history cleanup failed');
+    }
   }
 
   // ── Private helpers ──────────────────────────────────────────
@@ -223,6 +237,7 @@ export class AlertManager {
   }
 
   private async notifyFiring(event: AlertEvent, inst: AlertInstance): Promise<void> {
+    if (!this.enabled) return;
     if (!this.isEventEnabled(event.type)) return;
     if (this.isInCooldown(inst)) return;
 
@@ -247,6 +262,7 @@ export class AlertManager {
   }
 
   private async notifyResolved(inst: AlertInstance): Promise<void> {
+    if (!this.enabled) return;
     if (!this.isEventEnabled(inst.type)) return;
 
     const duration = inst.firedAt && inst.resolvedAt ? inst.resolvedAt - inst.firedAt : 0;

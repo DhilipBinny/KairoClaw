@@ -651,6 +651,7 @@ async function main(): Promise<void> {
       } else if (!value && channelRegistry.whatsapp) {
         await channelRegistry.whatsapp.stop();
         channelRegistry.whatsapp = undefined;
+        alertManager.emitSuccess('channel.disconnected', { source: 'whatsapp', channel: 'whatsapp' });
         server.log.info('WhatsApp channel stopped via Settings');
       }
     }
@@ -748,6 +749,7 @@ async function main(): Promise<void> {
       } else if (!value && channelRegistry.telegram) {
         await channelRegistry.telegram.stop();
         channelRegistry.telegram = undefined;
+        tgAlertChannel.setSender(null as unknown as (chatId: string, text: string) => Promise<void>);
         server.log.info('Telegram channel stopped via Settings');
       }
     }
@@ -928,7 +930,7 @@ async function main(): Promise<void> {
   }
 
   // 15b. Alert system
-  const alertsConfig = (config as unknown as Record<string, unknown>).alerts as import('@agw/types').AlertsConfig;
+  const alertsConfig = config.alerts;
   const alertManager = new AlertManager({ config: alertsConfig, db });
 
   const wsAlertChannel = new WebSocketAlertChannel();
@@ -951,7 +953,10 @@ async function main(): Promise<void> {
   alertManager.registerChannel(webhookAlertChannel);
 
   // Wire alert emitters
-  const emitFailure = alertManager.emitFailure.bind(alertManager);
+  const { filterOutput } = await import('@agw/security');
+  const emitFailure: typeof alertManager.emitFailure = (event) => {
+    alertManager.emitFailure({ ...event, message: filterOutput(event.message), title: filterOutput(event.title) });
+  };
   if (channelRegistry.whatsapp) channelRegistry.whatsapp.setAlertEmitter(emitFailure);
   providerRegistry.setAlertEmitter(emitFailure);
   scheduler.setAlertEmitter(emitFailure);
@@ -1104,10 +1109,23 @@ async function main(): Promise<void> {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes('not found')) console.error('DB backup failed:', msg);
+        if (!msg.includes('not found')) {
+          console.error('DB backup failed:', msg);
+          emitFailure({
+            type: 'system.backup_failed',
+            severity: 'warning',
+            source: 'core',
+            labels: { source: 'core', dialect: dbDialect },
+            title: 'Database backup failed',
+            message: `Backup failed: ${msg}`,
+          });
+        }
       }
     };
-    backupTimer = setInterval(runBackup, DAILY_INTERVAL_MS);
+    backupTimer = setInterval(async () => {
+      await runBackup();
+      await alertManager.cleanupHistory();
+    }, DAILY_INTERVAL_MS);
     backupTimer.unref();
     setTimeout(runBackup, SQLITE_BACKUP_STARTUP_DELAY_MS);
   }

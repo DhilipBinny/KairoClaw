@@ -13,6 +13,9 @@ export class WebhookAlertChannel implements AlertDeliveryChannel {
   setConfig(urls: string[], secret: string): void {
     this.urls = urls;
     this.secret = secret;
+    if (urls.length > 0 && !secret) {
+      log.warn('Webhook alert delivery enabled without HMAC secret — signatures disabled');
+    }
   }
 
   async send(event: AlertEvent, instance: AlertInstance, kind: 'firing' | 'resolved'): Promise<void> {

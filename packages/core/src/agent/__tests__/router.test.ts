@@ -43,7 +43,7 @@ function makeConfig(routing?: Partial<RoutingConfig>): GatewayConfig {
     tools: {} as any,
     models: { capabilities: {} },
     mcp: { servers: {} },
-  } as GatewayConfig;
+  } as unknown as GatewayConfig;
 }
 
 /** Simulate ProviderRegistry with Anthropic available. */

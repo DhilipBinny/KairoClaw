@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import type { GatewayConfig } from '@agw/types';
+import {
+  ALERT_GROUP_WAIT_MS, ALERT_COOLDOWN_CRITICAL_MS, ALERT_COOLDOWN_WARNING_MS,
+  ALERT_REPEAT_CRITICAL_MS, ALERT_REPEAT_WARNING_MS, ALERT_RESOLUTION_DELAY_MS,
+  ALERT_FAILURE_THRESHOLD, ALERT_RECOVERY_THRESHOLD,
+} from '../constants.js';
 
 // ──────────────────────────────────────────────
 // Zod schemas for config validation
@@ -374,21 +379,21 @@ const alertsSchema = z.object({
     })),
     webhook: withObjectDefault(z.object({
       enabled: z.boolean().default(false),
-      urls: z.array(z.string()).default([]),
+      urls: z.array(z.string().url()).default([]),
       secret: z.string().default(''),
     })),
   })),
   timing: withObjectDefault(z.object({
-    groupWaitMs: z.number().int().min(0).default(30_000),
-    cooldownCriticalMs: z.number().int().min(0).default(3_600_000),
-    cooldownWarningMs: z.number().int().min(0).default(21_600_000),
-    repeatCriticalMs: z.number().int().min(0).default(14_400_000),
-    repeatWarningMs: z.number().int().min(0).default(86_400_000),
-    resolutionDelayMs: z.number().int().min(0).default(300_000),
+    groupWaitMs: z.number().int().min(0).default(ALERT_GROUP_WAIT_MS),
+    cooldownCriticalMs: z.number().int().min(0).default(ALERT_COOLDOWN_CRITICAL_MS),
+    cooldownWarningMs: z.number().int().min(0).default(ALERT_COOLDOWN_WARNING_MS),
+    repeatCriticalMs: z.number().int().min(0).default(ALERT_REPEAT_CRITICAL_MS),
+    repeatWarningMs: z.number().int().min(0).default(ALERT_REPEAT_WARNING_MS),
+    resolutionDelayMs: z.number().int().min(0).default(ALERT_RESOLUTION_DELAY_MS),
   })),
   thresholds: withObjectDefault(z.object({
-    failureThreshold: z.number().int().min(1).default(2),
-    recoveryThreshold: z.number().int().min(1).default(3),
+    failureThreshold: z.number().int().min(1).default(ALERT_FAILURE_THRESHOLD),
+    recoveryThreshold: z.number().int().min(1).default(ALERT_RECOVERY_THRESHOLD),
   })),
   events: z.record(z.string(), alertEventOverrideSchema).default({}),
 });
@@ -540,6 +545,28 @@ export const configDefaults: GatewayConfig = {
   },
   mcp: {
     servers: {},
+  },
+  alerts: {
+    enabled: false,
+    delivery: {
+      telegram: { enabled: true, chatIds: [] },
+      whatsapp: { enabled: false, jids: [] },
+      websocket: { enabled: true },
+      webhook: { enabled: false, urls: [], secret: '' },
+    },
+    timing: {
+      groupWaitMs: ALERT_GROUP_WAIT_MS,
+      cooldownCriticalMs: ALERT_COOLDOWN_CRITICAL_MS,
+      cooldownWarningMs: ALERT_COOLDOWN_WARNING_MS,
+      repeatCriticalMs: ALERT_REPEAT_CRITICAL_MS,
+      repeatWarningMs: ALERT_REPEAT_WARNING_MS,
+      resolutionDelayMs: ALERT_RESOLUTION_DELAY_MS,
+    },
+    thresholds: {
+      failureThreshold: ALERT_FAILURE_THRESHOLD,
+      recoveryThreshold: ALERT_RECOVERY_THRESHOLD,
+    },
+    events: {},
   },
 };
 
