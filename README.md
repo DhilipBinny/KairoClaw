@@ -18,6 +18,7 @@ One agent. Every channel. Full control.
 </p>
 
 <p align="center">
+  <a href="https://www.kairoclaw.com">Website</a> &nbsp;&middot;&nbsp;
   <a href="#why-kairoclaw">Why</a> &nbsp;&middot;&nbsp;
   <a href="#get-started">Get Started</a> &nbsp;&middot;&nbsp;
   <a href="#features">Features</a> &nbsp;&middot;&nbsp;
