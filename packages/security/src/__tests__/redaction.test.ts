@@ -59,6 +59,74 @@ describe('filterOutput — added secret patterns (#185)', () => {
   });
 });
 
+describe('filterOutput — span-based overlap resolution (#203)', () => {
+  it('DB URL adjacent to PEM: URL does not consume BEGIN marker', () => {
+    const input = 'postgres://user:pass@host/db-----BEGIN PRIVATE KEY-----\nKEYBODY\n-----END PRIVATE KEY-----';
+    const result = filterOutput(input);
+    expect(result).toContain('***DB_URL_REDACTED***');
+    expect(result).toContain('***PRIVATE_KEY_REDACTED***');
+    expect(result).not.toContain('user:pass');
+    expect(result).not.toContain('KEYBODY');
+  });
+
+  it('sk-ant- matches as a single span, not split across sk- and ant-', () => {
+    const input = 'key: sk-ant-api03-ABCDEFGHIJKLMNOPQRST';
+    const result = filterOutput(input);
+    expect(result).toContain('***SK_REDACTED***');
+    expect(result).not.toContain('sk-ant-api03');
+  });
+
+  it('multiple adjacent secrets separated by single space', () => {
+    const input = 'AKIAIOSFODNN7EXAMPLE ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij';
+    const result = filterOutput(input);
+    expect(result).toBe('***AWS_KEY_REDACTED*** ***GITHUB_TOKEN_REDACTED***');
+  });
+
+  it('identical secret appearing twice', () => {
+    const input = 'first AKIAIOSFODNN7EXAMPLE then AKIAIOSFODNN7EXAMPLE end';
+    const result = filterOutput(input);
+    expect(result).toBe('first ***AWS_KEY_REDACTED*** then ***AWS_KEY_REDACTED*** end');
+  });
+
+  it('catch-all does not re-match replacement markers', () => {
+    const input = 'password=sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 done';
+    const result = filterOutput(input);
+    expect(result).not.toContain('sk-ABCDEF');
+    expect(result).toContain('REDACTED');
+    expect(result).toContain('done');
+  });
+
+  it('Bearer token containing sk- prefix: Bearer starts earlier and wins', () => {
+    const input = 'Authorization: Bearer sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdef';
+    const result = filterOutput(input);
+    expect(result).not.toContain('sk-ant');
+    expect(result).toContain('REDACTED');
+  });
+
+  it('DB URL pattern is length-capped and cannot consume unbounded text', () => {
+    const longSuffix = 'a'.repeat(600);
+    const input = `postgres://u:p@h/db${longSuffix} end`;
+    const result = filterOutput(input);
+    expect(result).toContain('***DB_URL_REDACTED***');
+    expect(result).toContain('end');
+  });
+
+  it('replacement markers do not match any pattern (idempotent)', () => {
+    const markers = [
+      '***AGW_KEY_REDACTED***', '***SK_REDACTED***', '***AWS_KEY_REDACTED***',
+      '***GITHUB_TOKEN_REDACTED***', '***JWT_REDACTED***', '***DB_URL_REDACTED***',
+      '***PRIVATE_KEY_REDACTED***', '***TELEGRAM_TOKEN_REDACTED***',
+      '***STRIPE_KEY_REDACTED***', '***SLACK_TOKEN_REDACTED***',
+      '***OAUTH_REDACTED***', '***BRAVE_KEY_REDACTED***',
+      '***GCLOUD_KEY_REDACTED***', '***GITHUB_PAT_REDACTED***',
+      'Bearer ***REDACTED***', 'password=***REDACTED***',
+    ];
+    for (const marker of markers) {
+      expect(filterOutput(marker)).toBe(marker);
+    }
+  });
+});
+
 describe('redactSecrets — deep structural redaction (#185)', () => {
   it('redacts secrets in nested objects and arrays, preserving shape', () => {
     const input = {
@@ -71,7 +139,7 @@ describe('redactSecrets — deep structural redaction (#185)', () => {
     expect(out.tool).toBe('send_email');
     expect(out.args.to).toBe('a@b.com');
     expect(out.args.note).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(out.args.note).toContain('***REDACTED***');
+    expect(out.args.note).toContain('REDACTED');
     expect(out.list[0]).toBe('plain');
     expect(out.list[1]).toContain('AWS_KEY_REDACTED');
     expect(out.n).toBe(42);
@@ -172,13 +240,13 @@ describe('createStreamingRedactor (#185)', () => {
   it('redacts a secret that arrives whole', () => {
     const out = run(['my key is sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 ok']);
     expect(out).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(out).toContain('***REDACTED***');
+    expect(out).toContain('REDACTED');
   });
 
   it('redacts a secret split across multiple deltas', () => {
     const out = run(['here: sk-', 'ABCDEFGHIJ', 'KLMNOPQRST', 'UVWXYZ0123', '45 end']);
     expect(out).not.toContain('sk-ABCDEFGHIJKLMNOP');
-    expect(out).toContain('***REDACTED***');
+    expect(out).toContain('REDACTED');
     expect(out).toContain('here:');
     expect(out).toContain('end');
   });
