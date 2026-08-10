@@ -7,7 +7,8 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { CronScheduler } from '../cron/scheduler.js';
 import { requireRole } from '../auth/middleware.js';
-import { getDb } from './utils.js';
+import { getDb, getTenantId } from './utils.js';
+import { UsageRepository } from '../db/repositories/usage.js';
 
 export interface CronRoutesOptions {
   scheduler: CronScheduler;
@@ -57,21 +58,34 @@ const cronUpdateSchema = {
 export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (app, opts) => {
   const { scheduler } = opts;
 
-  // GET /api/v1/admin/cron — list cron jobs (with user names)
+  // GET /api/v1/admin/cron — list cron jobs (with user names + cost data)
   app.get('/api/v1/admin/cron', { preHandler: [requireRole('admin')] }, async (request) => {
     const jobs = await scheduler.listFresh();
-    // Enrich with user names
     const db = getDb(request);
+    const tenantId = getTenantId(request);
+
+    const nameMap = new Map<string, string>();
+    let costMap = new Map<string, { totalCost: number; lastRunCost: number; runs: number }>();
+
     if (db) {
       const userIds = [...new Set(jobs.map(j => j.userId).filter(Boolean))] as string[];
       if (userIds.length > 0) {
         const placeholders = userIds.map(() => '?').join(',');
-        const users = await db.query(`SELECT id, name FROM users WHERE id IN (${placeholders})`, userIds);
-        const nameMap = new Map(users.map((u: any) => [u.id, u.name]));
-        return { jobs: jobs.map(j => ({ ...j, userName: j.userId ? nameMap.get(j.userId) || null : null })) };
+        const users = await db.query<{ id: string; name: string }>(`SELECT id, name FROM users WHERE id IN (${placeholders})`, userIds);
+        for (const u of users) nameMap.set(u.id, u.name);
       }
+
+      const usageRepo = new UsageRepository(db);
+      costMap = await usageRepo.costByCronJobs(tenantId);
     }
-    return { jobs: jobs.map(j => ({ ...j, userName: null })) };
+
+    return {
+      jobs: jobs.map(j => ({
+        ...j,
+        userName: j.userId ? nameMap.get(j.userId) || null : null,
+        cost: costMap.get(j.id) ?? { totalCost: 0, lastRunCost: 0, runs: 0 },
+      })),
+    };
   });
 
   // POST /api/v1/admin/cron — create a cron job
