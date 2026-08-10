@@ -134,7 +134,11 @@ export async function getSessions(limit = 50): Promise<{ sessions: Array<{ id: s
   return request(`/sessions?limit=${limit}`);
 }
 
-export async function getSession(id: string): Promise<{ session: Record<string, unknown>; messages: Array<{ role: string; content: string; created_at: string }> }> {
+export async function getSession(id: string): Promise<{
+  session: Record<string, unknown>;
+  messages: Array<{ id?: number; role: string; content: string; created_at: string; metadata?: string }>;
+  usageRecords?: Array<{ model: string; provider: string; input_tokens: number; output_tokens: number; cost_usd: number; created_at: string }>;
+}> {
   return request(`/sessions/${id}`);
 }
 

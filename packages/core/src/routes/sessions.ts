@@ -96,20 +96,27 @@ export const registerSessionRoutes: FastifyPluginAsync<SessionRoutesOptions> = a
     return { sessions: enriched };
   });
 
-  // GET /api/v1/sessions/:id — get session with messages
+  // GET /api/v1/sessions/:id — get session with messages + usage records
   app.get('/api/v1/sessions/:id', async (request, reply) => {
     const db = getDb(request);
     const tenantId = getTenantId(request);
     const { id } = request.params as { id: string };
     const sessionRepo = new SessionRepository(db);
     const messageRepo = new MessageRepository(db);
+    const usageRepo = new UsageRepository(db);
 
     const session = await sessionRepo.getById(id, tenantId);
     if (!session) return reply.code(404).send({ error: 'Session not found' });
     if (!assertSessionAccess(session, request, reply)) return;
 
-    const messages = await messageRepo.listBySession(id);
-    return { session, messages };
+    const [messages, usageRecords] = await Promise.all([
+      messageRepo.listBySession(id),
+      usageRepo.listBySession(id),
+    ]);
+
+    const totalCost = usageRecords.reduce((sum, r) => sum + r.cost_usd, 0);
+
+    return { session: { ...session, cost_usd: totalCost }, messages, usageRecords };
   });
 
   // GET /api/v1/sessions/:id/tool-calls — get tool calls for a session
