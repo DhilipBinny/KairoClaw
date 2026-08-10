@@ -12,7 +12,7 @@ import type { GatewayConfig, ChatArgs, ProviderResponse, DatabaseAdapter } from 
 import type { AgwLogger } from '@agw/types';
 import { noopLogger } from '@agw/types';
 import { getModelCapabilities } from '@agw/provider-bridge';
-import { type MessageRow, type MessageLister, getSessionMemoryForCompaction, estimateTokens as _estimateTokens, estimateMessageTokens as _estimateMessageTokens } from '@agw/memory-engine';
+import { type MessageRow, type MessageLister, getSessionMemoryForCompaction, extractSessionMemory, estimateTokens as _estimateTokens, estimateMessageTokens as _estimateMessageTokens } from '@agw/memory-engine';
 
 // ── Re-export token estimation from @agw/memory-engine ──────
 export { estimateTokens, estimateMessageTokens } from '@agw/memory-engine';
@@ -43,6 +43,16 @@ const POST_COMPACT_MAX_CHARS_PER_FILE = 5_000;
 /** Max total characters for all restored files */
 const POST_COMPACT_TOTAL_BUDGET_CHARS = 50_000;
 
+// ─── System prompt overhead estimate ────────────────────────
+// The system prompt (tools, persona files, memory injection) is sent separately
+// from messages but counts toward the context window. Subtract this from the
+// available window so compaction thresholds account for real capacity.
+const SYSTEM_PROMPT_OVERHEAD_TOKENS = 8_000;
+
+// ─── Archive constants ──────────────────────────────────────
+/** Max chars per message when archiving compacted messages */
+const ARCHIVE_MAX_CONTENT_CHARS = 10_000;
+
 // ─── Compaction check ───────────────────────────────────────
 
 export interface CompactionCheck {
@@ -60,12 +70,12 @@ export async function needsCompaction(
   config: GatewayConfig,
 ): Promise<CompactionCheck> {
   const caps = getModelCapabilities(modelId, config);
-  const contextWindow = caps.contextWindow;
+  const effectiveWindow = caps.contextWindow - SYSTEM_PROMPT_OVERHEAD_TOKENS;
   const compactionThreshold = config.agent?.compactionThreshold ?? 0.75;
 
   const messages = await messageStore.listBySession(sessionId);
   const tokens = _estimateMessageTokens(messages);
-  const threshold = contextWindow * compactionThreshold;
+  const threshold = effectiveWindow * compactionThreshold;
 
   return {
     needed: tokens > threshold,
@@ -566,11 +576,38 @@ export async function compactSession(
   const workspace = config.agent?.workspace || '';
   if (workspace && scopeKey !== undefined) {
     try {
-      const sessionMemoryContent = getSessionMemoryForCompaction(workspace, scopeKey ?? null, sessionId);
+      let sessionMemoryContent = getSessionMemoryForCompaction(workspace, scopeKey ?? null, sessionId);
+
+      // If session memory is missing or stale, trigger a synchronous extraction
+      // before falling back to expensive LLM summarization.
+      if (!sessionMemoryContent && callLLM && typeof messageStore.listSinceId === 'function') {
+        try {
+          const state = {
+            lastExtractedMessageId: 0,
+            tokensAtLastExtraction: 0,
+            extractionCount: 0,
+          };
+          log.info({ sessionId }, 'Compaction: session memory unavailable, running synchronous extraction');
+          await extractSessionMemory({
+            sessionId,
+            scopeKey: scopeKey ?? null,
+            messageLister: messageStore,
+            config,
+            state,
+            currentTokens: _estimateMessageTokens(messages),
+            callLLM,
+          });
+          sessionMemoryContent = getSessionMemoryForCompaction(workspace, scopeKey ?? null, sessionId);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          log.debug({ err: errMsg }, 'Synchronous session memory extraction failed');
+        }
+      }
+
       if (sessionMemoryContent) {
         summaryText = sessionMemoryContent;
         method = 'session-memory';
-        log.info({ sessionId, length: summaryText.length }, 'Compaction: using session memory as summary (no LLM call)');
+        log.info({ sessionId, length: summaryText.length }, 'Compaction: using session memory as summary (no expensive LLM call)');
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -580,7 +617,6 @@ export async function compactSession(
 
   // ── Fall back to LLM summarization ────────────────────────
   if (!summaryText) {
-    // Evict verbose tool results before summarization (reduces input by 60-80%)
     const evictedOlder = evictToolResults(olderMessages);
 
     if (callLLM) {
@@ -595,9 +631,33 @@ export async function compactSession(
       }
     }
 
-    // Fall back to simple extraction if LLM didn't produce a summary
     if (!summaryText) {
       summaryText = buildCompactionSummary(evictedOlder);
+    }
+  }
+
+  // Archive compacted messages before deletion so details are recoverable.
+  // Written to workspace/scopes/{scope}/archives/{sessionId}.jsonl
+  if (workspace && olderMessages.length > 0) {
+    try {
+      const archiveDir = scopeKey
+        ? path.join(workspace, 'scopes', scopeKey, 'archives')
+        : path.join(workspace, 'archives');
+      fs.mkdirSync(archiveDir, { recursive: true });
+      const archivePath = path.join(archiveDir, `${sessionId}.jsonl`);
+      const lines = olderMessages.map(m => JSON.stringify({
+        id: m.id,
+        role: m.role,
+        content: (m.content || '').slice(0, ARCHIVE_MAX_CONTENT_CHARS),
+        tool_calls: m.tool_calls || undefined,
+        tool_call_id: m.tool_call_id || undefined,
+        created_at: m.created_at,
+      }));
+      fs.appendFileSync(archivePath, lines.join('\n') + '\n');
+      log.info({ sessionId, archived: olderMessages.length, path: archivePath }, 'Compaction: archived messages before deletion');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.warn({ err: errMsg }, 'Failed to archive compacted messages (non-fatal)');
     }
   }
 
@@ -725,7 +785,7 @@ export async function checkAndCompact(
   scopeKey?: string | null,
 ): Promise<CompactionResult> {
   const caps = getModelCapabilities(modelId, config);
-  const contextWindow = caps.contextWindow;
+  const effectiveWindow = caps.contextWindow - SYSTEM_PROMPT_OVERHEAD_TOKENS;
   const hardThreshold = config.agent?.compactionThreshold ?? 0.75;
   const softThreshold = config.agent?.softCompactionThreshold ?? 0.50;
 
@@ -733,7 +793,7 @@ export async function checkAndCompact(
   const tokens = _estimateMessageTokens(messages);
 
   // Stage 2: Hard compaction at 75% (full LLM summarization)
-  if (tokens > contextWindow * hardThreshold) {
+  if (tokens > effectiveWindow * hardThreshold) {
     let resolvedTenantId = tenantId;
     if (!resolvedTenantId) {
       const firstMsg = await messageStore.listBySession(sessionId, 1);
@@ -743,9 +803,9 @@ export async function checkAndCompact(
   }
 
   // Stage 1: Soft compaction at 50% (strip tool results, no LLM call)
-  if (tokens > contextWindow * softThreshold) {
+  if (tokens > effectiveWindow * softThreshold) {
     return softCompact(sessionId, messageStore, config);
   }
 
-  return { compacted: false, tokens, threshold: contextWindow * hardThreshold };
+  return { compacted: false, tokens, threshold: effectiveWindow * hardThreshold };
 }
