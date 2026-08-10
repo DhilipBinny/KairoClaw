@@ -28,7 +28,7 @@ That's it. On first start, tables are created and data is seeded.
 | Concurrency | Single writer, ~4 concurrent agents | Full concurrent access |
 | Scale | <20 users, single server | 100+ users, multi-server |
 | Encryption at rest | Not encrypted (future: SQLCipher) | Native TDE / disk encryption |
-| Backup | File copy | `pg_dump` |
+| Backup | Daily automated (native `backup()` API) | Daily automated (`pg_dump` with `PGPASSWORD`) |
 | Data location | `{stateDir}/gateway.db` | External PostgreSQL server |
 | Recommended for | Personal, small team | Enterprise, production |
 
@@ -40,6 +40,8 @@ That's it. On first start, tables are created and data is seeded.
 | Audit log | Database | Yes — migrated automatically |
 | Usage records | Database | Yes — migrated automatically |
 | Tool permissions | Database | Yes — migrated automatically |
+| Background tasks | Database | Yes — migrated automatically |
+| Alert history | Database | Yes — migrated automatically |
 | API keys (hashed) | Database | Yes — migrated automatically |
 | Config | `config.json` (filesystem) | No |
 | Secrets (API tokens) | `secrets.enc` (filesystem) | No |
@@ -82,6 +84,8 @@ When you switch to PostgreSQL, data migrates automatically on first startup:
 | pending_senders | Channel discovery records |
 | sender_links | Maps Telegram/WhatsApp sender IDs to user accounts |
 | cron_jobs | Scheduled tasks with per-user ownership |
+| background_tasks | Durable background task state (survives restarts) |
+| alert_history | Alert firing/resolution history (30-day retention) |
 
 ### Conditions for auto-migration
 
@@ -204,6 +208,84 @@ volumes:
   kairoclaw-data:
   postgres-data:
 ```
+
+---
+
+## Daily Automated Backups
+
+KairoClaw runs automated daily database backups for both SQLite and PostgreSQL.
+
+### How it works
+
+| | SQLite | PostgreSQL |
+|--|--------|------------|
+| **Method** | Native `better-sqlite3` `backup()` API | `pg_dump --format=custom` via `PGPASSWORD` env |
+| **File pattern** | `gateway.db.backup-YYYY-MM-DD` | `gateway.pg.backup-YYYY-MM-DD.dump` |
+| **Location** | State directory (`AGW_STATE_DIR`) | State directory (`AGW_STATE_DIR`) |
+| **Retention** | 7 days (oldest auto-deleted) | 7 days (oldest auto-deleted) |
+| **Schedule** | Every 24 hours + 30s after startup | Every 24 hours + 30s after startup |
+| **Timeout** | N/A (in-process) | 120 seconds |
+
+### Backup retention
+
+- The 7 most recent backups are kept; older files are automatically deleted
+- Retention count is controlled by `SQLITE_BACKUP_RETENTION` in `core/src/constants.ts`
+- One backup per calendar day (skips if today's backup file already exists)
+
+### PostgreSQL prerequisites
+
+- `pg_dump` must be installed on the host (package: `postgresql-client`)
+- If `pg_dump` is not found, a warning is logged and backups are silently skipped (no crash)
+- Password is passed via `PGPASSWORD` environment variable (not command-line args) for security
+
+### Restore from backup
+
+**SQLite:**
+```bash
+cp gateway.db.backup-2026-06-15 gateway.db
+```
+
+**PostgreSQL:**
+```bash
+pg_restore --clean --dbname=postgres://user:pass@host:5432/kairoclaw gateway.pg.backup-2026-06-15.dump
+```
+
+### Failure alerting
+
+If a backup fails (for reasons other than missing `pg_dump`), a `system.backup_failed` alert is fired with severity `warning`. Alerts are delivered through the configured alert channels (WhatsApp, Telegram, etc.).
+
+---
+
+## Schema Details
+
+### Migrations
+
+There are **16 SQLite migrations** and **10 PostgreSQL migrations**. PostgreSQL has fewer because the initial schema (001) covers what SQLite builds up across migrations 001-009.
+
+| # | SQLite | PostgreSQL | Description |
+|---|--------|------------|-------------|
+| 001 | `001_initial_schema.sql` | `001_initial_schema.sql` | Base tables (tenants, users, sessions, messages, tool_calls, usage_records, audit_log) |
+| 002 | `002_memory_chunks.sql` | `002_multi_user.sql` | SQLite: memory chunks table; PG: multi-user support |
+| 003 | `003_fix_session_channel_constraint.sql` | `003_tool_permission_power_user.sql` | SQLite: session channel fix; PG: power user permissions |
+| 004 | `004_mcp_status_message.sql` | `004_cron_jobs.sql` | SQLite: MCP status; PG: cron jobs table |
+| 005 | `005_fix_audit_log_fk.sql` | `005_browse_permission.sql` | SQLite: audit FK fix; PG: browse permission |
+| 006 | `006_pending_senders.sql` | — | Pending senders table |
+| 007 | `007_drop_mcp_servers_table.sql` | — | Drop legacy MCP servers table |
+| 008 | `008_multi_user.sql` | — | Multi-user support |
+| 009 | `009_tool_permission_power_user.sql` | — | Power user permissions |
+| 010 | `010_cron_jobs.sql` | — | Cron jobs table |
+| 011 | `011_browse_permission.sql` | — | Browse tool permission |
+| 012 | `012_background_tasks.sql` | `012_background_tasks.sql` | Durable background task registry |
+| 013 | `013_missing_indexes.sql` | `013_missing_indexes.sql` | Performance indexes |
+| 014 | `014_sandbox_exec_permission.sql` | `014_sandbox_exec_permission.sql` | Sandbox exec permission |
+| 015 | `015_thinking_blocks.sql` | `015_thinking_blocks.sql` | Add `thinking_blocks` column to messages table |
+| 016 | `016_alert_history.sql` | `016_alert_history.sql` | Alert history table |
+
+### Notable columns added by later migrations
+
+- **`messages.thinking_blocks`** (migration 015) — JSON text storing LLM extended thinking blocks for persistence and replay
+- **`background_tasks.*`** (migration 012) — full task lifecycle: id, session_id, scope_key, task, status, timestamps, result/error
+- **`alert_history.*`** (migration 016) — alert fingerprint, type, severity, state, title, message, labels, fired/resolved timestamps
 
 ---
 

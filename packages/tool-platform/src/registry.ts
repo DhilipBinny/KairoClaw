@@ -253,6 +253,11 @@ export class ToolRegistry {
     this.loadedBySession.delete(sessionId);
   }
 
+  cleanupSession(sessionId: string): void {
+    this.loadedBySession.delete(sessionId);
+    this.planModeBySession.delete(sessionId);
+  }
+
   getSessionLoaded(sessionId: string): string[] {
     return Array.from(this.loadedBySession.get(sessionId) ?? []);
   }

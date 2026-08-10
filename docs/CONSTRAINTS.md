@@ -138,3 +138,156 @@ The LLM decides which tool to use and what arguments to pass based entirely on t
 - **State side effects clearly**: "run executes AND delivers to saved targets" prevents the LLM from double-sending
 - **Provide format examples**: `"<phone>@s.whatsapp.net"` prevents bare number hallucination
 - **Leave defaults implicit**: "Leave to empty for current chat" is better than requiring the LLM to know the JID
+
+---
+
+## Code Execution Safety
+
+**Implemented**: 2026-06-12 (PR #177) | **Status**: Resolved
+
+### Original Constraint: Exec Tool Is Dangerous
+
+The `exec` tool ran commands directly on the host OS. Any user could potentially execute destructive commands (`rm -rf`, network scans, file exfiltration). This was a critical security risk for a multi-user platform.
+
+### Resolution: Docker-Based Sandbox Execution
+
+A dedicated `@agw/sandbox` package provides isolated Docker containers for code execution. The sandbox enforces:
+
+- **Container isolation** — each execution runs in a disposable container with no host access
+- **Network policy** — configurable network restrictions per sandbox session
+- **Mount resolver** — controlled filesystem mounts, no arbitrary host path access
+- **Resource limits** — CPU, memory, and timeout constraints on containers
+- **Command filtering** — blocked command patterns prevent dangerous operations even inside containers
+
+### Key Files
+
+- `packages/sandbox/` — Docker client, container manager, network policy, config
+- `packages/tools-common/src/sandbox-exec.ts` — sandboxed exec tool implementation
+- `packages/tools-common/src/exec.ts` — host exec with policy-based command filtering
+- `packages/core/src/routes/sandbox.ts` — admin API for sandbox management
+- `packages/types/src/sandbox.ts` — shared sandbox types
+
+### Remaining Constraints
+
+- Sandbox requires Docker on the host — falls back to policy-filtered host exec if Docker is unavailable
+- Container startup adds latency (~200-500ms) compared to direct exec
+
+---
+
+## System Alerting
+
+**Implemented**: 2026-06-15 | **Status**: Partially Resolved (addresses #133)
+
+### Original Constraint: Silent Failures
+
+Channel disconnections, provider errors, cron failures, and health issues went unnoticed. Operators had to manually check logs to discover problems. There was no proactive notification system.
+
+### Resolution: Alert Manager with Multi-Channel Delivery
+
+A full alerting subsystem with state machine (inactive -> pending -> firing -> resolved), configurable thresholds, cooldown periods, and multiple delivery channels.
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Alert states | `inactive` -> `pending` -> `firing` -> `resolved` | Prevents alert storms; groups rapid failures before notifying |
+| Fingerprinting | SHA-256 of `type:sorted-labels` | Deduplicates identical alerts across events |
+| Delivery channels | Telegram, WhatsApp (future), WebSocket, Webhook | Operators get alerts where they already are |
+| Circular delivery prevention | Skip channel X when alerting about channel X disconnect | Avoids trying to send "Telegram is down" via Telegram |
+| Cooldown periods | Separate for critical vs warning severity | Critical alerts repeat more aggressively |
+| Persistence | `alert_history` table with retention cleanup | Audit trail with automatic old record pruning |
+| Per-event config | `config.alerts.events[type]` overrides global thresholds | Fine-grained control per alert type |
+
+### Alert Types
+
+- `channel.disconnected` — messaging channel lost connection
+- `channel.auth_lost` — channel authentication expired
+- `provider.error` — LLM provider returning errors
+- `cron.failure` — scheduled job execution failed
+
+### Key Files
+
+- `packages/core/src/alerts/index.ts` — AlertManager (state machine, delivery, persistence)
+- `packages/core/src/alerts/state.ts` — AlertStateStore (in-memory alert instances)
+- `packages/core/src/alerts/health/channel-probe.ts` — channel health probing
+- `packages/core/src/alerts/channels/` — delivery: telegram, websocket, webhook
+- `packages/types/src/alert.ts` — alert types, interfaces, config shapes
+- `packages/core/src/db/migrations/*/016_alert_history.sql` — persistence schema
+
+### Remaining Constraints
+
+- WhatsApp alert delivery channel not yet implemented (Telegram, WebSocket, Webhook are live)
+- No admin UI panel for alert history browsing yet
+- Per-user alert routing not yet supported — alerts go to all configured channels
+
+---
+
+## Database Backups
+
+**Implemented**: 2026-06-12 | **Status**: Resolved
+
+### Original Constraint: No Automated Backups
+
+There was no backup mechanism. A corrupted database or accidental deletion meant total data loss. This was unacceptable for a production system.
+
+### Resolution: Daily Automated Backups (SQLite + PostgreSQL)
+
+The cron scheduler runs a daily backup job supporting both database engines:
+
+- **SQLite** — uses the native backup API (`database.backup()`) for consistent, non-blocking backups
+- **PostgreSQL** — uses `pg_dump` with the password passed via `PGPASSWORD` environment variable (not argv, for security)
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Schedule | Daily (cron-based) | Balances data protection with storage usage |
+| SQLite method | Native backup API | Atomic, consistent snapshot without locking the DB |
+| PostgreSQL method | `pg_dump` via `PGPASSWORD` env | Standard tool; env var avoids password in process list |
+| Storage | Local filesystem | Simple; operators can layer cloud sync externally |
+
+### Key Files
+
+- `packages/cron/src/scheduler.ts` — backup job scheduling and execution
+- `packages/core/src/constants.ts` — backup-related constants
+
+### Remaining Constraints
+
+- Backups are local only — no built-in cloud storage upload (S3, GCS)
+- No backup rotation/retention policy yet — old backups accumulate
+- No backup verification (restore test) automation
+
+---
+
+## Sub-Agent Resource Limits
+
+**Implemented**: 2026-06-12 | **Status**: Resolved
+
+### Original Constraint: Unbounded Sub-Agent Execution
+
+Sub-agents (spawned by the main agent for parallel tasks) had no concurrency limit or timeout. A runaway prompt could spawn unlimited sub-agents, exhausting memory and API credits. A stuck sub-agent would hang indefinitely.
+
+### Resolution: Concurrency Cap + Timeout
+
+Two constants in `packages/core/src/constants.ts` enforce hard limits:
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `MAX_IN_TURN_SUBAGENTS` | 10 | Maximum concurrent sub-agents per agent turn |
+| `SUBAGENT_TIMEOUT_MS` | 300,000 (5 min) | Hard timeout per sub-agent execution |
+
+### Behavior
+
+- If a turn attempts to spawn more than 10 sub-agents, additional requests are rejected
+- Any sub-agent running longer than 5 minutes is forcibly terminated
+- Both limits apply per-turn, resetting for each new agent invocation
+
+### Key Files
+
+- `packages/core/src/constants.ts` — `MAX_IN_TURN_SUBAGENTS`, `SUBAGENT_TIMEOUT_MS`
+
+### Remaining Constraints
+
+- Limits are global constants, not per-user configurable
+- No admin UI to adjust limits at runtime
+- No per-user sub-agent budget tracking

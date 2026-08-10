@@ -1,9 +1,13 @@
 {
-  "name": "agentic-gateway",
-  "version": "0.2.0",
+  "name": "kairoclaw",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Self-hosted agentic LLM gateway with Telegram + Web UI",
-  "main": "src/index.js",
+  "description": "Self-hosted multi-user AI operations platform — one agent, every channel, full control",
+  "repository": "https://github.com/DhilipBinny/KairoClaw",
+  "homepage": "https://github.com/DhilipBinny/KairoClaw",
+  "license": "MIT",
+  "author": "BSigma AI",
+  "keywords": ["ai", "llm", "agent", "telegram", "whatsapp", "self-hosted", "multi-user", "mcp", "anthropic", "openai", "ollama"],
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
