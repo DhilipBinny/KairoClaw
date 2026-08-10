@@ -278,8 +278,8 @@
                 </td>
                 <td>{u.session_count}</td>
                 <td>
-                  <span title="{u.usage.total_input + u.usage.total_output} tokens, ${u.usage.total_cost.toFixed(4)}">
-                    {formatTokens(u.usage.total_input + u.usage.total_output)} tok
+                  <span title="{(u.usage.input || 0) + (u.usage.output || 0)} tokens, ${(u.usage.cost || 0).toFixed(4)}">
+                    {formatTokens((u.usage.input || 0) + (u.usage.output || 0))} tok
                   </span>
                 </td>
                 <td class="actions-cell">

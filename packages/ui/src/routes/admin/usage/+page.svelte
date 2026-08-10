@@ -2,39 +2,90 @@
   import { onMount } from 'svelte';
   import { getUsage } from '$lib/api';
 
-  interface UsageSummary {
-    totalCost: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    totalRequests: number;
-    byModel: Array<{
-      model: string;
-      inputTokens: number;
-      outputTokens: number;
-      cost: number;
-      requests: number;
-    }>;
-    byDay: Array<{
-      date: string;
-      cost: number;
-      requests: number;
-    }>;
+  interface UserUsage {
+    user_id: string;
+    user_name: string;
+    input: number;
+    output: number;
+    cost: number;
+    requests: number;
+    last_active: string;
   }
 
-  let usage: UsageSummary | null = $state(null);
+  interface ModelUsage {
+    model: string;
+    input: number;
+    output: number;
+    cost: number;
+    requests: number;
+  }
+
+  interface DayUsage {
+    date: string;
+    input: number;
+    output: number;
+    cost: number;
+    requests: number;
+  }
+
+  interface UsageData {
+    totalInput: number;
+    totalOutput: number;
+    totalCost: number;
+    totalRequests: number;
+    byModel: ModelUsage[];
+    byDay: DayUsage[];
+    byUser: UserUsage[];
+  }
+
+  let usage: UsageData | null = $state(null);
   let loading = $state(true);
   let days = $state(30);
+  let userSortKey: 'cost' | 'requests' | 'last_active' = $state('cost');
+  let userSortAsc = $state(false);
+
+  const sortedUsers = $derived.by(() => {
+    if (!usage?.byUser) return [];
+    const sorted = [...usage.byUser];
+    sorted.sort((a, b) => {
+      let cmp: number;
+      if (userSortKey === 'last_active') {
+        cmp = a.last_active.localeCompare(b.last_active);
+      } else {
+        cmp = (a[userSortKey] as number) - (b[userSortKey] as number);
+      }
+      return userSortAsc ? cmp : -cmp;
+    });
+    return sorted;
+  });
+
+  const maxDayCost = $derived(
+    usage?.byDay?.length ? Math.max(...usage.byDay.map(d => d.cost || 0), 0.01) : 1
+  );
 
   async function loadUsage() {
     loading = true;
     try {
-      const data = await getUsage(days);
-      usage = data as unknown as UsageSummary;
-    } catch (e) {
-      console.error('Failed to load usage:', e);
+      usage = await getUsage(days) as unknown as UsageData;
+    } catch {
+      usage = null;
     } finally {
       loading = false;
     }
+  }
+
+  function toggleUserSort(key: typeof userSortKey) {
+    if (userSortKey === key) {
+      userSortAsc = !userSortAsc;
+    } else {
+      userSortKey = key;
+      userSortAsc = false;
+    }
+  }
+
+  function sortIndicator(key: string): string {
+    if (userSortKey !== key) return '';
+    return userSortAsc ? ' ▲' : ' ▼';
   }
 
   function formatCost(cost: number): string {
@@ -45,6 +96,19 @@
     if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
     if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
     return tokens.toString();
+  }
+
+  function formatDate(iso: string): string {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    } catch {
+      return iso;
+    }
+  }
+
+  function costPercent(cost: number, total: number): number {
+    if (!total) return 0;
+    return Math.round((cost / total) * 100);
   }
 
   onMount(loadUsage);
@@ -58,7 +122,7 @@
   <div class="usage-header">
     <div>
       <h1 class="page-title">Usage & Costs</h1>
-      <p class="page-desc">Track token usage and costs across models.</p>
+      <p class="page-desc">Track token usage and costs across models and users.</p>
     </div>
     <div class="usage-controls">
       <select class="input" style="width: 140px;" bind:value={days} onchange={loadUsage}>
@@ -94,7 +158,7 @@
         </div>
         <div>
           <div class="stat-label">Total Requests</div>
-          <div class="stat-value">{usage.totalRequests || 0}</div>
+          <div class="stat-value">{(usage.totalRequests || 0).toLocaleString()}</div>
         </div>
       </div>
       <div class="card stat-card">
@@ -107,7 +171,7 @@
         </div>
         <div>
           <div class="stat-label">Input Tokens</div>
-          <div class="stat-value">{formatTokens(usage.totalInputTokens || 0)}</div>
+          <div class="stat-value">{formatTokens(usage.totalInput || 0)}</div>
         </div>
       </div>
       <div class="card stat-card">
@@ -120,10 +184,72 @@
         </div>
         <div>
           <div class="stat-label">Output Tokens</div>
-          <div class="stat-value">{formatTokens(usage.totalOutputTokens || 0)}</div>
+          <div class="stat-value">{formatTokens(usage.totalOutput || 0)}</div>
         </div>
       </div>
     </div>
+
+    <!-- By user -->
+    {#if sortedUsers.length > 0}
+      <div class="section">
+        <h2 class="section-title">Usage by User</h2>
+        <div class="card table-card">
+          <div class="table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th class="sortable" onclick={() => toggleUserSort('requests')}>Requests{sortIndicator('requests')}</th>
+                  <th>Input</th>
+                  <th>Output</th>
+                  <th class="sortable" onclick={() => toggleUserSort('cost')}>Cost{sortIndicator('cost')}</th>
+                  <th>Share</th>
+                  <th class="sortable" onclick={() => toggleUserSort('last_active')}>Last Active{sortIndicator('last_active')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each sortedUsers as row}
+                  <tr>
+                    <td class="user-cell">{row.user_name}</td>
+                    <td>{row.requests.toLocaleString()}</td>
+                    <td>{formatTokens(row.input)}</td>
+                    <td>{formatTokens(row.output)}</td>
+                    <td class="cost-cell">{formatCost(row.cost)}</td>
+                    <td>
+                      <div class="share-bar">
+                        <div class="share-fill" style="width: {costPercent(row.cost, usage.totalCost)}%"></div>
+                        <span class="share-label">{costPercent(row.cost, usage.totalCost)}%</span>
+                      </div>
+                    </td>
+                    <td class="date-cell">{formatDate(row.last_active)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    <!-- Daily chart -->
+    {#if usage.byDay && usage.byDay.length > 0}
+      <div class="section">
+        <h2 class="section-title">Daily Usage</h2>
+        <div class="card chart-card">
+          <div class="daily-chart">
+            {#each usage.byDay as day}
+              <div class="day-bar" title="{day.date}: {formatCost(day.cost)} ({day.requests} requests)">
+                <div
+                  class="day-fill"
+                  style="height: {Math.max(4, (day.cost / maxDayCost) * 100)}%"
+                ></div>
+                <div class="day-label">{day.date.slice(5)}</div>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <!-- By model -->
     {#if usage.byModel && usage.byModel.length > 0}
@@ -145,34 +271,14 @@
                 {#each usage.byModel as row}
                   <tr>
                     <td class="model-cell">{row.model}</td>
-                    <td>{row.requests}</td>
-                    <td>{formatTokens(row.inputTokens)}</td>
-                    <td>{formatTokens(row.outputTokens)}</td>
+                    <td>{row.requests.toLocaleString()}</td>
+                    <td>{formatTokens(row.input)}</td>
+                    <td>{formatTokens(row.output)}</td>
                     <td class="cost-cell">{formatCost(row.cost)}</td>
                   </tr>
                 {/each}
               </tbody>
             </table>
-          </div>
-        </div>
-      </div>
-    {/if}
-
-    <!-- By day -->
-    {#if usage.byDay && usage.byDay.length > 0}
-      <div class="section">
-        <h2 class="section-title">Daily Usage</h2>
-        <div class="card chart-card">
-          <div class="daily-chart">
-            {#each usage.byDay as day}
-              <div class="day-bar" title="{day.date}: {formatCost(day.cost)} ({day.requests} requests)">
-                <div
-                  class="day-fill"
-                  style="height: {Math.max(4, (day.cost / Math.max(...usage.byDay.map(d => d.cost || 1))) * 100)}%"
-                ></div>
-                <div class="day-label">{day.date.slice(5)}</div>
-              </div>
-            {/each}
           </div>
         </div>
       </div>
@@ -183,149 +289,105 @@
 </div>
 
 <style>
-  .usage-page {
-    max-width: 1000px;
-  }
+  .usage-page { max-width: 1000px; }
   .usage-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 24px;
   }
-  .page-title {
-    font-size: 24px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    letter-spacing: -0.3px;
-  }
-  .page-desc {
-    color: var(--text-muted);
-    font-size: 14px;
-  }
+  .page-title { font-size: 24px; font-weight: 700; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .page-desc { color: var(--text-muted); font-size: 14px; }
   .loading, .empty-state {
-    color: var(--text-muted);
-    padding: 40px 0;
-    text-align: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
+    color: var(--text-muted); padding: 40px 0; text-align: center;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
   }
+
   .stat-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 16px;
-    margin-bottom: 32px;
+    gap: 16px; margin-bottom: 32px;
   }
   .stat-card {
-    padding: 18px 22px;
-    display: flex;
-    gap: 14px;
-    align-items: flex-start;
+    padding: 18px 22px; display: flex; gap: 14px; align-items: flex-start;
     transition: border-color var(--duration) var(--ease);
   }
-  .stat-card:hover {
-    border-color: var(--border);
-  }
+  .stat-card:hover { border-color: var(--border); }
   .stat-icon-wrap {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
   .stat-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    font-size: 11px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;
   }
-  .stat-value {
-    font-size: 22px;
-    font-weight: 700;
+  .stat-value { font-size: 22px; font-weight: 700; }
+  .stat-value-cost { color: var(--cost); }
+
+  .section { margin-bottom: 32px; }
+  .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+  .table-card { padding: 0; overflow: hidden; }
+  .table-wrapper { overflow-x: auto; }
+  .data-table tbody tr:last-child td { border-bottom: none; }
+
+  .sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
   }
-  .stat-value-cost {
-    color: var(--cost);
+  .sortable:hover { color: var(--text-primary); }
+
+  .model-cell { font-family: var(--font-mono); font-size: 12px; }
+  .cost-cell { color: var(--cost); font-weight: 500; }
+  .user-cell { font-weight: 500; }
+  .date-cell { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+
+  .share-bar {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; min-width: 80px;
   }
-  .section {
-    margin-bottom: 32px;
+  .share-fill {
+    height: 6px; border-radius: 3px;
+    background: var(--accent);
+    min-width: 2px;
+    transition: width 0.3s var(--ease);
   }
-  .section-title {
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 16px;
+  .share-label {
+    font-size: 11px; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
-  .table-card {
-    padding: 0;
-    overflow: hidden;
-  }
-  .table-wrapper {
-    overflow-x: auto;
-  }
-  /* data-table base styles in app.css */
-  .data-table tbody tr:last-child td {
-    border-bottom: none;
-  }
-  .model-cell {
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-  .cost-cell {
-    color: var(--cost);
-    font-weight: 500;
-  }
-  .chart-card {
-    padding: 20px;
-  }
+
+  .chart-card { padding: 20px; }
   .daily-chart {
-    display: flex;
-    align-items: flex-end;
-    gap: 4px;
-    height: 120px;
-    overflow-x: auto;
+    display: flex; align-items: flex-end; gap: 4px;
+    height: 120px; overflow-x: auto; padding-bottom: 22px;
   }
   .day-bar {
-    flex: 1;
-    min-width: 20px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100%;
-    position: relative;
+    flex: 1; min-width: 20px;
+    display: flex; flex-direction: column; align-items: center;
+    height: 100%; position: relative;
   }
   .day-fill {
-    width: 100%;
-    max-width: 24px;
+    width: 100%; max-width: 24px;
     background: linear-gradient(180deg, var(--accent), rgba(99, 102, 241, 0.4));
-    border-radius: 3px 3px 0 0;
-    margin-top: auto;
+    border-radius: 3px 3px 0 0; margin-top: auto;
     transition: height 0.4s var(--ease);
   }
   .day-fill:hover {
     background: linear-gradient(180deg, var(--accent-hover), rgba(99, 102, 241, 0.6));
   }
   .day-label {
-    position: absolute;
-    bottom: -20px;
-    font-size: 9px;
-    color: var(--text-muted);
-    white-space: nowrap;
+    position: absolute; bottom: -20px;
+    font-size: 9px; color: var(--text-muted); white-space: nowrap;
   }
 
   @media (max-width: 768px) {
     .page-title { font-size: 24px; }
     .page-desc { font-size: 13px; }
-    .usage-header {
-      flex-direction: column;
-      gap: 12px;
-    }
+    .usage-header { flex-direction: column; gap: 12px; }
     .stat-icon-wrap { width: 36px; height: 36px; }
     .chart-card { padding: 12px; }
-    .daily-chart { overflow-x: auto; }
     .section-title { font-size: 16px; }
   }
 </style>

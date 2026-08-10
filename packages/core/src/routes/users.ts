@@ -47,7 +47,7 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
         channel_type: l.channel_type,
         sender_id: l.sender_id,
       })),
-      usage: usageMap.get(u.id) || { total_input: 0, total_output: 0, total_cost: 0, request_count: 0 },
+      usage: usageMap.get(u.id) || { input: 0, output: 0, cost: 0, requests: 0, last_active: '' },
     }));
   });
 

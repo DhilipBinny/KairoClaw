@@ -601,7 +601,7 @@ export interface UserInfo {
   updated_at: string;
   session_count: number;
   sender_links: Array<{ id: number; channel_type: string; sender_id: string }>;
-  usage: { total_input: number; total_output: number; total_cost: number; request_count: number };
+  usage: { input: number; output: number; cost: number; requests: number; last_active: string };
 }
 
 export async function getUsers(): Promise<UserInfo[]> {
