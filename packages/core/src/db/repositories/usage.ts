@@ -163,9 +163,13 @@ export class UsageRepository {
 
   async summarizeAllUsers(tenantId: string, days = 30): Promise<Array<{
     user_id: string; user_name: string; input: number; output: number; cost: number; requests: number; last_active: string;
+    byChannel: Array<{ channel: string; cost: number; requests: number }>;
   }>> {
     const cutoff = new Date(Date.now() - days * MS_PER_DAY).toISOString();
-    return await this.db.query(
+
+    const userRows = await this.db.query<{
+      user_id: string; user_name: string; input: number; output: number; cost: number; requests: number; last_active: string;
+    }>(
       `SELECT ur.user_id,
               COALESCE(u.name, 'Unknown') as user_name,
               COALESCE(SUM(ur.input_tokens), 0) as input,
@@ -180,5 +184,32 @@ export class UsageRepository {
        ORDER BY cost DESC`,
       [tenantId, cutoff],
     );
+
+    const channelRows = await this.db.query<{
+      user_id: string; channel: string; cost: number; requests: number;
+    }>(
+      `SELECT ur.user_id,
+              COALESCE(s.channel, 'unknown') as channel,
+              COALESCE(SUM(ur.cost_usd), 0) as cost,
+              COUNT(*) as requests
+       FROM usage_records ur
+       LEFT JOIN sessions s ON ur.session_id = s.id
+       WHERE ur.tenant_id = ? AND ur.created_at >= ? AND ur.user_id IS NOT NULL
+       GROUP BY ur.user_id, s.channel
+       ORDER BY cost DESC`,
+      [tenantId, cutoff],
+    );
+
+    const channelMap = new Map<string, Array<{ channel: string; cost: number; requests: number }>>();
+    for (const row of channelRows) {
+      const list = channelMap.get(row.user_id) ?? [];
+      list.push({ channel: row.channel, cost: row.cost, requests: row.requests });
+      channelMap.set(row.user_id, list);
+    }
+
+    return userRows.map(u => ({
+      ...u,
+      byChannel: channelMap.get(u.user_id) ?? [],
+    }));
   }
 }

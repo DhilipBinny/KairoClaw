@@ -2,6 +2,12 @@
   import { onMount } from 'svelte';
   import { getUsage } from '$lib/api';
 
+  interface ChannelUsage {
+    channel: string;
+    cost: number;
+    requests: number;
+  }
+
   interface UserUsage {
     user_id: string;
     user_name: string;
@@ -10,6 +16,7 @@
     cost: number;
     requests: number;
     last_active: string;
+    byChannel: ChannelUsage[];
   }
 
   interface ModelUsage {
@@ -96,6 +103,19 @@
     if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
     if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
     return tokens.toString();
+  }
+
+  const CHANNEL_LABELS: Record<string, string> = {
+    telegram: 'Telegram',
+    whatsapp: 'WhatsApp',
+    web: 'Web',
+    api: 'API',
+    cron: 'Cron',
+    internal: 'Cron',
+  };
+
+  function channelLabel(ch: string): string {
+    return CHANNEL_LABELS[ch] || ch;
   }
 
   function formatDate(iso: string): string {
@@ -203,7 +223,7 @@
                   <th>Input</th>
                   <th>Output</th>
                   <th class="sortable" onclick={() => toggleUserSort('cost')}>Cost{sortIndicator('cost')}</th>
-                  <th>Share</th>
+                  <th>Channels</th>
                   <th class="sortable" onclick={() => toggleUserSort('last_active')}>Last Active{sortIndicator('last_active')}</th>
                 </tr>
               </thead>
@@ -215,11 +235,16 @@
                     <td>{formatTokens(row.input)}</td>
                     <td>{formatTokens(row.output)}</td>
                     <td class="cost-cell">{formatCost(row.cost)}</td>
-                    <td>
-                      <div class="share-bar">
-                        <div class="share-fill" style="width: {costPercent(row.cost, usage.totalCost)}%"></div>
-                        <span class="share-label">{costPercent(row.cost, usage.totalCost)}%</span>
-                      </div>
+                    <td class="channels-cell">
+                      {#if row.byChannel && row.byChannel.length > 0}
+                        <div class="channel-chips">
+                          {#each row.byChannel as ch}
+                            <span class="channel-chip channel-{ch.channel}" title="{formatCost(ch.cost)} ({ch.requests} requests)">
+                              {channelLabel(ch.channel)} {formatCost(ch.cost)}
+                            </span>
+                          {/each}
+                        </div>
+                      {/if}
                     </td>
                     <td class="date-cell">{formatDate(row.last_active)}</td>
                   </tr>
@@ -341,22 +366,23 @@
   .cost-cell { color: var(--cost); font-weight: 500; }
   .user-cell { font-weight: 500; }
   .date-cell { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+  .channels-cell { min-width: 120px; }
 
-  .share-bar {
-    display: flex; align-items: center; gap: 6px;
-    width: 100%; min-width: 80px;
+  .channel-chips {
+    display: flex; flex-wrap: wrap; gap: 4px;
   }
-  .share-fill {
-    height: 6px; border-radius: 3px;
-    background: var(--accent);
-    min-width: 2px;
-    transition: width 0.3s var(--ease);
-  }
-  .share-label {
-    font-size: 11px; color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
+  .channel-chip {
+    font-size: 10px; font-weight: 600;
+    padding: 2px 7px; border-radius: 4px;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    border: 1px solid transparent;
   }
+  .channel-telegram { background: var(--blue-subtle, rgba(59,130,246,0.1)); color: var(--blue, #3b82f6); border-color: var(--blue-subtle, rgba(59,130,246,0.2)); }
+  .channel-whatsapp { background: var(--green-subtle, rgba(34,197,94,0.1)); color: var(--green, #22c55e); border-color: var(--green-subtle, rgba(34,197,94,0.2)); }
+  .channel-web { background: var(--accent-subtle, rgba(99,102,241,0.1)); color: var(--accent, #6366f1); border-color: var(--accent-subtle, rgba(99,102,241,0.2)); }
+  .channel-api { background: var(--accent-subtle, rgba(99,102,241,0.1)); color: var(--accent, #6366f1); border-color: var(--accent-subtle, rgba(99,102,241,0.2)); }
+  .channel-cron, .channel-internal { background: var(--yellow-subtle, rgba(234,179,8,0.1)); color: var(--yellow, #eab308); border-color: var(--yellow-subtle, rgba(234,179,8,0.2)); }
 
   .chart-card { padding: 20px; }
   .daily-chart {
