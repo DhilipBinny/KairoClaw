@@ -57,8 +57,10 @@ import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
 import { createModuleLogger, toAgwLogger } from './observability/logger.js';
+import { isSessionExpired } from './agent/session-lifecycle.js';
 
 // Wire loggers for extracted packages that added setters in PR #120
+const _bootLog = createModuleLogger('system');
 const _agentLog = createModuleLogger('agent');
 setMessagesLogger(toAgwLogger(_agentLog));
 setPromptLogger(toAgwLogger(_agentLog));
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
     : createDatabase(path.join(stateDir, 'gateway.db'));
 
   if (dbDialect === 'postgres') {
-    console.log('  Database: PostgreSQL');
+    _bootLog.info('Database: PostgreSQL');
     // Validate PG connection before proceeding
     try {
       await db.get('SELECT 1 as ok');
@@ -158,7 +160,7 @@ async function main(): Promise<void> {
     const { autoMigrateSqliteToPg } = await import('./db/migrate-to-pg.js');
     const migResult = await autoMigrateSqliteToPg(db, stateDir);
     if (migResult.migrated) {
-      console.log(`  Migrated SQLite → PostgreSQL (${migResult.totalRows} rows)`);
+      _bootLog.info({ totalRows: migResult.totalRows }, 'Migrated SQLite → PostgreSQL');
     }
   }
 
@@ -167,20 +169,22 @@ async function main(): Promise<void> {
     const sessionRepo = new SessionRepository(db);
     const cleaned = await sessionRepo.cleanupOrphans();
     if (cleaned > 0) {
-      console.log(`  Cleaned ${cleaned} orphaned internal sessions`);
+      _bootLog.info({ cleaned }, 'Cleaned orphaned internal sessions');
     }
   } catch { /* non-critical */ }
 
   // 4. Seed database (first run — skipped if migration populated tenants)
   const { apiKey, isFirstRun } = await seedDatabase(db);
   if (isFirstRun && apiKey) {
-    console.log('\n' + '='.repeat(60));
-    console.log('  FIRST RUN — Your admin API key:');
-    console.log(`  ${apiKey}`);
-    console.log('');
-    console.log('  Save this key! It will not be shown again.');
-    console.log('  Tip: Set AGW_ADMIN_KEY env var to choose your own key.');
-    console.log('='.repeat(60) + '\n');
+    _bootLog.info([
+      '', '='.repeat(60),
+      '  FIRST RUN — Your admin API key:',
+      `  ${apiKey}`,
+      '',
+      '  Save this key! It will not be shown again.',
+      '  Tip: Set AGW_ADMIN_KEY env var to choose your own key.',
+      '='.repeat(60), '',
+    ].join('\n'));
   }
 
   // 4b. Seed default workspace persona files from workspace-defaults/
@@ -221,8 +225,9 @@ async function main(): Promise<void> {
   if (defaultTenant && dbDialect === 'sqlite') {
     const migration = await migrateV1Data(db, stateDir, tenantId);
     if (migration.sessions > 0 || migration.messages > 0) {
-      console.log(
-        `v1 migration: ${migration.sessions} sessions, ${migration.messages} messages, ${migration.mcpServers} MCP servers`,
+      _bootLog.info(
+        { sessions: migration.sessions, messages: migration.messages, mcpServers: migration.mcpServers },
+        'v1 data migration complete',
       );
     }
   }
@@ -240,7 +245,7 @@ async function main(): Promise<void> {
     ? createMediaUrlSigner(deriveMediaSigningKey(masterKey))
     : undefined;
   if (secretsStore.isEncrypted) {
-    console.log('  Secrets: encrypted (AES-256-GCM envelope encryption)');
+    _bootLog.info('Secrets: encrypted (AES-256-GCM envelope encryption)');
   }
 
   // 6a. Clear sensitive env vars — secrets are now in encrypted store, not process.env
@@ -259,7 +264,7 @@ async function main(): Promise<void> {
   if (oldAuthToken && !secretsStore.get('kairo.providers.anthropic', 'authToken')) {
     secretsStore.set('kairo.providers.anthropic', 'authToken', oldAuthToken);
     secretsStore.set('providers.anthropic', 'authToken', '');
-    console.log('  [migration] Moved OAuth token to kairo.providers.anthropic namespace');
+    _bootLog.info('Moved OAuth token to kairo.providers.anthropic namespace');
   }
 
   // 6d. Initialize provider registry with secrets store
@@ -284,8 +289,8 @@ async function main(): Promise<void> {
   toolRegistry.setHooks((config as { hooks?: unknown }).hooks as Parameters<typeof toolRegistry.setHooks>[0]);
   const hasPdftotext = await hasBinary('pdftotext');
   const hasChromium = await hasBinary('chromium') || await hasBinary('chromium-browser');
-  if (!hasPdftotext) console.log('  WARN: pdftotext not found — read_pdf tool disabled');
-  if (!hasChromium) console.log('  WARN: chromium not found — browse tool disabled');
+  if (!hasPdftotext) _bootLog.warn('pdftotext not found — read_pdf tool disabled');
+  if (!hasChromium) _bootLog.warn('chromium not found — browse tool disabled');
 
   const toolEnabledMap: Record<string, boolean> = {
     exec: config.tools?.exec?.enabled !== false,
@@ -315,7 +320,7 @@ async function main(): Promise<void> {
   const pluginLogger = createModuleLogger('plugins');
   const pluginTools = await registerAllPlugins(config, toolRegistry, secretsStore, pluginLogger, mediaStore);
   if (pluginTools.length > 0) {
-    console.log(`  Plugins: ${pluginTools.length} tools registered`);
+    _bootLog.info({ count: pluginTools.length }, 'Plugins registered');
   }
 
   // Phase 6.5: process-wide progress bus for live SSE streaming.
@@ -336,20 +341,20 @@ async function main(): Promise<void> {
   try {
     const scopeResult = await migrateScopesToUserUUID(config.agent.workspace, db);
     if (scopeResult.migrated > 0) {
-      console.log(`[scope] Migrated ${scopeResult.migrated} scope dirs from channel:sender to user UUID`);
+      _bootLog.info({ migrated: scopeResult.migrated }, 'Migrated scope dirs from channel:sender to user UUID');
     }
   } catch (e) {
-    console.error('[scope] Scope migration failed:', e instanceof Error ? e.message : e);
+    _bootLog.error({ err: e instanceof Error ? e.message : String(e) }, 'Scope migration failed');
   }
 
   // 7b2. Migrate old documents/ and media/ to shared/ (one-time)
   try {
     const sharedResult = migrateToSharedDir(config.agent.workspace);
     if (sharedResult.migrated) {
-      console.log('[scope] Migrated documents/ and media/ to shared/');
+      _bootLog.info('Migrated documents/ and media/ to shared/');
     }
   } catch (e) {
-    console.error('[scope] Shared dir migration failed:', e instanceof Error ? e.message : e);
+    _bootLog.error({ err: e instanceof Error ? e.message : String(e) }, 'Shared dir migration failed');
   }
 
   // 7c. Initialize memory system
@@ -368,7 +373,7 @@ async function main(): Promise<void> {
         const sandboxLog = toAgwLogger(createModuleLogger('sandbox'));
         sandboxManager = new ContainerManager(sandboxConfig, sandboxLog);
         setSandboxManager(sandboxManager);
-        console.log(`  Sandbox: enabled (image: ${sandboxConfig.image})`);
+        _bootLog.info({ image: sandboxConfig.image }, 'Sandbox: enabled');
       } else {
         console.warn(`  Sandbox: image '${sandboxConfig.image}' not found — sandbox_exec disabled`);
       }
@@ -383,7 +388,7 @@ async function main(): Promise<void> {
   // 9. One-time DB→config migration for MCP servers (SQLite only), then initialize bridge
   const mcpMigrated = dbDialect === 'sqlite' ? await migrateDbMcpToConfig(db, CONFIG_PATH) : 0;
   if (mcpMigrated > 0) {
-    console.log(`DB→config migration: ${mcpMigrated} MCP servers moved to config.json`);
+    _bootLog.info({ count: mcpMigrated }, 'DB→config migration: MCP servers moved to config.json');
     // Reload config to pick up migrated MCP servers
     const refreshed = loadConfig();
     config.mcp = refreshed.mcp;
@@ -449,6 +454,19 @@ async function main(): Promise<void> {
     // many sessions exist. The previous linear scan was capped at 500 and
     // silently forked a new session (losing history) past the cap (#186).
     let sessionRow = await sessionRepo.findByChat(tenantId, inbound.channel, chatIdStr);
+
+    // Session lifecycle: check if the existing session should be expired.
+    // Cron/internal channels always get a fresh session (#269).
+    // Interactive channels check resetHour and idleMinutes (#268).
+    const isCronChannel = inbound.channel === 'cron' || inbound.channel === 'internal';
+    if (sessionRow && (isCronChannel || isSessionExpired(sessionRow, config.session, config.agent?.timezone))) {
+      const reason = isCronChannel ? 'cron-fresh' : 'expired';
+      _agentLog.info(
+        { oldSessionId: sessionRow.id, reason, channel: inbound.channel },
+        'Previous session expired — starting fresh',
+      );
+      sessionRow = undefined;
+    }
 
     if (!sessionRow) {
       const sessionId = crypto.randomUUID();
@@ -1045,17 +1063,10 @@ async function main(): Promise<void> {
 
   await server.listen({ port, host });
 
-  console.log(
+  _bootLog.info(
+    { port, host, telegram: !!channelRegistry.telegram, whatsapp: !!channelRegistry.whatsapp, tools: toolRegistry.size },
     `Kairo listening on http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`,
   );
-  if (channelRegistry.telegram) {
-    console.log('  Telegram bot: active');
-  }
-  if (channelRegistry.whatsapp) {
-    console.log('  WhatsApp: active');
-  }
-  console.log(`  Tools: ${toolRegistry.size} registered`);
-  console.log(`  MCP servers: connecting in background`);
 
   // 19. Daily memory consolidation — runs every 24h, consolidates session notes → PROFILE.md
   const CONSOLIDATION_INTERVAL_MS = DAILY_INTERVAL_MS;
@@ -1107,7 +1118,7 @@ async function main(): Promise<void> {
         const backupPath = path.join(stateDir, `${backupPrefix}${date}${ext}`);
         if (fs.existsSync(backupPath)) return;
         await db.backup(backupPath);
-        console.log(`  DB backup: ${backupPath}`);
+        _bootLog.info({ path: backupPath }, 'DB backup complete');
         const files = fs.readdirSync(stateDir).filter(f => f.startsWith(backupPrefix)).sort();
         while (files.length > SQLITE_BACKUP_RETENTION) {
           const old = files.shift()!;
@@ -1138,7 +1149,7 @@ async function main(): Promise<void> {
 
   // 20. Graceful shutdown
   const shutdown = async (): Promise<void> => {
-    console.log('Shutting down...');
+    _bootLog.info('Shutting down...');
 
     // Stop channels
     if (channelRegistry.telegram) {
