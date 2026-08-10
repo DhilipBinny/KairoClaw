@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { ToolCallRepository } from '../db/repositories/tool-call.js';
+import { UsageRepository } from '../db/repositories/usage.js';
 import { getDb, getTenantId, assertSessionAccess, getConfig } from './utils.js';
 import type { ProgressBus } from '@agw/tool-platform';
 
@@ -69,6 +70,10 @@ export const registerSessionRoutes: FastifyPluginAsync<SessionRoutesOptions> = a
       }
     }
 
+    // Batch-fetch cost per session
+    const usageRepo = new UsageRepository(db);
+    const costMap = await usageRepo.costBySessionIds(sessionIds);
+
     const enriched = sessions.map((s) => {
       const metadata = JSON.parse(s.metadata || '{}');
       let title = metadata.title || '';
@@ -84,6 +89,7 @@ export const registerSessionRoutes: FastifyPluginAsync<SessionRoutesOptions> = a
         ...s,
         title,
         user_name: s.user_id ? userNameMap.get(s.user_id) || null : null,
+        cost_usd: costMap.get(s.id) ?? 0,
       };
     });
 
