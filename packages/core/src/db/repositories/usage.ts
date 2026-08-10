@@ -161,6 +161,41 @@ export class UsageRepository {
     };
   }
 
+  async costBySessionIds(sessionIds: string[]): Promise<Map<string, number>> {
+    if (sessionIds.length === 0) return new Map();
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const rows = await this.db.query<{ session_id: string; cost: number }>(
+      `SELECT session_id, COALESCE(SUM(cost_usd), 0) as cost
+       FROM usage_records WHERE session_id IN (${placeholders})
+       GROUP BY session_id`,
+      sessionIds,
+    );
+    return new Map(rows.map(r => [r.session_id, r.cost]));
+  }
+
+  async costByCronJobs(tenantId: string): Promise<Map<string, { totalCost: number; lastRunCost: number; runs: number }>> {
+    const rows = await this.db.query<{
+      job_id: string; total_cost: number; runs: number; last_run_cost: number;
+    }>(
+      `SELECT
+         REPLACE(s.chat_id, 'cron:', '') as job_id,
+         COALESCE(SUM(ur.cost_usd), 0) as total_cost,
+         COUNT(DISTINCT s.id) as runs,
+         0 as last_run_cost
+       FROM usage_records ur
+       JOIN sessions s ON ur.session_id = s.id
+       WHERE ur.tenant_id = ? AND s.chat_id LIKE 'cron:%'
+       GROUP BY s.chat_id`,
+      [tenantId],
+    );
+
+    const result = new Map<string, { totalCost: number; lastRunCost: number; runs: number }>();
+    for (const row of rows) {
+      result.set(row.job_id, { totalCost: row.total_cost, lastRunCost: row.last_run_cost, runs: row.runs });
+    }
+    return result;
+  }
+
   async summarizeAllUsers(tenantId: string, days = 30): Promise<Array<{
     user_id: string; user_name: string; input: number; output: number; cost: number; requests: number; last_active: string;
     byChannel: Array<{ channel: string; cost: number; requests: number }>;

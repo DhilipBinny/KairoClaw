@@ -496,6 +496,12 @@
                     <span class="meta-label">Runs</span>
                     <span class="meta-value">{job.runCount || 0}</span>
                   </div>
+                  {#if job.cost?.totalCost > 0}
+                    <div class="meta-item">
+                      <span class="meta-label">Total cost</span>
+                      <span class="meta-value meta-cost">${job.cost.totalCost.toFixed(4)}</span>
+                    </div>
+                  {/if}
                   {#if job.schedule.tz}
                     <div class="meta-item">
                       <span class="meta-label">Timezone</span>
@@ -701,6 +707,11 @@
   .meta-value {
     font-size: 12px;
     color: var(--text-secondary);
+  }
+  .meta-cost {
+    color: var(--cost, #e0a84c);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   .job-error {
     font-size: 12px;

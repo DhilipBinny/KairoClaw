@@ -11,6 +11,7 @@
     turns: number;
     input_tokens: number;
     output_tokens: number;
+    cost_usd?: number;
     created_at: string;
     updated_at: string;
     user_name?: string | null;
@@ -366,6 +367,9 @@
                   <span class="session-user">{session.user_name}</span>
                 {/if}
                 <span class="session-turns">{session.turns} turns</span>
+                {#if session.cost_usd && session.cost_usd > 0.001}
+                  <span class="session-cost">${session.cost_usd.toFixed(2)}</span>
+                {/if}
               </div>
               <div class="session-title-text" title={session.id}>{session.title || session.id.slice(0, 24) + '...'}</div>
               <div class="session-date">
@@ -680,6 +684,7 @@
   .session-row-header { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
   .session-user { font-size: 11px; font-weight: 600; color: var(--accent); }
   .session-turns { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .session-cost { font-size: 10px; font-weight: 600; color: var(--cost, #e0a84c); font-variant-numeric: tabular-nums; }
   .session-title-text { font-size: 12px; color: var(--text-primary); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .session-date { font-size: 11px; color: var(--text-muted); }
 
