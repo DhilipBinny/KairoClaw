@@ -15,6 +15,7 @@ import type { MediaAttachment } from '@agw/types';
 import {
   makeWASocket,
   useMultiFileAuthState,
+  fetchLatestBaileysVersion,
   DisconnectReason,
   downloadMediaMessage,
   getContentType,
@@ -106,13 +107,20 @@ class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
+    let version: [number, number, number] | undefined;
+    try {
+      const fetched = await fetchLatestBaileysVersion();
+      version = fetched.version;
+      log.info({ version }, 'WhatsApp: using protocol version');
+    } catch (e: unknown) {
+      log.warn({ err: e instanceof Error ? e.message : String(e) }, 'WhatsApp: failed to fetch latest version, using Baileys default');
+    }
+
     this.sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
-      // Pin version to work around Baileys 405 error (github.com/WhiskeySockets/Baileys/issues/2370)
-      version: [2, 3000, 1033893291],
+      ...(version ? { version } : {}),
       browser: ['Kairo', 'Chrome', '145.0.0'],
-      // Reduce log noise
       logger: silentLogger,
     });
 
@@ -139,10 +147,10 @@ class WhatsAppChannel implements Channel {
 
         const error = lastDisconnect?.error as { output?: { statusCode?: number } } | undefined;
         const statusCode = error?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 405;
 
-        if (statusCode === DisconnectReason.loggedOut) {
-          log.info('WhatsApp: logged out — clearing credentials');
+        if (isLoggedOut) {
+          log.info({ statusCode }, 'WhatsApp: session invalid — clearing credentials');
           this.reconnectAttempts = 0;
           this.clearAuth();
           this.alertEmitter?.({
@@ -153,7 +161,7 @@ class WhatsAppChannel implements Channel {
             title: 'WhatsApp logged out',
             message: 'WhatsApp session was logged out — requires QR re-scan',
           });
-        } else if (shouldReconnect) {
+        } else {
           // Clear any existing timer to prevent storm
           if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
