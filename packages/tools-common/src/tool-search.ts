@@ -202,6 +202,7 @@ export const toolSearchTools: ToolRegistration[] = [
     category: 'read',
     concurrencySafe: true,
     isReadOnly: true,
+    maxResultSizeChars: 64 * 1024,
     getActivityDescription: (input) => {
       const q = (input as { query?: string })?.query ?? '';
       return `tool_search: ${q.slice(0, 60)}`;

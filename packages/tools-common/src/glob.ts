@@ -123,6 +123,7 @@ export const globTools: ToolRegistration[] = [
     category: 'read',
     concurrencySafe: true,
     isReadOnly: true,
+    maxResultSizeChars: 32 * 1024,
     getActivityDescription: (input) => {
       const p = (input as { pattern?: string })?.pattern ?? '';
       return `glob ${p}`;

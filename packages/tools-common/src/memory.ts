@@ -68,6 +68,7 @@ export const memoryTools: ToolRegistration[] = [
     category: 'read',
     concurrencySafe: true,
     isReadOnly: true,
+    maxResultSizeChars: 32 * 1024,
     getActivityDescription: (input) => {
       const q = (input as { query?: string })?.query ?? '';
       return `Memory search: ${q.slice(0, 60)}`;
@@ -106,6 +107,7 @@ export const memoryTools: ToolRegistration[] = [
     category: 'read',
     concurrencySafe: true,
     isReadOnly: true,
+    maxResultSizeChars: 32 * 1024,
     getActivityDescription: (input) => {
       const p = (input as { path?: string })?.path ?? '<unknown>';
       return `Reading memory: ${p}`;
