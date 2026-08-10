@@ -67,7 +67,7 @@ const modelSelectionSchema = z.object({
 
 const sessionSchema = z.object({
   resetHour: z.number().int().min(0).max(23).default(4),
-  idleMinutes: z.number().int().min(0).default(0),
+  idleMinutes: z.number().int().min(0).default(60),
 });
 
 const execToolSchema = z.object({
@@ -473,7 +473,7 @@ export const configDefaults: GatewayConfig = {
   },
   session: {
     resetHour: 4,
-    idleMinutes: 0,
+    idleMinutes: 60,
   },
   tools: {
     exec: { enabled: true, timeout: 30 },

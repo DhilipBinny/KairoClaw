@@ -57,6 +57,7 @@ import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
 import { createModuleLogger, toAgwLogger } from './observability/logger.js';
+import { isSessionExpired } from './agent/session-lifecycle.js';
 
 // Wire loggers for extracted packages that added setters in PR #120
 const _agentLog = createModuleLogger('agent');
@@ -449,6 +450,19 @@ async function main(): Promise<void> {
     // many sessions exist. The previous linear scan was capped at 500 and
     // silently forked a new session (losing history) past the cap (#186).
     let sessionRow = await sessionRepo.findByChat(tenantId, inbound.channel, chatIdStr);
+
+    // Session lifecycle: check if the existing session should be expired.
+    // Cron/internal channels always get a fresh session (#269).
+    // Interactive channels check resetHour and idleMinutes (#268).
+    const isCronChannel = inbound.channel === 'cron' || inbound.channel === 'internal';
+    if (sessionRow && (isCronChannel || isSessionExpired(sessionRow, config.session, config.agent?.timezone))) {
+      const reason = isCronChannel ? 'cron-fresh' : 'expired';
+      _agentLog.info(
+        { oldSessionId: sessionRow.id, reason, channel: inbound.channel },
+        'Previous session expired — starting fresh',
+      );
+      sessionRow = undefined;
+    }
 
     if (!sessionRow) {
       const sessionId = crypto.randomUUID();
