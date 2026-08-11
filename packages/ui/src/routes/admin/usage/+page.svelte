@@ -66,6 +66,29 @@
     return sorted;
   });
 
+  let modelSortKey = $state<'cost' | 'requests'>('cost');
+  let modelSortAsc = $state(false);
+
+  const sortedModels = $derived.by(() => {
+    if (!usage?.byModel) return [];
+    const sorted = [...usage.byModel];
+    sorted.sort((a, b) => {
+      const cmp = (a[modelSortKey] as number) - (b[modelSortKey] as number);
+      return modelSortAsc ? cmp : -cmp;
+    });
+    return sorted;
+  });
+
+  function toggleModelSort(key: typeof modelSortKey) {
+    if (modelSortKey === key) modelSortAsc = !modelSortAsc;
+    else { modelSortKey = key; modelSortAsc = false; }
+  }
+
+  function modelSortIndicator(key: string): string {
+    if (modelSortKey !== key) return '';
+    return modelSortAsc ? ' ▲' : ' ▼';
+  }
+
   const maxDayCost = $derived(
     usage?.byDay?.length ? Math.max(...usage.byDay.map(d => d.cost || 0), 0.01) : 1
   );
@@ -286,14 +309,14 @@
               <thead>
                 <tr>
                   <th>Model</th>
-                  <th>Requests</th>
+                  <th class="sortable" onclick={() => toggleModelSort('requests')}>Requests{modelSortIndicator('requests')}</th>
                   <th>Input Tokens</th>
                   <th>Output Tokens</th>
-                  <th>Cost</th>
+                  <th class="sortable" onclick={() => toggleModelSort('cost')}>Cost{modelSortIndicator('cost')}</th>
                 </tr>
               </thead>
               <tbody>
-                {#each usage.byModel as row}
+                {#each sortedModels as row}
                   <tr>
                     <td class="model-cell">{row.model}</td>
                     <td>{row.requests.toLocaleString()}</td>

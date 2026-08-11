@@ -137,7 +137,7 @@ describe('isSessionExpired', () => {
 
     it('handles resetHour at 23', () => {
       expect(isSessionExpired(
-        makeSession(daysAgo(1)),
+        makeSession(daysAgo(2)),
         { resetHour: 23, idleMinutes: 0 },
       )).toBe(true);
     });

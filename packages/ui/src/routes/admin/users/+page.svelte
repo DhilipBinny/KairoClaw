@@ -42,6 +42,38 @@
   let newApiKey = $state('');
   let newApiKeyUserId = $state('');
 
+  let userSearch = $state('');
+  let userSortKey = $state<'name' | 'sessions' | 'usage' | 'created'>('name');
+  let userSortAsc = $state(true);
+
+  let filteredUsers = $derived((): UserInfo[] => {
+    let list = users;
+    if (userSearch) {
+      const q = userSearch.toLowerCase();
+      list = list.filter(u => u.name.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q));
+    }
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      let cmp: number;
+      if (userSortKey === 'name') cmp = a.name.localeCompare(b.name);
+      else if (userSortKey === 'sessions') cmp = (a.session_count || 0) - (b.session_count || 0);
+      else if (userSortKey === 'usage') cmp = (a.usage?.cost || 0) - (b.usage?.cost || 0);
+      else cmp = a.created_at.localeCompare(b.created_at);
+      return userSortAsc ? cmp : -cmp;
+    });
+    return sorted;
+  });
+
+  function toggleUserSort(key: typeof userSortKey) {
+    if (userSortKey === key) userSortAsc = !userSortAsc;
+    else { userSortKey = key; userSortAsc = key === 'name'; }
+  }
+
+  function sortArrow(key: string): string {
+    if (userSortKey !== key) return '';
+    return userSortAsc ? ' ▲' : ' ▼';
+  }
+
   // Regenerate key modal
   let regenUserId = $state('');
   let regenUserName = $state('');
@@ -217,9 +249,12 @@
       <h1 class="page-title">Users</h1>
       <p class="page-desc">Manage user accounts, roles, and channel sender links.</p>
     </div>
-    <button class="btn btn-primary" onclick={() => { showCreate = true; createdApiKey = ''; createName = ''; createEmail = ''; createRole = 'user'; createElevated = false; }}>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <input class="input" type="text" placeholder="Search users..." style="width: 180px;" bind:value={userSearch} />
+      <button class="btn btn-primary" onclick={() => { showCreate = true; createdApiKey = ''; createName = ''; createEmail = ''; createRole = 'user'; createElevated = false; }}>
       + Add User
     </button>
+    </div>
   </div>
 
   {#if error}
@@ -236,17 +271,17 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>Name</th>
+              <th class="sortable" onclick={() => toggleUserSort('name')}>Name{sortArrow('name')}</th>
               <th>Role</th>
               <th>Status</th>
               <th>Linked Senders</th>
-              <th>Sessions</th>
-              <th>Usage (30d)</th>
+              <th class="sortable" onclick={() => toggleUserSort('sessions')}>Sessions{sortArrow('sessions')}</th>
+              <th class="sortable" onclick={() => toggleUserSort('usage')}>Usage (30d){sortArrow('usage')}</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {#each users as u}
+            {#each filteredUsers as u}
               {@const isSelf = getUser()?.id === u.id}
               <tr class:inactive={!u.active}>
                 <td>
@@ -489,6 +524,8 @@
   .data-table tbody tr.inactive { opacity: 0.6; }
 
   .user-name { font-weight: 600; }
+  .sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  .sortable:hover { color: var(--text-primary); }
   .user-email { font-size: 12px; color: var(--text-muted); }
 
   .badge {
