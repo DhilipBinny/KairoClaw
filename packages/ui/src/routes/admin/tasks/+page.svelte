@@ -16,6 +16,12 @@
   let autoRefresh = $state(true);
   let clearing = $state(false);
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  let statusFilter = $state('all');
+
+  let filteredTasks = $derived((): BackgroundTaskRow[] => {
+    if (statusFilter === 'all') return tasks;
+    return tasks.filter(t => t.status === statusFilter);
+  });
 
   async function load() {
     try {
@@ -112,6 +118,13 @@
         {clearing ? 'Clearing…' : 'Clear Completed'}
       </button>
     {/if}
+    <select class="btn btn-sm" bind:value={statusFilter}>
+      <option value="all">All statuses</option>
+      <option value="running">Running</option>
+      <option value="completed">Completed</option>
+      <option value="error">Error</option>
+      <option value="killed">Killed</option>
+    </select>
     <label class="auto-refresh">
       <input type="checkbox" bind:checked={autoRefresh} />
       Auto-refresh (3s)
@@ -147,7 +160,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each tasks as t (t.id)}
+          {#each filteredTasks as t (t.id)}
             <tr>
               <td class="mono">{t.id}</td>
               <td>

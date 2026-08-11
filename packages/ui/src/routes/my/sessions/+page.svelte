@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getSessions, getSession, deleteSession } from '$lib/api';
+  import { getSessions, getSession } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   interface SessionRow {
@@ -8,6 +8,7 @@
     channel: string;
     title?: string;
     turns: number;
+    cost_usd?: number;
     created_at: string;
     updated_at: string;
   }
@@ -56,6 +57,9 @@
           <div class="session-header">
             <Badge variant={s.channel === 'telegram' ? 'blue' : s.channel === 'whatsapp' ? 'green' : 'default'}>{s.channel}</Badge>
             <span class="session-turns">{s.turns} turns</span>
+            {#if s.cost_usd && s.cost_usd > 0.001}
+              <span class="session-cost">${s.cost_usd.toFixed(2)}</span>
+            {/if}
           </div>
           <div class="session-title">{s.title || s.id.slice(0, 20) + '...'}</div>
           <div class="session-date">{new Date(s.updated_at || s.created_at).toLocaleDateString()}</div>
@@ -97,6 +101,7 @@
   .session-row.active { border-color: var(--accent); background: var(--bg-raised); }
   .session-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .session-turns { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .session-cost { font-size: 10px; font-weight: 600; color: var(--cost, #e0a84c); font-variant-numeric: tabular-nums; }
   .session-title { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .session-date { font-size: 11px; color: var(--text-muted); }
   .session-detail { flex: 1; overflow-y: auto; }
