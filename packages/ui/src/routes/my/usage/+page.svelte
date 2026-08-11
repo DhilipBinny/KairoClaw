@@ -51,11 +51,11 @@
 </div>
 
 {#if loading}
-  <span class="spinner"></span>
+  <div class="loading"><span class="spinner"></span> Loading usage data...</div>
 {:else if usage}
   <div class="stats-grid">
     <div class="stat-card">
-      <div class="stat-value">${usage.totalCost.toFixed(2)}</div>
+      <div class="stat-value">${usage.totalCost.toFixed(4)}</div>
       <div class="stat-label">Estimated Cost</div>
     </div>
     <div class="stat-card">
@@ -89,9 +89,15 @@
       {/each}
     </div>
   {/if}
+{:else}
+  <div class="empty">No usage data available for the selected period.</div>
 {/if}
 
 <style>
+  .loading, .empty {
+    color: var(--text-muted); padding: 40px 0; text-align: center;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
   .usage-header {
     display: flex; justify-content: space-between; align-items: flex-start;
     margin-bottom: 20px;
