@@ -41,11 +41,21 @@
     sessionCount: number;
   }
 
+  interface UsageRecord {
+    model: string;
+    provider: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    created_at: string;
+  }
+
   interface TimelineEntry {
-    type: 'message' | 'tool_call';
+    type: 'message' | 'tool_call' | 'llm_call';
     timestamp: string;
     message?: SessionMessage;
     toolCall?: ToolCallInfo;
+    usageRecord?: UsageRecord;
   }
 
   let sessions: SessionRow[] = $state([]);
@@ -56,6 +66,7 @@
   let confirmDeleteId = $state<string | null>(null);
   let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let selectedSession: string | null = $state(null);
+  let selectedSessionCost: number = $state(0);
   let selectedMessages: SessionMessage[] = $state([]);
   let timeline: TimelineEntry[] = $state([]);
   let loadingMessages = $state(false);
@@ -208,8 +219,15 @@
     try { return JSON.stringify(JSON.parse(json), null, 2); } catch { return json; }
   }
 
+  function formatTokens(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return n.toString();
+  }
+
   async function viewSession(id: string) {
     selectedSession = id;
+    selectedSessionCost = 0;
     loadingMessages = true;
     try {
       const [msgData, tcData] = await Promise.all([
@@ -217,6 +235,8 @@
         getSessionToolCalls(id).catch(() => ({ toolCalls: [] })),
       ]);
       selectedMessages = msgData.messages;
+      const usageRecords: UsageRecord[] = msgData.usageRecords ?? [];
+      selectedSessionCost = usageRecords.reduce((sum, r) => sum + r.cost_usd, 0);
 
       // Build interleaved timeline
       const entries: TimelineEntry[] = [];
@@ -225,6 +245,9 @@
       }
       for (const tc of tcData.toolCalls) {
         entries.push({ type: 'tool_call', timestamp: tc.created_at, toolCall: tc });
+      }
+      for (const ur of usageRecords) {
+        entries.push({ type: 'llm_call', timestamp: ur.created_at, usageRecord: ur });
       }
       entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
       timeline = entries;
@@ -388,6 +411,9 @@
           <div class="messages-header-info">
             <h3>Session</h3>
             <code class="messages-session-id" title={selectedSession}>{selectedSession.slice(0, 24)}...</code>
+            {#if selectedSessionCost > 0}
+              <span class="session-cost-badge">${selectedSessionCost.toFixed(4)}</span>
+            {/if}
           </div>
           <button
             class="btn btn-sm btn-danger"
@@ -457,6 +483,15 @@
                       <pre class="tool-json">{formatJson(entry.toolCall.result)}</pre>
                     </details>
                   {/if}
+                </div>
+              {:else if entry.type === 'llm_call' && entry.usageRecord}
+                <div class="llm-call-row">
+                  <div class="llm-call-header">
+                    <span class="llm-call-label">LLM Call</span>
+                    <span class="llm-call-model">{entry.usageRecord.model}</span>
+                    <span class="llm-call-tokens">{formatTokens(entry.usageRecord.input_tokens)} in / {formatTokens(entry.usageRecord.output_tokens)} out</span>
+                    <span class="llm-call-cost">${entry.usageRecord.cost_usd.toFixed(4)}</span>
+                  </div>
                 </div>
               {/if}
             {:else}
@@ -750,6 +785,54 @@
     font-size: 12px;
   }
   .tool-call-row.error { border-left-color: var(--red, #ef4444); }
+
+  .llm-call-row {
+    padding: 6px 14px;
+    margin-bottom: 4px;
+    border-radius: var(--radius);
+    background: var(--bg-surface);
+    border-left: 3px solid var(--cost, #e0a84c);
+  }
+  .llm-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+  .llm-call-label {
+    font-weight: 600;
+    color: var(--cost, #e0a84c);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+  }
+  .llm-call-model {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+  .llm-call-tokens {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .llm-call-cost {
+    margin-left: auto;
+    font-weight: 600;
+    color: var(--cost, #e0a84c);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .session-cost-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cost, #e0a84c);
+    background: var(--cost-subtle);
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    font-variant-numeric: tabular-nums;
+  }
   .tool-call-header { display: flex; align-items: center; gap: 8px; }
   .tool-duration { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
   .tool-status { font-size: 11px; color: var(--text-muted); margin-left: auto; }

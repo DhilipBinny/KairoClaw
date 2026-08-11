@@ -161,6 +161,17 @@ export class UsageRepository {
     };
   }
 
+  async listBySession(sessionId: string): Promise<Array<{
+    model: string; provider: string; input_tokens: number; output_tokens: number; cost_usd: number; created_at: string;
+  }>> {
+    return this.db.query(
+      `SELECT model, provider, input_tokens, output_tokens, cost_usd, created_at
+       FROM usage_records WHERE session_id = ?
+       ORDER BY created_at ASC`,
+      [sessionId],
+    );
+  }
+
   async costBySessionIds(sessionIds: string[]): Promise<Map<string, number>> {
     if (sessionIds.length === 0) return new Map();
     const placeholders = sessionIds.map(() => '?').join(',');
