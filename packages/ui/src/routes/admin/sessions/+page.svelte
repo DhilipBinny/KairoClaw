@@ -65,6 +65,7 @@
   let selectedUserId = $state<string | null | 'all'>('all');
   let confirmDeleteId = $state<string | null>(null);
   let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
+  let sessionSort = $state<'recent' | 'cost' | 'turns'>('recent');
   let selectedSession: string | null = $state(null);
   let selectedSessionCost: number = $state(0);
   let selectedMessages: SessionMessage[] = $state([]);
@@ -187,9 +188,8 @@
     return groups;
   });
 
-  let filteredSessions = $derived(
-    sessions.filter((s) => {
-      // User filter
+  let filteredSessions = $derived((): SessionRow[] => {
+    const filtered = sessions.filter((s) => {
       if (selectedUserId !== 'all') {
         if (selectedUserId === null && s.user_id !== null) return false;
         if (selectedUserId !== null && s.user_id !== selectedUserId) return false;
@@ -200,8 +200,15 @@
         return s.id.toLowerCase().includes(q) || s.channel.toLowerCase().includes(q) || (s.title || '').toLowerCase().includes(q) || (s.user_name || '').toLowerCase().includes(q);
       }
       return true;
-    })
-  );
+    });
+    const sorted = [...filtered];
+    if (sessionSort === 'cost') {
+      sorted.sort((a, b) => (b.cost_usd || 0) - (a.cost_usd || 0));
+    } else if (sessionSort === 'turns') {
+      sorted.sort((a, b) => b.turns - a.turns);
+    }
+    return sorted;
+  });
 
   async function loadSessions() {
     loading = true;
@@ -365,7 +372,15 @@
             <option value={ch}>{ch}</option>
           {/each}
         </select>
+        <select class="channel-filter" bind:value={sessionSort}>
+          <option value="recent">Recent</option>
+          <option value="cost">Cost</option>
+          <option value="turns">Turns</option>
+        </select>
       </div>
+      {#if !loading && sessions.length > 0}
+        <div class="session-count">{filteredSessions.length} of {sessions.length} sessions{sessions.length >= 200 ? ' (limit reached)' : ''}</div>
+      {/if}
 
       {#if loading}
         <div class="loading"><span class="spinner"></span> Loading...</div>
@@ -720,6 +735,7 @@
   .session-user { font-size: 11px; font-weight: 600; color: var(--accent); }
   .session-turns { font-size: 11px; color: var(--text-muted); margin-left: auto; }
   .session-cost { font-size: 10px; font-weight: 600; color: var(--cost, #e0a84c); font-variant-numeric: tabular-nums; }
+  .session-count { font-size: 11px; color: var(--text-muted); padding: 4px 10px; }
   .session-title-text { font-size: 12px; color: var(--text-primary); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .session-date { font-size: 11px; color: var(--text-muted); }
 

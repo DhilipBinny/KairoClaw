@@ -6,6 +6,25 @@
 
   let jobs: CronJob[] = $state([]);
   let loading = $state(true);
+  let cronStatusFilter = $state<'all' | 'active' | 'disabled' | 'error'>('all');
+  let cronSearch = $state('');
+
+  let filteredJobs = $derived((): CronJob[] => {
+    let list = jobs;
+    if (cronStatusFilter !== 'all') {
+      list = list.filter(j => {
+        if (cronStatusFilter === 'active') return j.enabled && !j.lastError;
+        if (cronStatusFilter === 'disabled') return !j.enabled;
+        if (cronStatusFilter === 'error') return !!j.lastError;
+        return true;
+      });
+    }
+    if (cronSearch) {
+      const q = cronSearch.toLowerCase();
+      list = list.filter(j => j.name.toLowerCase().includes(q) || j.prompt.toLowerCase().includes(q));
+    }
+    return list;
+  });
   let actionInProgress = $state('');
   let error = $state('');
   let successMsg = $state('');
@@ -381,10 +400,19 @@
 
     <!-- Existing Jobs -->
     <div class="section">
-      <h2 class="section-title">
-        Scheduled Jobs
-        <span class="section-count">{jobs.length}</span>
-      </h2>
+      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;">
+        <h2 class="section-title" style="margin-bottom: 0;">
+          Scheduled Jobs
+          <span class="section-count">{filteredJobs.length}{filteredJobs.length !== jobs.length ? ` / ${jobs.length}` : ''}</span>
+        </h2>
+        <input class="input" type="text" placeholder="Search jobs..." style="width: 160px; font-size: 12px;" bind:value={cronSearch} />
+        <select class="input" style="width: 120px; font-size: 12px;" bind:value={cronStatusFilter}>
+          <option value="all">All</option>
+          <option value="active">Active</option>
+          <option value="disabled">Disabled</option>
+          <option value="error">Error</option>
+        </select>
+      </div>
       {#if jobs.length === 0}
         <div class="empty-state">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-ghost)">
@@ -395,7 +423,7 @@
         </div>
       {:else}
         <div class="job-list">
-          {#each jobs as job}
+          {#each filteredJobs as job}
             <div class="card job-card">
               {#if editingJobId === job.id}
                 <!-- Edit mode -->
