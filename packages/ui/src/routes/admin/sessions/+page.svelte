@@ -188,7 +188,7 @@
     return groups;
   });
 
-  let filteredSessions = $derived((): SessionRow[] => {
+  let filteredSessions = $derived.by((): SessionRow[] => {
     const filtered = sessions.filter((s) => {
       if (selectedUserId !== 'all') {
         if (selectedUserId === null && s.user_id !== null) return false;

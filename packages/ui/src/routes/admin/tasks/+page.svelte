@@ -18,7 +18,7 @@
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let statusFilter = $state('all');
 
-  let filteredTasks = $derived((): BackgroundTaskRow[] => {
+  let filteredTasks = $derived.by((): BackgroundTaskRow[] => {
     if (statusFilter === 'all') return tasks;
     return tasks.filter(t => t.status === statusFilter);
   });
