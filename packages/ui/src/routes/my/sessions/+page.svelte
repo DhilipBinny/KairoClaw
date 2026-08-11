@@ -45,7 +45,7 @@
 <h1 class="page-title">My Sessions</h1>
 
 {#if loading}
-  <span class="spinner"></span>
+  <div style="color: var(--text-muted); display: flex; align-items: center; gap: 10px; padding: 40px 0;"><span class="spinner"></span> Loading sessions...</div>
 {:else if sessions.length === 0}
   <p class="empty">No sessions yet. Start chatting to create one.</p>
 {:else}
