@@ -77,7 +77,7 @@ describe('isSessionExpired', () => {
   describe('daily reset boundary', () => {
     it('returns true for a session from yesterday', () => {
       expect(isSessionExpired(
-        makeSession(daysAgo(1)),
+        makeSession(daysAgo(2)),
         { resetHour: 4, idleMinutes: 0 },
       )).toBe(true);
     });

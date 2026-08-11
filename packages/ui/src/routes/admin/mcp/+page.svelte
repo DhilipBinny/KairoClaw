@@ -325,6 +325,7 @@
 
   // ── Server actions ─────────────────────────
   async function handleRemove(id: string) {
+    if (!confirm(`Remove MCP server "${id}"? This will disconnect it and remove its configuration.`)) return;
     actionInProgress = id;
     try { await removeMCPServer(id); await loadData(); } catch { /* ignore */ }
     finally { actionInProgress = ''; }

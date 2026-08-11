@@ -135,7 +135,7 @@
 {#if successMsg}<div class="alert alert-success">{successMsg}</div>{/if}
 
 {#if loading}
-  <span class="spinner"></span>
+  <div style="color: var(--text-muted); display: flex; align-items: center; gap: 10px; padding: 40px 0;"><span class="spinner"></span> Loading cron jobs...</div>
 {:else if jobs.length === 0}
   <p class="empty">No cron jobs yet. Ask the agent to create one: "remind me every morning at 9am to check my email"</p>
 {:else}
