@@ -181,12 +181,13 @@ export async function maybeExtractToProfile(opts: {
   config: GatewayConfig;
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   minTurns?: number;
+  skipChannelCheck?: boolean;
 }): Promise<void> {
-  const { sessionId, channel, scopeKey, messageLister, config, callLLM, minTurns = MEMORY_MIN_TURNS } = opts;
+  const { sessionId, channel, scopeKey, messageLister, config, callLLM, minTurns = MEMORY_MIN_TURNS, skipChannelCheck = false } = opts;
   const workspace = config.agent.workspace;
 
-  // Skip non-conversational sessions
-  if (channel === 'cron' || channel === 'internal') return;
+  // Skip non-conversational sessions (unless called from session-end extraction)
+  if (!skipChannelCheck && (channel === 'cron' || channel === 'internal')) return;
 
   try {
     // Gate: enough turns?
@@ -215,9 +216,9 @@ export async function maybeExtractToProfile(opts: {
       existingSessionNotes ? `## Today's Notes:\n${existingSessionNotes.slice(0, 2000)}` : '',
     ].filter(Boolean).join('\n\n');
 
-    // Resolve extraction model (cheap — Haiku preferred)
-    const extractionModel = config.agent?.sessionMemory?.extractionModel
-      || (config.model.fallback && config.model.fallback.trim() ? config.model.fallback : null)
+    // Use explicit extraction model or primary — fallback is for agent
+    // chat resilience, not background extraction.
+    const extractionModel = (config.agent?.sessionMemory?.extractionModel?.trim())
       || config.model.primary;
 
     const response = await callLLM({
