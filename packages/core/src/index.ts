@@ -33,6 +33,7 @@ import { SecretsStore } from './secrets/store.js';
 import { migrateToSecretsStore } from './secrets/migrate.js';
 import { resolveMasterKey } from './secrets/crypto.js';
 import { runAgent } from './agent/loop.js';
+import { triggerSessionEndExtraction } from './agent/session-end-extraction.js';
 import { FileStateTracker } from './agent/file-state.js';
 import { ProgressBus, ResultBudget, LoopDetector, ResultStorage } from '@agw/tool-platform';
 import { backgroundTaskRegistry } from './agent/background-task-registry.js';
@@ -42,6 +43,7 @@ import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
+import { loadCronOutputHistory, saveCronOutput } from './cron/output-history.js';
 import { ALERT_TYPES } from '@agw/types';
 import { AlertManager } from './alerts/index.js';
 import { WebSocketAlertChannel } from './alerts/channels/websocket.js';
@@ -459,12 +461,16 @@ async function main(): Promise<void> {
     // Cron/internal channels always get a fresh session (#269).
     // Interactive channels check resetHour and idleMinutes (#268).
     const isCronChannel = inbound.channel === 'cron' || inbound.channel === 'internal';
+    let expiredSessionId: string | null = null;
+    let expiredSessionTurns = 0;
     if (sessionRow && (isCronChannel || isSessionExpired(sessionRow, config.session, config.agent?.timezone))) {
       const reason = isCronChannel ? 'cron-fresh' : 'expired';
       _agentLog.info(
         { oldSessionId: sessionRow.id, reason, channel: inbound.channel },
         'Previous session expired — starting fresh',
       );
+      expiredSessionId = sessionRow.id;
+      expiredSessionTurns = sessionRow.turns;
       sessionRow = undefined;
     }
 
@@ -500,6 +506,21 @@ async function main(): Promise<void> {
       channel: inbound.channel,
       userId: inbound.userId,
     });
+
+    // Session-end memory extraction: flush the outgoing session's knowledge
+    // to disk before it's forgotten. Runs async (non-blocking) — the new
+    // session starts immediately. By the user's 2nd message, extraction
+    // will have completed and files are available for prompt injection.
+    if (expiredSessionId && expiredSessionTurns > 0 && scopeKey) {
+      triggerSessionEndExtraction({
+        sessionId: expiredSessionId,
+        channel: inbound.channel,
+        scopeKey,
+        db,
+        config,
+        providerRegistry,
+      });
+    }
 
     // ── Phase 6 per-turn services ──────────────────────────
     // One instance per createRunner invocation (= one inbound message =
@@ -830,15 +851,33 @@ async function main(): Promise<void> {
       }
       // Use job owner's userId if set — cron runs with their permissions
       const cronUserId = job.userId || 'system';
+
+      // Inject previous cron outputs as context so the agent knows what
+      // it already generated (prevents repetitive output for creative tasks)
+      const previousOutputs = loadCronOutputHistory(stateDir, job.id);
+      const promptWithContext = previousOutputs
+        ? `${job.prompt}\n\n<previous_runs>\n${previousOutputs}\n</previous_runs>\nIMPORTANT: The above shows your previous outputs for this scheduled task. Produce something DIFFERENT and FRESH — do not repeat.`
+        : job.prompt;
+
       const inbound: InboundMessage = {
-        text: job.prompt,
-        channel: job.userId ? 'internal' : 'cron', // user-owned crons use 'internal' channel
+        text: promptWithContext,
+        channel: job.userId ? 'internal' : 'cron',
         chatId: `cron:${job.id}`,
         chatType: 'private',
         userId: cronUserId,
         senderName: 'Cron',
       };
       const result = await createRunner(inbound);
+
+      // Save this run's output for future context injection
+      if (result.text) {
+        try {
+          saveCronOutput(stateDir, job.id, result.text);
+        } catch {
+          // non-fatal — cron result is still delivered even if output save fails
+        }
+      }
+
       return { text: result.text ?? undefined, media: result.media };
     },
     deliverer: async (text, channel, to, media, ownerId) => {

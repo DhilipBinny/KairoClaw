@@ -72,6 +72,7 @@ export async function maybeExtractToProfile(opts: {
   config: GatewayConfig;
   callLLM: (args: ChatArgs) => Promise<ProviderResponse>;
   minTurns?: number;
+  skipChannelCheck?: boolean;
 }): Promise<void> {
   return _maybeExtractToProfile({
     sessionId: opts.sessionId,
@@ -81,5 +82,6 @@ export async function maybeExtractToProfile(opts: {
     config: opts.config,
     callLLM: opts.callLLM,
     minTurns: opts.minTurns,
+    skipChannelCheck: opts.skipChannelCheck,
   });
 }

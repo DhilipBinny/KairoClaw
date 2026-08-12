@@ -295,15 +295,13 @@ function formatMessagesForExtraction(messages: MessageRow[], maxChars = 20_000):
 
 /** Resolve which model to use for session memory extraction. */
 function resolveExtractionModel(config: GatewayConfig): string {
-  // 1. Explicit override from session memory config
+  // 1. Explicit override (admin can set a dedicated cheap model for extraction)
   const explicit = config.agent?.sessionMemory?.extractionModel;
-  if (explicit) return explicit;
+  if (explicit && explicit.trim()) return explicit;
 
-  // 2. Fallback model (often a cheaper model)
-  const fallback = config.model.fallback;
-  if (fallback && fallback.trim()) return fallback;
-
-  // 3. Primary model (last resort — works with whatever auth is configured)
+  // 2. Primary model — the fallback model is for agent chat resilience,
+  //    not for background extraction. Using fallback here caused 410 errors
+  //    when the fallback endpoint was deprecated.
   return config.model.primary;
 }
 

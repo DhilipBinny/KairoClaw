@@ -52,7 +52,6 @@ export function deriveScopeKey(
   resolvedUserId?: string,
 ): string | null {
   if (!userId && !resolvedUserId) return null;
-  if (!SCOPED_CHANNELS.includes(channel)) return null;
 
   // Prefer resolved user UUID — one scope across all channels
   if (resolvedUserId) {

@@ -29,8 +29,12 @@ describe('deriveScopeKey', () => {
     expect(deriveScopeKey('cron', 'system')).toBeNull();
   });
 
-  it('returns null for internal channel', () => {
-    expect(deriveScopeKey('internal', 'sub-123')).toBeNull();
+  it('returns scope for internal channel with real user', () => {
+    expect(deriveScopeKey('internal', 'abc-user-uuid', 'abc-user-uuid')).toBe('abc-user-uuid');
+  });
+
+  it('returns fallback scope for internal channel without resolved user', () => {
+    expect(deriveScopeKey('internal', 'sub-123')).toBe('internal:sub-123');
   });
 
   it('returns null when no userId', () => {
