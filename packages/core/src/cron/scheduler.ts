@@ -28,6 +28,7 @@ function repoToStore(db: DatabaseAdapter): CronJobStore {
     create: (job) => repo.create(job),
     update: (id, tenantId, fields) => repo.update(id, tenantId, fields as any),
     delete: (id, tenantId) => repo.delete(id, tenantId),
+    updateLastRun: (id, tenantId, result) => repo.updateLastRun(id, tenantId, result),
   };
 }
 
