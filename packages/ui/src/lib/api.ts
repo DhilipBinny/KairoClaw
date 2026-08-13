@@ -702,6 +702,10 @@ export async function deleteMyCron(id: string): Promise<{ success: boolean }> {
   return request(`/my/cron/${id}`, { method: 'DELETE' });
 }
 
+export async function runMyCron(id: string): Promise<{ success: boolean; lastResult?: string }> {
+  return request(`/my/cron/${id}/run`, { method: 'POST' });
+}
+
 // ── Admin: Background Tasks (Phase 10 TB-4) ──────────────
 export interface BackgroundTaskRow {
   id: string;

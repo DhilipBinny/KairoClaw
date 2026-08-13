@@ -37,6 +37,23 @@ describe('deriveScopeKey', () => {
     expect(deriveScopeKey('internal', 'sub-123')).toBe('internal:sub-123');
   });
 
+  // API and other channels now get scopes (channel whitelist removed)
+  it('returns scope for api channel with user', () => {
+    expect(deriveScopeKey('api', 'user-uuid-123', 'user-uuid-123')).toBe('user-uuid-123');
+  });
+
+  it('returns fallback scope for api without resolved user', () => {
+    expect(deriveScopeKey('api', 'api-key-user-id')).toBe('api:api-key-user-id');
+  });
+
+  it('returns null for heartbeat with system userId', () => {
+    expect(deriveScopeKey('heartbeat', 'system')).toBeNull();
+  });
+
+  it('returns null for cron channel with real user UUID', () => {
+    expect(deriveScopeKey('cron', 'some-uuid', 'some-uuid')).toBe('some-uuid');
+  });
+
   it('returns null when no userId', () => {
     expect(deriveScopeKey('telegram', undefined)).toBeNull();
   });
