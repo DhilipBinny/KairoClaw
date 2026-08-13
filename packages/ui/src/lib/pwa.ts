@@ -1,7 +1,12 @@
 let updateAvailableCallback: (() => void) | null = null;
+let waitingWorker: ServiceWorker | null = null;
 
 export function applyUpdate() {
-  navigator.serviceWorker?.controller?.postMessage({ type: 'SKIP_WAITING' });
+  if (waitingWorker) {
+    waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  } else {
+    navigator.serviceWorker?.controller?.postMessage({ type: 'SKIP_WAITING' });
+  }
 }
 
 export function initPwa() {
@@ -24,6 +29,7 @@ export function initPwa() {
       if (!newWorker) return;
       newWorker.addEventListener('statechange', () => {
         if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          waitingWorker = newWorker;
           updateAvailableCallback?.();
         }
       });
