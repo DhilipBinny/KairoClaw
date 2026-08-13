@@ -885,16 +885,12 @@ async function main(): Promise<void> {
       if ((channel === 'whatsapp' || channel === 'telegram') && to) {
         const check = await checkOutboundAllowed(channel, to, config, db);
         if (!check.allowed) {
-          const cronLog = createModuleLogger('cron');
-          cronLog.warn({ channel, to, reason: check.reason }, 'Cron delivery blocked by outbound policy');
-          return;
+          throw new Error(`Delivery blocked by outbound policy: ${check.reason}`);
         }
       }
       if (channel === 'telegram') {
         if (!channelRegistry.telegram) {
-          const cronLog = createModuleLogger('cron');
-          cronLog.warn({ channel, to }, 'Cron delivery skipped: Telegram channel is disabled');
-          return;
+          throw new Error('Telegram channel is not connected');
         }
         if (media && media.length > 0) {
           await channelRegistry.telegram.sendMediaToChat(media, text, to);
@@ -903,9 +899,7 @@ async function main(): Promise<void> {
         }
       } else if (channel === 'whatsapp') {
         if (!channelRegistry.whatsapp) {
-          const cronLog = createModuleLogger('cron');
-          cronLog.warn({ channel, to }, 'Cron delivery skipped: WhatsApp channel is disabled');
-          return;
+          throw new Error('WhatsApp not connected (status: disconnected)');
         }
         if (media && media.length > 0) {
           await channelRegistry.whatsapp.sendMediaToChat(media, text, to);

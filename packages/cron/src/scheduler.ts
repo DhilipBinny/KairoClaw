@@ -27,6 +27,18 @@ import { noopLogger, ALERT_TYPES } from '@agw/types';
  * Parse a single cron field (minute, hour, etc.) into a set of allowed values.
  * Returns `null` when the field is `*` (matches all).
  */
+const DAY_NAMES: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+const MONTH_NAMES: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+
+function parseFieldValue(s: string, min: number, max: number): number {
+  const named = DAY_NAMES[s.toLowerCase()] ?? MONTH_NAMES[s.toLowerCase()];
+  if (named !== undefined) return named;
+  let n = parseInt(s);
+  if (Number.isNaN(n)) return NaN;
+  if (max === 6 && n === 7) n = 0; // day-of-week 7 = Sunday
+  return n;
+}
+
 function parseCronField(field: string, min: number, max: number): Set<number> | null {
   if (field === '*') return null;
   const values = new Set<number>();
@@ -43,10 +55,15 @@ function parseCronField(field: string, min: number, max: number): Set<number> | 
     if (range === '*') {
       for (let i = min; i <= max; i += step) values.add(i);
     } else if (range.includes('-')) {
-      const [a, b] = range.split('-').map(Number);
-      for (let i = a; i <= b; i += step) values.add(i);
+      const [aStr, bStr] = range.split('-');
+      const a = parseFieldValue(aStr, min, max);
+      const b = parseFieldValue(bStr, min, max);
+      if (!Number.isNaN(a) && !Number.isNaN(b)) {
+        for (let i = a; i <= b; i += step) values.add(i);
+      }
     } else {
-      values.add(parseInt(range));
+      const v = parseFieldValue(range, min, max);
+      if (!Number.isNaN(v) && v >= min && v <= max) values.add(v);
     }
   }
   return values;
@@ -99,6 +116,7 @@ export interface CronJobStore {
   create(job: { id: string; tenantId: string; userId?: string | null; name: string; scheduleType: string; scheduleValue: string; timezone?: string; prompt: string; delivery: string; enabled?: boolean }): Promise<CronJobRow>;
   update(id: string, tenantId: string, fields: Record<string, unknown>): Promise<void>;
   delete(id: string, tenantId: string): Promise<void>;
+  updateLastRun?(id: string, tenantId: string, result?: string): Promise<void>;
 }
 
 export interface CronJobSchedule {
@@ -549,6 +567,11 @@ export class CronScheduler {
         }
       }
 
+      // Persist run tracking atomically (run_count + 1, last_run, last_result)
+      if (this.store?.updateLastRun) {
+        this.store.updateLastRun(job.id, this.tenantId, job.lastResult ?? undefined)
+          .catch(e2 => this.log.error({ jobId: job.id, err: e2 instanceof Error ? e2.message : String(e2) }, 'Failed to persist run tracking'));
+      }
       this._saveJob(job).catch(e2 => this.log.error({ jobId: job.id, err: e2 instanceof Error ? e2.message : String(e2) }, 'Failed to persist job result'));
       this.log.info({ jobId: job.id, resultLen: responseText.length }, 'Cron job completed');
     } catch (e) {
@@ -700,6 +723,8 @@ export class CronScheduler {
       this.timers.delete(id);
     }
     this.jobs.delete(id);
+    this.lastCronMinute.delete(id);
+    this.consecutiveFailures.delete(id);
     // Delete from DB
     if (this.store) {
       this.store.delete(id, this.tenantId).catch(e =>
