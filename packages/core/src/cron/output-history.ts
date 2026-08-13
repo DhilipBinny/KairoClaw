@@ -50,16 +50,34 @@ export function loadCronOutputHistory(stateDir: string, jobId: string): string |
 }
 
 /**
+ * Strip media noise from output — keep only human-readable text.
+ * Removes markdown image syntax, bare media URLs, and signed URL params.
+ * Generic — works for any cron output type.
+ */
+function cleanOutputForHistory(text: string): string {
+  return text
+    .replace(/!\[(?:image|[^\]]*)\]\([^)]+\)/g, '')   // ![image](url) or ![alt](url)
+    .replace(/\[image\]/g, '')                          // [image] placeholders
+    .replace(/\/api\/v1\/media\/[^\s)]+/g, '')          // bare media URLs
+    .replace(/\n{3,}/g, '\n\n')                         // collapse excessive newlines
+    .trim();
+}
+
+/**
  * Save a cron run's output for future context injection.
+ * Strips media URLs and saves only human-readable text.
  * Filename is timestamp-based for chronological ordering.
  */
 export function saveCronOutput(stateDir: string, jobId: string, output: string): void {
   const dir = outputDir(stateDir, jobId);
   fs.mkdirSync(dir, { recursive: true });
 
+  const cleaned = cleanOutputForHistory(output);
+  if (!cleaned) return;
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const filePath = path.join(dir, `${timestamp}.md`);
-  fs.writeFileSync(filePath, output.slice(0, MAX_OUTPUT_CHARS));
+  fs.writeFileSync(filePath, cleaned.slice(0, MAX_OUTPUT_CHARS));
 
   cleanupOldOutputs(dir);
 }
