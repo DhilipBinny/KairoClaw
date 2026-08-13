@@ -12,6 +12,7 @@
 
 const CRON_MAX_JOBS = 50;
 const CRON_MIN_INTERVAL_MS = 5000;
+const CRON_EXEC_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -59,7 +60,9 @@ function parseCronField(field: string, min: number, max: number): Set<number> | 
       const a = parseFieldValue(aStr, min, max);
       const b = parseFieldValue(bStr, min, max);
       if (!Number.isNaN(a) && !Number.isNaN(b)) {
-        for (let i = a; i <= b; i += step) values.add(i);
+        const clampedA = Math.max(a, min);
+        const clampedB = Math.min(b, max);
+        for (let i = clampedA; i <= clampedB; i += step) values.add(i);
       }
     } else {
       const v = parseFieldValue(range, min, max);
@@ -408,10 +411,11 @@ export class CronScheduler {
         this.log.warn({ jobId: job.id, scheduledAt: job.schedule.value }, 'Cron job "at" time already passed -- skipping');
         return;
       }
-      const timer = setTimeout(() => {
-        void this._executeJob(job);
+      const timer = setTimeout(async () => {
+        await this._executeJob(job);
         this.jobs.delete(job.id);
         this.timers.delete(job.id);
+        this.lastCronMinute.delete(job.id);
         if (this.store) {
           this.store.delete(job.id, this.tenantId).catch(e =>
             this.log.warn({ err: e instanceof Error ? e.message : String(e), jobId: job.id }, 'Failed to delete one-shot job from DB'));
@@ -485,8 +489,6 @@ export class CronScheduler {
     this.runningJobs.add(job.id);
     this.log.info({ jobId: job.id, name: job.name }, 'Executing cron job');
     job.lastRun = new Date().toISOString();
-    job.runCount = (job.runCount || 0) + 1;
-    this._saveJob(job).catch(e => this.log.error({ jobId: job.id, err: e instanceof Error ? e.message : String(e) }, 'Failed to persist job run start'));
 
     try {
       if (!this.executor) {
@@ -516,7 +518,14 @@ export class CronScheduler {
         ? { ...job, prompt: `${job.prompt}\n\nIMPORTANT: Your response will be delivered automatically to ${announceChannels}. Just return the message content directly. Do NOT use send_message or any delivery tools.` }
         : job;
 
-      const result = await this.executor(execJob);
+      let execTimer: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        this.executor(execJob),
+        new Promise<never>((_, reject) => {
+          execTimer = setTimeout(() => reject(new Error(`Cron job timed out after ${CRON_EXEC_TIMEOUT_MS / 1000}s`)), CRON_EXEC_TIMEOUT_MS);
+        }),
+      ]);
+      if (execTimer) clearTimeout(execTimer);
       const responseText = (result.text || '').trim();
       const responseMedia = result.media;
       job.lastResult = responseText.slice(0, 500);

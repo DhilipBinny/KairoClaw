@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getMyCrons, updateMyCron, deleteMyCron } from '$lib/api';
+  import { getMyCrons, updateMyCron, deleteMyCron, runMyCron } from '$lib/api';
   import Badge from '$lib/components/Badge.svelte';
 
   let jobs: Array<Record<string, any>> = $state([]);
@@ -18,6 +18,22 @@
   let editTargets = $state<Array<{ channel: string; to: string }>>([]);
   let editEnabled = $state(true);
   let saving = $state(false);
+
+  let runningJobId = $state<string | null>(null);
+
+  async function handleRunNow(id: string) {
+    runningJobId = id;
+    try {
+      await runMyCron(id);
+      successMsg = 'Job triggered successfully';
+      setTimeout(() => { successMsg = ''; }, 3000);
+      await loadJobs();
+    } catch (e: any) {
+      error = e.message || 'Failed to run job';
+    } finally {
+      runningJobId = null;
+    }
+  }
 
   // Delete confirmation
   let confirmDeleteId = $state<string | null>(null);
@@ -216,7 +232,7 @@
           <!-- View mode -->
           <div class="job-header">
             <span class="job-name">{job.name || 'Untitled'}</span>
-            <Badge variant={job.enabled ? 'green' : 'default'}>{job.enabled ? 'Active' : 'Disabled'}</Badge>
+            <Badge variant={job.lastError ? 'red' : job.enabled ? 'green' : 'default'}>{job.lastError ? 'Error' : job.enabled ? 'Active' : 'Disabled'}</Badge>
           </div>
           <div class="job-schedule">{formatSchedule(job)}</div>
           <div class="job-prompt">{job.prompt}</div>
@@ -245,6 +261,9 @@
           {/if}
           <div class="job-actions">
             <button class="btn btn-sm" onclick={() => startEdit(job)}>Edit</button>
+            <button class="btn btn-sm" onclick={() => handleRunNow(job.id)} disabled={runningJobId === job.id}>
+              {runningJobId === job.id ? 'Running...' : 'Run Now'}
+            </button>
             <button class="btn btn-sm btn-danger" onclick={() => requestDelete(job.id)}>
               {confirmDeleteId === job.id ? 'Confirm?' : 'Delete'}
             </button>
