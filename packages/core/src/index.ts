@@ -873,8 +873,9 @@ async function main(): Promise<void> {
       if (result.text) {
         try {
           saveCronOutput(stateDir, job.id, result.text);
-        } catch {
-          // non-fatal — cron result is still delivered even if output save fails
+        } catch (e) {
+          const cronLog = createModuleLogger('cron');
+          cronLog.warn({ jobId: job.id, err: e instanceof Error ? e.message : String(e) }, 'Failed to save cron output history');
         }
       }
 

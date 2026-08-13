@@ -206,4 +206,24 @@ export const registerCronRoutes: FastifyPluginAsync<CronRoutesOptions> = async (
     scheduler.remove(id);
     return { success: true };
   });
+
+  // POST /api/v1/my/cron/:id/run — run own cron job now
+  app.post('/api/v1/my/cron/:id/run', async (request, reply) => {
+    const userId = request.user?.id;
+    if (!userId) return reply.code(401).send({ error: 'Not authenticated' });
+
+    const { id } = request.params as { id: string };
+
+    const job = scheduler.list().find(j => j.id === id);
+    if (!job) return reply.code(404).send({ error: 'Job not found' });
+    if (job.userId !== userId) return reply.code(403).send({ error: 'Forbidden' });
+
+    try {
+      const result = await scheduler.run(id);
+      return { success: true, lastResult: result?.lastResult ?? null };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ error: msg });
+    }
+  });
 };

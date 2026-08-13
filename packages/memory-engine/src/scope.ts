@@ -33,7 +33,7 @@ export function isSafeScopeKey(key: string): boolean {
   return !!key && key !== '.' && !key.includes('\0') && !/[/\\]|\.\./.test(key);
 }
 const GLOBAL_ONLY_FILES = ['RULES.md', 'IDENTITY.md', 'SOUL.md'];
-const SCOPED_CHANNELS = ['telegram', 'whatsapp', 'web'];
+const GROUP_CAPABLE_CHANNELS = ['telegram', 'whatsapp', 'web'];
 const SHARED_DIR = 'shared';
 const DOCUMENTS_DIR = 'documents';
 
@@ -78,7 +78,7 @@ export function deriveGroupScopeKey(
   channel: string,
   chatId: string,
 ): string | null {
-  if (!SCOPED_CHANNELS.includes(channel)) return null;
+  if (!GROUP_CAPABLE_CHANNELS.includes(channel)) return null;
   // Sanitize chatId — remove the channel: prefix if present, block traversal
   const raw = chatId.replace(/^(telegram|whatsapp):/, '');
   if (!raw || /[/\\]|\.\./.test(raw)) return null;
