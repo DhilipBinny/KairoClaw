@@ -9,7 +9,8 @@ import { MessageRepository } from '../db/repositories/message.js';
 
 const log = createModuleLogger('memory');
 
-const MIN_TURNS_FOR_PROFILE = 2;
+const MIN_TURNS_FOR_PROFILE_INTERACTIVE = 2;
+const MIN_TURNS_FOR_PROFILE_CRON = 1;
 
 /**
  * Trigger memory extraction for a session that just expired.
@@ -60,6 +61,7 @@ export function triggerSessionEndExtraction(opts: {
     // Note: we pass minTurns=2 (lower than the default 5) and do NOT
     // skip cron/internal channels — cron sessions deserve memory too.
     try {
+      const isCron = channel === 'cron' || channel === 'internal';
       await maybeExtractToProfile({
         sessionId,
         channel,
@@ -67,7 +69,7 @@ export function triggerSessionEndExtraction(opts: {
         db,
         config,
         callLLM,
-        minTurns: MIN_TURNS_FOR_PROFILE,
+        minTurns: isCron ? MIN_TURNS_FOR_PROFILE_CRON : MIN_TURNS_FOR_PROFILE_INTERACTIVE,
         skipChannelCheck: true,
       });
       log.info({ sessionId, channel }, 'Session-end extraction: profile extraction complete');

@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const CRON_OUTPUT_DIR = 'cron-output';
-const MAX_HISTORY_FILES = 5;
-const MAX_HISTORY_CHARS = 3_000;
+const MAX_HISTORY_FILES = 30;
+const MAX_HISTORY_CHARS = 6_000;
 const MAX_OUTPUT_CHARS = 2_000;
 const RETENTION_DAYS = 7;
 const MS_PER_DAY = 86_400_000;
