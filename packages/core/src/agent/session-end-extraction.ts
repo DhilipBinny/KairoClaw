@@ -9,8 +9,7 @@ import { MessageRepository } from '../db/repositories/message.js';
 
 const log = createModuleLogger('memory');
 
-const MIN_TURNS_FOR_PROFILE_INTERACTIVE = 2;
-const MIN_TURNS_FOR_PROFILE_CRON = 1;
+const MIN_TURNS_FOR_PROFILE = 2;
 
 /**
  * Trigger memory extraction for a session that just expired.
@@ -34,9 +33,20 @@ export function triggerSessionEndExtraction(opts: {
     providerRegistry.callWithFailover(args);
 
   const run = async () => {
+    const isCron = channel === 'cron' || channel === 'internal';
     const messageRepo = new MessageRepository(db);
     const messages = await messageRepo.listBySession(sessionId);
     if (messages.length === 0) return;
+
+    // Cron jobs with few turns don't need LLM-based memory extraction —
+    // the cron output history file already captures what was generated.
+    // Only run the expensive extraction for interactive sessions or
+    // cron sessions with substantial conversation (multi-tool rounds).
+    const userMessages = messages.filter(m => m.role === 'user');
+    if (isCron && userMessages.length <= 1) {
+      log.info({ sessionId, channel }, 'Session-end extraction: skipped for short cron session (output history handles it)');
+      return;
+    }
 
     const currentTokens = estimateMessageTokens(messages);
 
@@ -58,10 +68,7 @@ export function triggerSessionEndExtraction(opts: {
     }
 
     // Step 2: Extract to daily notes + PROFILE.md
-    // Note: we pass minTurns=2 (lower than the default 5) and do NOT
-    // skip cron/internal channels — cron sessions deserve memory too.
     try {
-      const isCron = channel === 'cron' || channel === 'internal';
       await maybeExtractToProfile({
         sessionId,
         channel,
@@ -69,7 +76,7 @@ export function triggerSessionEndExtraction(opts: {
         db,
         config,
         callLLM,
-        minTurns: isCron ? MIN_TURNS_FOR_PROFILE_CRON : MIN_TURNS_FOR_PROFILE_INTERACTIVE,
+        minTurns: MIN_TURNS_FOR_PROFILE,
         skipChannelCheck: true,
       });
       log.info({ sessionId, channel }, 'Session-end extraction: profile extraction complete');
