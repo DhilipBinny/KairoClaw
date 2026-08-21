@@ -76,6 +76,7 @@ class WhatsAppChannel implements Channel {
   private ownJid: string | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
+  private logoutRetries = 0;
   private authDir: string;
   /** LID → phone number mapping (WhatsApp's Linked Identity system). */
   private lidToPhone = new Map<string, string>();
@@ -145,12 +146,24 @@ class WhatsAppChannel implements Channel {
         this.connectedName = null;
         this.ownJid = null;
 
-        const error = lastDisconnect?.error as { output?: { statusCode?: number } } | undefined;
+        const error = lastDisconnect?.error as { output?: { statusCode?: number }; message?: string } | undefined;
         const statusCode = error?.output?.statusCode;
+        const disconnectReason = error?.message || 'unknown';
         const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 405;
 
+        log.warn({
+          statusCode,
+          reason: disconnectReason,
+          isLoggedOut,
+          reconnectAttempts: this.reconnectAttempts,
+        }, `WhatsApp: connection closed (${statusCode ?? 'no status'}: ${disconnectReason})`);
+
         if (isLoggedOut) {
-          log.info({ statusCode }, 'WhatsApp: session invalid — clearing credentials');
+          if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+          }
+          this.logoutRetries = (this.logoutRetries || 0) + 1;
           this.reconnectAttempts = 0;
           this.clearAuth();
           this.alertEmitter?.({
@@ -161,6 +174,16 @@ class WhatsAppChannel implements Channel {
             title: 'WhatsApp logged out',
             message: 'WhatsApp session was logged out — requires QR re-scan',
           });
+          // Reconnect with empty auth so Baileys generates a QR code.
+          // Guard: only retry 3 times to prevent infinite 405 loops.
+          if (this.logoutRetries <= 3) {
+            log.info({ attempt: this.logoutRetries }, 'WhatsApp: reconnecting with empty auth to generate QR');
+            this.reconnectTimer = setTimeout(() => this.connect().catch((e) => {
+              log.error({ err: e instanceof Error ? e.message : String(e) }, 'WhatsApp: reconnect for QR failed');
+            }), 5000);
+          } else {
+            log.error('WhatsApp: gave up reconnecting after multiple auth failures — disable and re-enable from admin UI');
+          }
         } else {
           // Clear any existing timer to prevent storm
           if (this.reconnectTimer) {
@@ -181,6 +204,7 @@ class WhatsAppChannel implements Channel {
         this.connectionStatus = 'connected';
         this.currentQR = null;
         this.reconnectAttempts = 0;
+        this.logoutRetries = 0;
         // Extract own JID
         if (this.sock?.user) {
           this.ownJid = jidNormalizedUser(this.sock.user.id);
