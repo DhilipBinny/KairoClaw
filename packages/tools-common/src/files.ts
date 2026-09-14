@@ -105,22 +105,17 @@ export const fileTools: ToolRegistration[] = [
       }
 
       // Office documents — extract text content
-      const docExt = path.extname(filePath).toLowerCase();
-      const { getDocumentType } = await import('./document.js');
-      const docType = getDocumentType(docExt);
-      if (docType) {
-        const { extractDocxText, extractXlsxText, extractPptxText } = await import('./document.js');
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.docx' || ext === '.xlsx' || ext === '.pptx') {
+        const { extractDocxText, extractXlsxText, extractPptxText, formatDocumentMeta } = await import('./document.js');
         let docResult;
-        if (docType === 'docx') docResult = await extractDocxText(filePath);
-        else if (docType === 'xlsx') docResult = await extractXlsxText(filePath);
+        if (ext === '.docx') docResult = await extractDocxText(filePath);
+        else if (ext === '.xlsx') docResult = await extractXlsxText(filePath);
         else docResult = await extractPptxText(filePath);
 
         if ('error' in docResult) return docResult;
 
-        const meta = 'paragraphs' in docResult ? `${docResult.paragraphs} paragraphs`
-          : 'sheets' in docResult ? `${docResult.sheets} sheets, ${docResult.totalRows} rows`
-          : `${docResult.slides} slides`;
-        const headerLine = `File: ${args.path} (${docExt.slice(1).toUpperCase()}, ${meta}, extracted via ${docResult.method})`;
+        const headerLine = `File: ${args.path} (${ext.slice(1).toUpperCase()}, ${formatDocumentMeta(docResult)}, extracted via ${docResult.method})`;
 
         try {
           const raw = fs.readFileSync(filePath);

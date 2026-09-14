@@ -19,7 +19,7 @@ export { globTools } from './glob.js';
 export { sleepTools } from './sleep.js';
 export { todoTools, readTodos, writeTodos, type Todo } from './todo.js';
 export { pdfTools, extractPdfText } from './pdf.js';
-export { extractDocxText, extractXlsxText, extractPptxText, isDocumentExtension, getDocumentType } from './document.js';
+export { extractDocxText, extractXlsxText, extractPptxText, extractTextFromXml, getDocumentType, formatDocumentMeta, type DocxResult, type XlsxResult, type PptxResult, type DocumentResult } from './document.js';
 export { emailTools } from './email.js';
 export { applyPatchTools, extractPatchPaths } from './apply-patch.js';
 export { planModeTools } from './plan-mode.js';
