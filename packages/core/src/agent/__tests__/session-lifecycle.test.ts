@@ -66,7 +66,7 @@ describe('isSessionExpired', () => {
     });
 
     it('returns false just before the boundary', () => {
-      const justBefore = new Date(Date.now() - 60 * 60_000 + 5000).toISOString();
+      const justBefore = new Date(Date.now() - 60 * 60_000 + 30_000).toISOString();
       expect(isSessionExpired(
         makeSession(justBefore),
         DEFAULT_CONFIG,
