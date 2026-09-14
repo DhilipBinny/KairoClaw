@@ -57,10 +57,9 @@ export const fileTools: ToolRegistration[] = [
       name: 'read_file',
       description:
         'Read the contents of a file. Returns text content. For text files, ' +
-        'use optional offset/limit to read a line range. For PDF files (.pdf ' +
-        'extension), extracted text is returned and the optional pages ' +
-        'parameter ("1-5", "3", or omit for all) controls which pages are ' +
-        'extracted — matches the semantics of the separate read_pdf tool. ' +
+        'use optional offset/limit to read a line range. For PDF files (.pdf), ' +
+        'extracted text is returned with optional pages parameter. ' +
+        'For Office documents (.docx, .xlsx, .pptx), text content is extracted automatically. ' +
         'The file is recorded in the session file-state tracker so subsequent ' +
         'edit_file calls see a matching hash.',
       searchHint: 'read file contents text source code pdf pages',
@@ -103,6 +102,31 @@ export const fileTools: ToolRegistration[] = [
           context.fileState?.recordRead(filePath, raw.toString('base64'));
         } catch { /* tracker update is best-effort */ }
         return textEnvelope(`${headerLine}${warnBlock}\n\n${result.text}`);
+      }
+
+      // Office documents — extract text content
+      const docExt = path.extname(filePath).toLowerCase();
+      const { getDocumentType } = await import('./document.js');
+      const docType = getDocumentType(docExt);
+      if (docType) {
+        const { extractDocxText, extractXlsxText, extractPptxText } = await import('./document.js');
+        let docResult;
+        if (docType === 'docx') docResult = await extractDocxText(filePath);
+        else if (docType === 'xlsx') docResult = await extractXlsxText(filePath);
+        else docResult = await extractPptxText(filePath);
+
+        if ('error' in docResult) return docResult;
+
+        const meta = 'paragraphs' in docResult ? `${docResult.paragraphs} paragraphs`
+          : 'sheets' in docResult ? `${docResult.sheets} sheets, ${docResult.totalRows} rows`
+          : `${docResult.slides} slides`;
+        const headerLine = `File: ${args.path} (${docExt.slice(1).toUpperCase()}, ${meta}, extracted via ${docResult.method})`;
+
+        try {
+          const raw = fs.readFileSync(filePath);
+          context.fileState?.recordRead(filePath, raw.toString('base64'));
+        } catch { /* tracker update is best-effort */ }
+        return textEnvelope(`${headerLine}\n\n${docResult.text}`);
       }
 
       const fullContent = fs.readFileSync(filePath, 'utf8');
