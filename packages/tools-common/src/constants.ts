@@ -11,3 +11,9 @@ export const MAX_TOOL_RESULT_CHARS = 10_000;
 export const PDF_MAX_PAGES = 50;
 export const PDF_OCR_MIN_CHARS_PER_PAGE = 50;
 export const PDF_TIMEOUT_MS = 60_000;
+
+// Document extraction (DOCX, XLSX, PPTX)
+export const DOC_MAX_EXTRACT_CHARS = 50_000;
+export const DOC_MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB — prevents OOM on large uploads
+export const XLSX_MAX_ROWS_PER_SHEET = 500;
+export const PPTX_MAX_SLIDES = 50;

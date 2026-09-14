@@ -58,6 +58,30 @@ export async function generateFilePreview(
     }
   }
 
+  // Office documents — extract text content
+  if (ext === '.docx' || ext === '.xlsx' || ext === '.pptx') {
+    try {
+      const { extractDocxText, extractXlsxText, extractPptxText, formatDocumentMeta } = await import('@agw/tools-common');
+      let result;
+      if (ext === '.docx') result = await extractDocxText(filePath);
+      else if (ext === '.xlsx') result = await extractXlsxText(filePath);
+      else result = await extractPptxText(filePath);
+
+      if ('error' in result) {
+        return `[File received: ${fileName}]\nType: ${ext} | Size: ${sizeStr}\n${result.error}\nUse \`read_file\` to try reading it.`;
+      }
+
+      let preview = result.text;
+      if (preview.length > 5000) {
+        const lastNewline = preview.lastIndexOf('\n', 5000);
+        preview = preview.slice(0, lastNewline > 4000 ? lastNewline : 5000) + '\n... (truncated)';
+      }
+      return `[File received: ${fileName}]\nType: ${ext.slice(1).toUpperCase()} | Size: ${sizeStr} | ${formatDocumentMeta(result)} | Extracted via ${result.method}\n\n${preview}\n\nUse \`read_file\` to examine the full content.`;
+    } catch {
+      return `[File received: ${fileName}]\nType: ${ext} | Size: ${sizeStr}\nDocument extraction failed. Use \`read_file\` to try reading it.`;
+    }
+  }
+
   // Binary files — always metadata only
   if (!isText) {
     return `[File received: ${fileName}]\nType: ${ext || 'unknown'} | Size: ${sizeStr}\nFile saved to disk. Use \`read_file\` to examine contents if it's a readable format.`;
