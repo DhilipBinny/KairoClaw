@@ -44,7 +44,7 @@ jobs:
         env:
           GITHUB_PKG_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
 
-      - name: Deploy stack
+      - name: Deploy
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           COMPOSE_FILE="${{ vars.DEPLOY_COMPOSE_PATH }}"
@@ -52,8 +52,10 @@ jobs:
             echo "Error: DEPLOY_COMPOSE_PATH variable not set"
             exit 1
           fi
+          COMPOSE_DIR=$(dirname "$COMPOSE_FILE")
           sed -i "s|image: kairoclaw:.*|image: kairoclaw:$SHORT_SHA|" "$COMPOSE_FILE"
-          docker stack deploy -c "$COMPOSE_FILE" kairoclaw
+          cd "$COMPOSE_DIR"
+          docker compose up -d --no-build
           echo "Deployed kairoclaw:$SHORT_SHA"
 
       - name: Cleanup previous image
@@ -67,10 +69,10 @@ jobs:
           for i in $(seq 1 30); do
             if curl -sf http://localhost:18181/api/v1/health > /dev/null 2>&1; then
               echo "KairoClaw is healthy"
-              docker stack services kairoclaw
+              docker ps --filter name=kairoclaw --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
               exit 0
             fi
             sleep 2
           done
           echo "Health check timed out (may still be starting)"
-          docker stack services kairoclaw
+          docker ps --filter name=kairoclaw --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
