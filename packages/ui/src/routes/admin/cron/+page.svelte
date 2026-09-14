@@ -9,7 +9,7 @@
   let cronStatusFilter = $state<'all' | 'active' | 'disabled' | 'error'>('all');
   let cronSearch = $state('');
 
-  let filteredJobs = $derived((): CronJob[] => {
+  let filteredJobs = $derived.by((): CronJob[] => {
     let list = jobs;
     if (cronStatusFilter !== 'all') {
       list = list.filter(j => {
