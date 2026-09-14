@@ -78,6 +78,17 @@ class WhatsAppChannel implements Channel {
   private reconnectAttempts = 0;
   private logoutRetries = 0;
   private authDir: string;
+
+  // Multi-image batching: WhatsApp sends album images as separate messages.
+  // Buffer by sender JID + debounce to combine them into one agent turn.
+  private imageBuffer = new Map<string, {
+    images: Array<{ data: string; mimeType: string; filename?: string }>;
+    caption: string;
+    msg: WAMessage;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  private static readonly IMAGE_BATCH_DEBOUNCE_MS = 500;
+
   /** LID → phone number mapping (WhatsApp's Linked Identity system). */
   private lidToPhone = new Map<string, string>();
 
@@ -86,6 +97,40 @@ class WhatsAppChannel implements Channel {
 
   setAlertEmitter(fn: AlertEmitFn): void {
     this.alertEmitter = fn;
+  }
+
+  /**
+   * Buffer an image from a sender. If more images arrive within the debounce
+   * window, they're combined into one batch. When the timer fires, all images
+   * are passed as a single handleMessage call.
+   */
+  private bufferImage(
+    senderJid: string,
+    msg: WAMessage,
+    image: { data: string; mimeType: string; filename?: string },
+    caption: string,
+  ): void {
+    const existing = this.imageBuffer.get(senderJid);
+    if (existing) {
+      existing.images.push(image);
+      if (caption && !existing.caption) existing.caption = caption;
+      clearTimeout(existing.timer);
+      existing.timer = setTimeout(() => this.flushImageBuffer(senderJid), WhatsAppChannel.IMAGE_BATCH_DEBOUNCE_MS);
+    } else {
+      const timer = setTimeout(() => this.flushImageBuffer(senderJid), WhatsAppChannel.IMAGE_BATCH_DEBOUNCE_MS);
+      this.imageBuffer.set(senderJid, { images: [image], caption, msg, timer });
+    }
+  }
+
+  private flushImageBuffer(senderJid: string): void {
+    const batch = this.imageBuffer.get(senderJid);
+    if (!batch) return;
+    this.imageBuffer.delete(senderJid);
+
+    const text = batch.caption || `What's in ${batch.images.length === 1 ? 'this image' : `these ${batch.images.length} images`}?`;
+    this.handleMessage(batch.msg, text, batch.images).catch((e) => {
+      log.error({ err: e instanceof Error ? e.message : String(e), senderJid }, 'Failed to handle image batch');
+    });
   }
 
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string) {
@@ -268,6 +313,13 @@ class WhatsAppChannel implements Channel {
   }
 
   async stop(): Promise<void> {
+    // Clear pending image buffers to prevent timer leaks and data loss
+    for (const [key, batch] of this.imageBuffer) {
+      clearTimeout(batch.timer);
+      this.imageBuffer.delete(key);
+    }
+    this.imageBuffer.clear();
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -286,7 +338,11 @@ class WhatsAppChannel implements Channel {
 
   // ── Message handling ─────────────────────────────────────
 
-  private async handleMessage(msg: WAMessage): Promise<void> {
+  private async handleMessage(
+    msg: WAMessage,
+    overrideText?: string,
+    preloadedImages?: Array<{ data: string; mimeType: string; filename?: string }>,
+  ): Promise<void> {
     if (!this.runner || !this.sock) return;
     if (!msg.message || !msg.key.remoteJid) return;
 
@@ -447,7 +503,11 @@ class WhatsAppChannel implements Channel {
     let msgText = '';
     let images: Array<{ data: string; mimeType: string; filename?: string }> | undefined;
 
-    if (contentType === 'conversation') {
+    // When called from image batch flush, skip content-type parsing
+    if (overrideText !== undefined && preloadedImages) {
+      msgText = overrideText;
+      images = preloadedImages;
+    } else if (contentType === 'conversation') {
       msgText = msg.message.conversation || '';
     } else if (contentType === 'extendedTextMessage') {
       msgText = msg.message.extendedTextMessage?.text || '';
@@ -476,8 +536,11 @@ class WhatsAppChannel implements Channel {
         });
         const base64 = Buffer.from(buffer).toString('base64');
         const mimeType = imgMsg.mimetype || 'image/jpeg';
-        msgText = caption || "What's in this image?";
-        images = [{ data: base64, mimeType }];
+        // Buffer for multi-image batching — flush after debounce.
+        // Key by chat:sender to avoid cross-user batching in groups.
+        const bufferKey = isGroup ? `${jid}:${senderPhone}` : jid;
+        this.bufferImage(bufferKey, msg, { data: base64, mimeType }, caption);
+        return;
       } catch (_e: unknown) {
         // Fallback: save to disk
         const localPath = await this.downloadMediaToDisk(msg, 'image.jpg', senderPhone);

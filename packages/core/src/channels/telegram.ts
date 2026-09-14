@@ -82,12 +82,55 @@ class TelegramChannel implements Channel {
   private readonly pendingSenders: PendingSenderRepository;
   private resolvedBotToken: string = '';
 
+  // Media group buffering: Telegram sends album photos as separate events.
+  // We buffer them by media_group_id and flush after a debounce window.
+  private mediaGroupBuffer = new Map<string, {
+    images: Array<{ data: string; mimeType: string; filename?: string }>;
+    caption: string;
+    ctx: Context;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  private static readonly MEDIA_GROUP_DEBOUNCE_MS = 500;
+
   constructor(config: GatewayConfig, db: DatabaseAdapter, tenantId: string, secretsStore?: SecretsStore) {
     this.config = config;
     this.db = db;
     this.tenantId = tenantId;
     this.secretsStore = secretsStore;
     this.pendingSenders = new PendingSenderRepository(db);
+  }
+
+  /**
+   * Buffer an image for a media group (album). When the debounce timer
+   * fires, all images are flushed as a single handleMessage call.
+   */
+  private bufferMediaGroupImage(
+    mediaGroupId: string,
+    ctx: Context,
+    image: { data: string; mimeType: string; filename?: string },
+    caption: string,
+  ): void {
+    const existing = this.mediaGroupBuffer.get(mediaGroupId);
+    if (existing) {
+      existing.images.push(image);
+      if (caption && !existing.caption) existing.caption = caption;
+      clearTimeout(existing.timer);
+      existing.timer = setTimeout(() => this.flushMediaGroup(mediaGroupId), TelegramChannel.MEDIA_GROUP_DEBOUNCE_MS);
+    } else {
+      const timer = setTimeout(() => this.flushMediaGroup(mediaGroupId), TelegramChannel.MEDIA_GROUP_DEBOUNCE_MS);
+      this.mediaGroupBuffer.set(mediaGroupId, { images: [image], caption, ctx, timer });
+    }
+  }
+
+  private flushMediaGroup(mediaGroupId: string): void {
+    const group = this.mediaGroupBuffer.get(mediaGroupId);
+    if (!group) return;
+    this.mediaGroupBuffer.delete(mediaGroupId);
+
+    const text = group.caption || `What's in ${group.images.length === 1 ? 'this image' : `these ${group.images.length} images`}?`;
+    this.handleMessage(group.ctx, text, group.images).catch((e) => {
+      log.error({ err: e instanceof Error ? e.message : String(e), mediaGroupId }, 'Failed to handle media group');
+    });
   }
 
   async start(runner: AgentRunner): Promise<void> {
@@ -186,11 +229,16 @@ class TelegramChannel implements Channel {
       const largest = photo[photo.length - 1]!;
       const imageData = await this.downloadFileAsBase64(largest.file_id);
       const caption = ctx.message.caption || '';
+
       if (imageData) {
+        const mediaGroupId = (ctx.message as { media_group_id?: string }).media_group_id;
+        if (mediaGroupId) {
+          this.bufferMediaGroupImage(mediaGroupId, ctx, { data: imageData, mimeType: 'image/jpeg' }, caption);
+          return;
+        }
         const text = caption || "What's in this image?";
         await this.handleMessage(ctx, text, [{ data: imageData, mimeType: 'image/jpeg' }]);
       } else {
-        // Fallback: save to disk
         const localPath = await this.downloadFile(largest.file_id, 'photo.jpg', ctx.from?.id ? String(ctx.from.id) : undefined);
         const workspace = this.config.agent.workspace;
         const text = localPath
@@ -216,6 +264,11 @@ class TelegramChannel implements Channel {
         const caption = ctx.message.caption || '';
         if (imageData) {
           const mimeType = doc.mime_type || `image/${ext.slice(1) || 'jpeg'}`;
+          const mediaGroupId = (ctx.message as { media_group_id?: string }).media_group_id;
+          if (mediaGroupId) {
+            this.bufferMediaGroupImage(mediaGroupId, ctx, { data: imageData, mimeType, filename: fileName }, caption);
+            return;
+          }
           const text = caption || "What's in this image?";
           await this.handleMessage(ctx, text, [{ data: imageData, mimeType, filename: fileName }]);
           return;
@@ -283,6 +336,13 @@ class TelegramChannel implements Channel {
   }
 
   async stop(): Promise<void> {
+    // Flush pending media groups before shutdown so images aren't lost
+    for (const [id, group] of this.mediaGroupBuffer) {
+      clearTimeout(group.timer);
+      this.mediaGroupBuffer.delete(id);
+    }
+    this.mediaGroupBuffer.clear();
+
     if (this.bot) {
       try {
         this.bot.stop();
