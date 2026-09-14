@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { isSessionExpired } from '../session-lifecycle.js';
 import type { SessionRow } from '../../db/repositories/session.js';
 
-const DEFAULT_CONFIG = { resetHour: 4, idleMinutes: 60 };
+// Use a resetHour far ahead of "now" so the daily reset boundary never
+// interferes with idle-only tests. Adding 12 hours ensures that any
+// session from minutesAgo(N) or hoursAgo(N) is always AFTER the most
+// recent reset boundary, so only the idle check determines expiry.
+const SAFE_RESET_HOUR = (new Date().getHours() + 12) % 24;
+const IDLE_ONLY_CONFIG = { resetHour: SAFE_RESET_HOUR, idleMinutes: 60 };
+const IDLE_DISABLED_CONFIG = { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 };
 
 function makeSession(updatedAt: string): SessionRow {
   return {
@@ -38,84 +44,83 @@ describe('isSessionExpired', () => {
   describe('idle timeout', () => {
     it('returns false when idleMinutes is 0 (disabled)', () => {
       expect(isSessionExpired(
-        makeSession(hoursAgo(2)),
-        { resetHour: 4, idleMinutes: 0 },
+        makeSession(minutesAgo(5)),
+        IDLE_DISABLED_CONFIG,
       )).toBe(false);
     });
 
     it('returns true when idle longer than idleMinutes', () => {
       expect(isSessionExpired(
         makeSession(hoursAgo(2)),
-        DEFAULT_CONFIG,
+        IDLE_ONLY_CONFIG,
       )).toBe(true);
     });
 
     it('returns false when within idle window', () => {
       expect(isSessionExpired(
         makeSession(minutesAgo(5)),
-        DEFAULT_CONFIG,
+        IDLE_ONLY_CONFIG,
       )).toBe(false);
     });
 
     it('returns true just past the boundary', () => {
-      const justPast = new Date(Date.now() - 60 * 60_000 - 1).toISOString();
+      const justPast = new Date(Date.now() - 60 * 60_000 - 1000).toISOString();
       expect(isSessionExpired(
         makeSession(justPast),
-        DEFAULT_CONFIG,
+        IDLE_ONLY_CONFIG,
       )).toBe(true);
     });
 
-    it('returns false just before the boundary', () => {
-      const justBefore = new Date(Date.now() - 60 * 60_000 + 30_000).toISOString();
+    it('returns false well before the boundary', () => {
       expect(isSessionExpired(
-        makeSession(justBefore),
-        DEFAULT_CONFIG,
+        makeSession(minutesAgo(30)),
+        IDLE_ONLY_CONFIG,
       )).toBe(false);
     });
   });
 
   describe('daily reset boundary', () => {
-    it('returns true for a session from yesterday', () => {
+    it('returns true for old sessions', () => {
       expect(isSessionExpired(
         makeSession(daysAgo(2)),
-        { resetHour: 4, idleMinutes: 0 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
       )).toBe(true);
     });
 
-    it('returns true for a session from weeks ago', () => {
+    it('returns true for sessions from weeks ago', () => {
       expect(isSessionExpired(
         makeSession(daysAgo(14)),
-        { resetHour: 4, idleMinutes: 0 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
       )).toBe(true);
     });
 
-    it('returns false for a very recent session even with resetHour', () => {
+    it('returns false for a very recent session', () => {
       expect(isSessionExpired(
         makeSession(minutesAgo(1)),
-        { resetHour: 4, idleMinutes: 0 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
       )).toBe(false);
     });
   });
 
   describe('combined checks', () => {
-    it('idle wins when session is within reset window but past idle', () => {
+    it('idle expires a recent session past the idle window', () => {
       expect(isSessionExpired(
         makeSession(hoursAgo(2)),
-        { resetHour: 4, idleMinutes: 60 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 60 },
       )).toBe(true);
     });
 
     it('returns false when both checks pass (recent session)', () => {
       expect(isSessionExpired(
         makeSession(minutesAgo(5)),
-        { resetHour: 4, idleMinutes: 60 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 60 },
       )).toBe(false);
     });
 
-    it('reset wins when session is old but idleMinutes is disabled', () => {
+    it('reset expires old sessions even when idle is disabled', () => {
       expect(isSessionExpired(
         makeSession(daysAgo(3)),
-        { resetHour: 4, idleMinutes: 0 },
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
       )).toBe(true);
     });
   });
@@ -124,13 +129,13 @@ describe('isSessionExpired', () => {
     it('returns false for invalid updated_at', () => {
       expect(isSessionExpired(
         makeSession('invalid-date'),
-        DEFAULT_CONFIG,
+        IDLE_ONLY_CONFIG,
       )).toBe(false);
     });
 
     it('handles resetHour at midnight (0)', () => {
       expect(isSessionExpired(
-        makeSession(daysAgo(1)),
+        makeSession(daysAgo(2)),
         { resetHour: 0, idleMinutes: 0 },
       )).toBe(true);
     });
@@ -144,16 +149,16 @@ describe('isSessionExpired', () => {
 
     it('accepts timezone parameter without error', () => {
       expect(isSessionExpired(
-        makeSession(daysAgo(1)),
-        { resetHour: 4, idleMinutes: 0 },
+        makeSession(daysAgo(2)),
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
         'Asia/Singapore',
       )).toBe(true);
     });
 
     it('falls back to UTC for invalid timezone', () => {
       expect(() => isSessionExpired(
-        makeSession(daysAgo(1)),
-        { resetHour: 4, idleMinutes: 0 },
+        makeSession(daysAgo(2)),
+        { resetHour: SAFE_RESET_HOUR, idleMinutes: 0 },
         'Invalid/Timezone',
       )).not.toThrow();
     });
