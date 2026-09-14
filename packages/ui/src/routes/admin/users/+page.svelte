@@ -46,7 +46,7 @@
   let userSortKey = $state<'name' | 'sessions' | 'usage' | 'created'>('name');
   let userSortAsc = $state(true);
 
-  let filteredUsers = $derived((): UserInfo[] => {
+  let filteredUsers = $derived.by((): UserInfo[] => {
     let list = users;
     if (userSearch) {
       const q = userSearch.toLowerCase();
