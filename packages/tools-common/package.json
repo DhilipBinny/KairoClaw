@@ -19,11 +19,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agw/types": "workspace:*",
-    "@agw/tool-platform": "workspace:*",
-    "nodemailer": "^7.0.3",
     "@agw/memory-engine": "workspace:*",
-    "@agw/sandbox": "workspace:*"
+    "@agw/sandbox": "workspace:*",
+    "@agw/tool-platform": "workspace:*",
+    "@agw/types": "workspace:*",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.12.3",
+    "nodemailer": "^7.0.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
