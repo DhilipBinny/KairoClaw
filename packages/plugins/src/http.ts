@@ -252,20 +252,23 @@ export function registerHttpPlugins(
               }
             }
 
-            // Auto-convert file paths to base64 for parameters expecting image data
-            for (const [name, rawDef] of Object.entries(endpoint.parameters)) {
-              const def = rawDef as EndpointParamDef;
-              const val = resolvedArgs[name];
-              if (typeof val !== 'string' || !val) continue;
-              const desc = (def.description || '').toLowerCase();
-              if (!desc.includes('base64')) continue;
-              if (val.length > 1000) continue; // already base64 data
-              // Check if value is a file path or media URL
-              const filePath = val.startsWith('/api/v1/media/')
-                ? path.join(mediaStore?.dir || '', path.basename(val.split('?')[0]))
-                : val;
-              if (filePath.startsWith('/') && fs.existsSync(filePath)) {
-                resolvedArgs[name] = fs.readFileSync(filePath).toString('base64');
+            // Auto-convert media references to base64 for parameters expecting image data.
+            // Only resolves /api/v1/media/ URLs — never arbitrary file paths (path traversal risk).
+            if (mediaStore) {
+              for (const [name, rawDef] of Object.entries(endpoint.parameters)) {
+                const def = rawDef as EndpointParamDef;
+                const val = resolvedArgs[name];
+                if (typeof val !== 'string' || !val) continue;
+                const desc = (def.description || '').toLowerCase();
+                if (!desc.includes('base64')) continue;
+                if (val.length > 1000) continue;
+                if (!val.startsWith('/api/v1/media/')) continue;
+                const baseDir = fs.realpathSync(mediaStore.dir);
+                const candidate = path.join(baseDir, path.basename(val.split('?')[0]));
+                let resolved: string;
+                try { resolved = fs.realpathSync(candidate); } catch { continue; }
+                if (!resolved.startsWith(baseDir + path.sep)) continue;
+                resolvedArgs[name] = fs.readFileSync(resolved).toString('base64');
               }
             }
 
