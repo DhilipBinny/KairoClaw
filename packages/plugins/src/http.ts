@@ -220,10 +220,13 @@ export function registerHttpPlugins(
       const toolName = `http_${plugin.name}_${endpoint.name}`;
       const { properties, required } = buildParameterSchema(endpoint.parameters);
 
+      const searchTerms = [plugin.name, endpoint.name, endpoint.description || ''].join(' ');
+
       const registration: ToolRegistration = {
         definition: {
           name: toolName,
           description: `${endpoint.description || `${endpoint.method} ${endpoint.path}`}\nPlugin: ${plugin.name} (${plugin.description || plugin.baseUrl})`,
+          searchHint: searchTerms,
           parameters: {
             type: 'object',
             properties,
