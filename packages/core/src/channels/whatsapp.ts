@@ -9,6 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PENDING_SEEN_CAP, PENDING_PENDING_CAP } from '../constants.js';
+
+/** WhatsApp image size limit — larger images sent as documents to avoid upload failures. */
+const IMAGE_SIZE_LIMIT = 10 * 1024 * 1024;
 import { extractMedia } from '../media/detector.js';
 import type { MediaItem } from '../media/detector.js';
 import type { MediaAttachment } from '@agw/types';
@@ -888,7 +891,10 @@ class WhatsAppChannel implements Channel {
     if (!this.sock) throw new Error('WhatsApp not connected');
     const data = await fs.promises.readFile(item.filePath);
 
-    switch (item.type) {
+    const effectiveType = item.type === 'image' && data.length > IMAGE_SIZE_LIMIT
+      ? 'document' : item.type;
+
+    switch (effectiveType) {
       case 'image':
         await this.sock.sendMessage(jid, { image: data, caption });
         break;

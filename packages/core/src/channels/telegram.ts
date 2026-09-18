@@ -10,6 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Bot, InputFile } from 'grammy';
 import { PENDING_SEEN_CAP, PENDING_PENDING_CAP } from '../constants.js';
+
+/** Telegram sendPhoto limit — images above this are sent as documents. */
+const PHOTO_SIZE_LIMIT = 10 * 1024 * 1024;
 import { extractMedia } from '../media/detector.js';
 import type { MediaItem } from '../media/detector.js';
 import type { Context } from 'grammy';
@@ -709,7 +712,10 @@ class TelegramChannel implements Channel {
       reply_parameters: replyParams,
     };
 
-    switch (item.type) {
+    const effectiveType = item.type === 'image' && fs.statSync(item.filePath).size > PHOTO_SIZE_LIMIT
+      ? 'document' : item.type;
+
+    switch (effectiveType) {
       case 'image':
         await ctx.replyWithPhoto(file, opts);
         break;
@@ -822,7 +828,10 @@ class TelegramChannel implements Channel {
         const file = new InputFile(fs.createReadStream(item.filePath), item.fileName);
         const opts = { caption: !mediaSent ? caption : undefined, parse_mode: (!mediaSent && caption) ? 'HTML' as const : undefined };
         try {
-          switch (item.type) {
+          const effectiveType = item.type === 'image' && fs.statSync(item.filePath).size > PHOTO_SIZE_LIMIT
+            ? 'document' : item.type;
+
+          switch (effectiveType) {
             case 'image':
               await this.bot.api.sendPhoto(targetChatId, file, opts);
               break;
@@ -835,6 +844,7 @@ class TelegramChannel implements Channel {
             case 'video':
               await this.bot.api.sendVideo(targetChatId, file, opts);
               break;
+            case 'document':
             default:
               await this.bot.api.sendDocument(targetChatId, file, opts);
               break;
