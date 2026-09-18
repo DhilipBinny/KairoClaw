@@ -890,7 +890,11 @@ class WhatsAppChannel implements Channel {
 
     switch (item.type) {
       case 'image':
-        await this.sock.sendMessage(jid, { image: data, caption });
+        if (data.length > 10 * 1024 * 1024) {
+          await this.sock.sendMessage(jid, { document: data, mimetype: item.mimeType, fileName: item.fileName, caption });
+        } else {
+          await this.sock.sendMessage(jid, { image: data, caption });
+        }
         break;
       case 'audio':
       case 'voice':

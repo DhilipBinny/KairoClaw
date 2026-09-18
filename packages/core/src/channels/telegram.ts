@@ -823,9 +823,15 @@ class TelegramChannel implements Channel {
         const opts = { caption: !mediaSent ? caption : undefined, parse_mode: (!mediaSent && caption) ? 'HTML' as const : undefined };
         try {
           switch (item.type) {
-            case 'image':
-              await this.bot.api.sendPhoto(targetChatId, file, opts);
+            case 'image': {
+              const fileSizeMB = fs.statSync(item.filePath).size / (1024 * 1024);
+              if (fileSizeMB > 10) {
+                await this.bot.api.sendDocument(targetChatId, file, opts);
+              } else {
+                await this.bot.api.sendPhoto(targetChatId, file, opts);
+              }
               break;
+            }
             case 'audio':
               await this.bot.api.sendAudio(targetChatId, file, opts);
               break;
