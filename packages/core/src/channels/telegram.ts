@@ -710,9 +710,15 @@ class TelegramChannel implements Channel {
     };
 
     switch (item.type) {
-      case 'image':
-        await ctx.replyWithPhoto(file, opts);
+      case 'image': {
+        const fileSizeMB = fs.statSync(item.filePath).size / (1024 * 1024);
+        if (fileSizeMB > 10) {
+          await ctx.replyWithDocument(file, opts);
+        } else {
+          await ctx.replyWithPhoto(file, opts);
+        }
         break;
+      }
       case 'audio':
         await ctx.replyWithAudio(file, opts);
         break;
