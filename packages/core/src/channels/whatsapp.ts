@@ -36,7 +36,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { markdownToWhatsAppFmt } from './markdown.js';
-import { createModuleLogger } from '../observability/logger.js';
+import { createModuleLogger, withTraceIdAsync } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
 const log = createModuleLogger('channel.whatsapp');
@@ -346,6 +346,7 @@ class WhatsAppChannel implements Channel {
     overrideText?: string,
     preloadedImages?: Array<{ data: string; mimeType: string; filename?: string }>,
   ): Promise<void> {
+    return withTraceIdAsync(async () => {
     if (!this.runner || !this.sock) return;
     if (!msg.message || !msg.key.remoteJid) return;
 
@@ -822,6 +823,7 @@ class WhatsAppChannel implements Channel {
         /* ignore */
       }
     }
+    }); // withTraceIdAsync
   }
 
   // ── Media download ──────────────────────────────────────

@@ -19,7 +19,7 @@ import { AgentQueue } from '../queue/index.js';
 import { SessionRepository } from '../db/repositories/session.js';
 import { MessageRepository } from '../db/repositories/message.js';
 import { findUserByApiKey } from '../auth/keys.js';
-import { createModuleLogger } from '../observability/logger.js';
+import { createModuleLogger, withTraceIdAsync, getTraceId } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 import { getModelShortName, shouldShowModelIndicator } from './utils.js';
 
@@ -314,7 +314,8 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         return;
       }
 
-      const requestId = `ws-${Date.now().toString(36)}`;
+      await withTraceIdAsync(async () => {
+      const requestId = getTraceId()!;
 
       try {
         switch (msg.type) {
@@ -640,6 +641,7 @@ export const webchatPlugin: FastifyPluginAsync<WebchatPluginOptions> = async (ap
         log.error({ err: errMsg, type: msg.type, requestId }, 'WebChat message handler error');
         safeSend({ type: 'error', message: 'Internal server error', requestId });
       }
+      }); // withTraceIdAsync
     });
 
     // ── Cleanup ──────────────────────────────────

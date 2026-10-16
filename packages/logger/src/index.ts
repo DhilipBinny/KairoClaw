@@ -342,3 +342,6 @@ export function getLogFilePath(date: string): string | null {
   const filePath = path.join(_logsDir, `server-${date}.log`);
   return fs.existsSync(filePath) ? filePath : null;
 }
+
+// ── Trace Context ─────────────────────────────────
+export { getTraceId, withTraceId, withTraceIdAsync } from './trace.js';

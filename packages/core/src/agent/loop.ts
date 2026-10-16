@@ -42,7 +42,7 @@ import { MAX_TOOL_RESULT_CHARS, MAX_TOTAL_TOOL_RESULTS, TOOL_LOOP_THRESHOLD } fr
 import { SubAgentRegistry } from './subagent-registry.js';
 import { SUBAGENT_PENDING_MARKER } from '../tools/builtin/subagent.js';
 import { getModelCapabilities, estimateCost } from '@agw/provider-bridge';
-import { createModuleLogger } from '../observability/logger.js';
+import { createModuleLogger, getTraceId } from '../observability/logger.js';
 import { filterOutput, containsSecrets, redactSecrets, createStreamingRedactor, checkOutputSafety, detectPromptInjection, neutralizeToolResultDelimiters, sanitizeToolName } from '@agw/security';
 
 /**
@@ -698,7 +698,7 @@ export async function runAgent(
     : undefined;
   const { db, config, session, tenantId, userId } = context;
   const ephemeral = context.ephemeral ?? false;
-  const requestId = `req-${crypto.randomUUID().slice(0, 12)}`;
+  const requestId = getTraceId() ?? `req-${crypto.randomUUID().slice(0, 12)}`;
   const maxToolRounds = config.agent?.maxToolRounds || 25;
 
   // ── Model routing ───────────────────────────────────────
