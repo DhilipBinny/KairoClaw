@@ -36,6 +36,11 @@ WORKDIR /app
 
 # Self-contained @agw/core with all workspace deps resolved
 COPY --from=build /prod/core .
+# Rebuild native addons for the runtime Node version (needs build tools temporarily)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && npm rebuild better-sqlite3 \
+    && apt-get purge -y python3 make g++ && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 # DB migrations (needed at runtime)
 COPY --from=build /app/packages/core/dist/db/migrations dist/db/migrations/
 # UI build (served by core, not a npm dependency)
