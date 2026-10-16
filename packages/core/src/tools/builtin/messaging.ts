@@ -270,6 +270,7 @@ IMPORTANT delivery rules:
             },
           },
           enabled: { type: 'boolean', description: 'Enable or disable the job' },
+          variety: { type: 'boolean', description: 'Enable theme tracking — the agent records what themes it used so future runs avoid repeating them. Use for creative tasks (images, stories, varied content). Not needed for factual tasks (news, status checks).' },
         },
         required: ['action'],
       },
@@ -416,6 +417,7 @@ IMPORTANT delivery rules:
             prompt: args.prompt,
             delivery: delivery || 'none',
             enabled: args.enabled !== false,
+            variety: args.variety === true,
             userId: ownerId,
           });
           return {
@@ -439,6 +441,7 @@ IMPORTANT delivery rules:
           if (args.prompt !== undefined) updates.prompt = args.prompt;
           if (args.delivery !== undefined) updates.delivery = args.delivery;
           if (args.enabled !== undefined) updates.enabled = args.enabled;
+          if (args.variety !== undefined) updates.variety = args.variety;
           const updated = cronScheduler.update(args.id as string, updates);
           if (!updated) return { error: `Job not found: ${args.id}` };
           return { success: true, job: { id: updated.id, name: updated.name, schedule: updated.schedule, enabled: updated.enabled } };

@@ -42,7 +42,7 @@ import { SenderLinkRepository } from './db/repositories/sender-link.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
-import { loadCronOutputHistory, saveCronOutput } from './cron/output-history.js';
+import { loadCronOutputHistory, saveCronOutput, createRecordThemeTool } from './cron/output-history.js';
 import { ALERT_TYPES } from '@agw/types';
 import { AlertManager } from './alerts/index.js';
 import { WebSocketAlertChannel } from './alerts/channels/websocket.js';
@@ -850,12 +850,19 @@ async function main(): Promise<void> {
       // Use job owner's userId if set — cron runs with their permissions
       const cronUserId = job.userId || 'system';
 
-      // Inject previous cron outputs as context so the agent knows what
-      // it already generated (prevents repetitive output for creative tasks)
-      const previousOutputs = loadCronOutputHistory(stateDir, job.id);
-      const promptWithContext = previousOutputs
-        ? `${job.prompt}\n\n<previous_runs>\n${previousOutputs}\n</previous_runs>\nIMPORTANT: The above shows your previous outputs for this scheduled task. Produce something DIFFERENT and FRESH — do not repeat.`
-        : job.prompt;
+      // Variety mode: inject theme tracking for creative crons that need diverse output
+      const needsVariety = !!job.variety;
+      let promptWithContext = job.prompt;
+
+      if (needsVariety) {
+        toolRegistry.register(createRecordThemeTool(stateDir, job.id));
+
+        const exclusionList = loadCronOutputHistory(stateDir, job.id);
+        const themeInstruction = '\n\nAfter generating your content, call the record_theme tool with a short description (under 10 words) of the theme you chose.';
+        promptWithContext = exclusionList
+          ? `${job.prompt}\n\nAlready covered: ${exclusionList}\nDo NOT repeat any topic or theme listed above. Choose something distinctly different.${themeInstruction}`
+          : `${job.prompt}${themeInstruction}`;
+      }
 
       const inbound: InboundMessage = {
         text: promptWithContext,
@@ -865,7 +872,13 @@ async function main(): Promise<void> {
         userId: cronUserId,
         senderName: 'Cron',
       };
-      const result = await createRunner(inbound);
+
+      let result;
+      try {
+        result = await createRunner(inbound);
+      } finally {
+        if (needsVariety) toolRegistry.unregister('record_theme');
+      }
 
       // Save this run's output for future context injection
       if (result.text) {

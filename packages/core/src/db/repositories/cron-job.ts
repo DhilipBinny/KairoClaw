@@ -11,6 +11,7 @@ export interface CronJobRow {
   prompt: string;
   delivery: string; // JSON
   enabled: number;
+  variety: number;
   last_run: string | null;
   last_result: string | null;
   run_count: number;
@@ -53,13 +54,14 @@ export class CronJobRepository {
     prompt: string;
     delivery: string;
     enabled?: boolean;
+    variety?: number;
   }): Promise<CronJobRow> {
     const now = new Date().toISOString();
     await this.db.run(
-      `INSERT INTO cron_jobs (id, tenant_id, user_id, name, schedule_type, schedule_value, timezone, prompt, delivery, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO cron_jobs (id, tenant_id, user_id, name, schedule_type, schedule_value, timezone, prompt, delivery, enabled, variety, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [job.id, job.tenantId, job.userId ?? null, job.name, job.scheduleType, job.scheduleValue,
-       job.timezone ?? null, job.prompt, job.delivery, job.enabled !== false ? 1 : 0, now, now],
+       job.timezone ?? null, job.prompt, job.delivery, job.enabled !== false ? 1 : 0, job.variety ?? 0, now, now],
     );
     return (await this.getById(job.id, job.tenantId))!;
   }
@@ -72,6 +74,7 @@ export class CronJobRepository {
     prompt: string;
     delivery: string;
     enabled: boolean;
+    variety: number;
     userId: string | null;
   }>): Promise<void> {
     const fields: string[] = [];
