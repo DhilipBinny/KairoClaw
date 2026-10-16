@@ -435,6 +435,95 @@
       </div>
     </div>
 
+    <!-- Budget Settings -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--warning, #d97706)">
+          <line x1="12" y1="1" x2="12" y2="23"></line>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        Budget
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="budget-dailyCap">Daily Cap (USD)</label>
+            <span class="field-hint">Maximum daily spend. 0 = unlimited. Resets at midnight ({getVal('agent.timezone') || 'UTC'})</span>
+          </div>
+          <div class="field-control">
+            <div class="input-action">
+              <input
+                id="budget-dailyCap"
+                class="input input-narrow"
+                type="number"
+                min="0"
+                step="0.5"
+                value={getVal('agent.budget.dailyCapUsd') ?? 0}
+                onblur={(e) => saveNumberField('agent.budget.dailyCapUsd', e)}
+                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+              {#if saving['agent.budget.dailyCapUsd']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+            </div>
+            {#if feedback['agent.budget.dailyCapUsd']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.budget.dailyCapUsd'].ok} class:err={!feedback['agent.budget.dailyCapUsd'].ok}>
+                {feedback['agent.budget.dailyCapUsd'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="budget-monthlyCap">Monthly Cap (USD)</label>
+            <span class="field-hint">Maximum monthly spend. 0 = unlimited. Resets on the 1st</span>
+          </div>
+          <div class="field-control">
+            <div class="input-action">
+              <input
+                id="budget-monthlyCap"
+                class="input input-narrow"
+                type="number"
+                min="0"
+                step="1"
+                value={getVal('agent.budget.monthlyCapUsd') ?? 0}
+                onblur={(e) => saveNumberField('agent.budget.monthlyCapUsd', e)}
+                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+              {#if saving['agent.budget.monthlyCapUsd']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+            </div>
+            {#if feedback['agent.budget.monthlyCapUsd']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.budget.monthlyCapUsd'].ok} class:err={!feedback['agent.budget.monthlyCapUsd'].ok}>
+                {feedback['agent.budget.monthlyCapUsd'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="budget-enforcement">When Limit Reached</label>
+            <span class="field-hint">How to handle requests after budget is exhausted</span>
+          </div>
+          <div class="field-control">
+            <select
+              id="budget-enforcement"
+              class="select-input"
+              disabled={!!saving['agent.budget.enforcement']}
+              value={getVal('agent.budget.enforcement') || 'downgrade'}
+              onchange={(e) => saveField('agent.budget.enforcement', (e.target as HTMLSelectElement).value)}
+            >
+              <option value="downgrade">Downgrade to cheapest model</option>
+              <option value="block">Block with message</option>
+              <option value="alert">Alert only (continue serving)</option>
+            </select>
+            {#if feedback['agent.budget.enforcement']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.budget.enforcement'].ok} class:err={!feedback['agent.budget.enforcement'].ok}>
+                {feedback['agent.budget.enforcement'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Thinking Settings -->
     <div class="section">
       <h2 class="section-title">
