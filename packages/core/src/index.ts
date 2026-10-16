@@ -114,6 +114,12 @@ async function main(): Promise<void> {
   // 1. Load config
   const config = loadConfig();
 
+  // 1b. Enable PII redaction if configured
+  if ((config.agent as any)?.piiRedaction) {
+    const { enablePiiRedaction } = await import('@agw/security');
+    enablePiiRedaction(true);
+  }
+
   // 2. Initialize database
   const home = process.env.HOME || process.env.USERPROFILE;
   if (!process.env.AGW_STATE_DIR && !home) {
@@ -819,6 +825,11 @@ async function main(): Promise<void> {
         tgAlertChannel.setSender(null as unknown as (chatId: string, text: string) => Promise<void>);
         server.log.info('Telegram channel stopped via Settings');
       }
+    }
+    if (dotPath === 'agent.piiRedaction') {
+      const { enablePiiRedaction } = await import('@agw/security');
+      enablePiiRedaction(!!value);
+      server.log.info({ enabled: !!value }, 'PII redaction toggled via Settings');
     }
   };
 

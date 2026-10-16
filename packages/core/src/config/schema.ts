@@ -310,6 +310,7 @@ const agentSchema = z.object({
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
   maxBackgroundTasks: z.number().int().min(1).default(10),
   budget: withObjectDefault(budgetSchema),
+  piiRedaction: z.boolean().default(false),
   debug: withObjectDefault(debugSchema),
 });
 
