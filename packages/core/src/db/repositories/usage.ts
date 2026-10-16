@@ -258,4 +258,48 @@ export class UsageRepository {
       byChannel: channelMap.get(u.user_id) ?? [],
     }));
   }
+
+  async getTodayCost(tenantId: string, timezone: string, userId?: string): Promise<number> {
+    const todayStart = getTodayStart(timezone);
+    const params: unknown[] = [tenantId, todayStart];
+    let userClause = '';
+    if (userId) {
+      userClause = ' AND user_id = ?';
+      params.push(userId);
+    }
+    const row = await this.db.get<{ cost: number }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) as cost FROM usage_records WHERE tenant_id = ? AND created_at >= ?${userClause}`,
+      params,
+    );
+    return row?.cost ?? 0;
+  }
+
+  async getMonthCost(tenantId: string, timezone: string, userId?: string): Promise<number> {
+    const monthStart = getMonthStart(timezone);
+    const params: unknown[] = [tenantId, monthStart];
+    let userClause = '';
+    if (userId) {
+      userClause = ' AND user_id = ?';
+      params.push(userId);
+    }
+    const row = await this.db.get<{ cost: number }>(
+      `SELECT COALESCE(SUM(cost_usd), 0) as cost FROM usage_records WHERE tenant_id = ? AND created_at >= ?${userClause}`,
+      params,
+    );
+    return row?.cost ?? 0;
+  }
+}
+
+function getTodayStart(timezone: string): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dateStr = formatter.format(now);
+  return `${dateStr}T00:00:00`;
+}
+
+function getMonthStart(timezone: string): string {
+  const now = new Date();
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit' });
+  const parts = formatter.format(now).split('-');
+  return `${parts[0]}-${parts[1]}-01T00:00:00`;
 }

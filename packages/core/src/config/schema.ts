@@ -271,6 +271,15 @@ const debugSchema = z.object({
   recordPrompt: z.boolean().default(false),
 });
 
+const budgetEnforcementSchema = z.enum(['block', 'downgrade', 'alert']).default('downgrade');
+
+const budgetSchema = z.object({
+  dailyCapUsd: z.number().min(0).default(0),
+  monthlyCapUsd: z.number().min(0).default(0),
+  enforcement: budgetEnforcementSchema,
+  alertThresholds: z.array(z.number().min(0).max(100)).default([80, 95]),
+});
+
 const agentSchema = z.object({
   name: z.string().default('Assistant').transform(v => v.replace(/[^\w \-'.]/g, '').slice(0, 50)),
   timezone: z.string().default('UTC').transform((tz) => {
@@ -299,6 +308,7 @@ const agentSchema = z.object({
   routing: withObjectDefault(routingSchema),
   showModelIndicator: withObjectDefault(modelIndicatorSchema),
   maxBackgroundTasks: z.number().int().min(1).default(10),
+  budget: withObjectDefault(budgetSchema),
   debug: withObjectDefault(debugSchema),
 });
 
