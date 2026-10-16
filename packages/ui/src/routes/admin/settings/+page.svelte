@@ -523,27 +523,11 @@
         </div>
         <div class="field-row">
           <div class="field-info">
-            <label class="field-label" for="budget-downgradeModel">Downgrade Model</label>
-            <span class="field-hint">Model to use when budget is exceeded and enforcement is "downgrade" (e.g. anthropic/claude-haiku-3-5). Required for downgrade mode — falls back to block if empty</span>
+            <label class="field-label">Downgrade Model</label>
+            <span class="field-hint">Model to use when budget is exceeded. Set from <a href="/admin/providers">Providers & Models</a> page. Required for downgrade mode — falls back to block if empty</span>
           </div>
           <div class="field-control">
-            <div class="input-action">
-              <input
-                id="budget-downgradeModel"
-                class="input"
-                type="text"
-                placeholder="anthropic/claude-haiku-3-5"
-                value={getVal('agent.budget.downgradeModel') ?? ''}
-                onblur={(e) => saveStringField('agent.budget.downgradeModel', e)}
-                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-              />
-              {#if saving['agent.budget.downgradeModel']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
-            </div>
-            {#if feedback['agent.budget.downgradeModel']?.msg}
-              <span class="field-feedback" class:ok={feedback['agent.budget.downgradeModel'].ok} class:err={!feedback['agent.budget.downgradeModel'].ok}>
-                {feedback['agent.budget.downgradeModel'].msg}
-              </span>
-            {/if}
+            <code style="font-size: 13px;">{getVal('agent.budget.downgradeModel') || 'Not set'}</code>
           </div>
         </div>
       </div>
