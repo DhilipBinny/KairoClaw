@@ -106,6 +106,7 @@ export interface CronJobRow {
   prompt: string;
   delivery: string;
   enabled: number;
+  variety: number;
   last_run: string | null;
   last_result: string | null;
   run_count: number;
@@ -116,7 +117,7 @@ export interface CronJobRow {
 export interface CronJobStore {
   listByTenant(tenantId: string): Promise<CronJobRow[]>;
   getById(id: string, tenantId: string): Promise<CronJobRow | undefined>;
-  create(job: { id: string; tenantId: string; userId?: string | null; name: string; scheduleType: string; scheduleValue: string; timezone?: string; prompt: string; delivery: string; enabled?: boolean }): Promise<CronJobRow>;
+  create(job: { id: string; tenantId: string; userId?: string | null; name: string; scheduleType: string; scheduleValue: string; timezone?: string; prompt: string; delivery: string; enabled?: boolean; variety?: number }): Promise<CronJobRow>;
   update(id: string, tenantId: string, fields: Record<string, unknown>): Promise<void>;
   delete(id: string, tenantId: string): Promise<void>;
   updateLastRun?(id: string, tenantId: string, result?: string): Promise<void>;
@@ -157,7 +158,8 @@ export interface CronJob {
   lastDelivered: boolean | null;
   lastDeliveryChannel: string | null;
   runCount: number;
-  userId?: string | null; // owner -- crons run with this user's permissions
+  userId?: string | null;
+  variety?: boolean;
 }
 
 export type JobExecutor = (job: CronJob) => Promise<{ text?: string; media?: import('@agw/types').MediaAttachment[] }>;
@@ -303,6 +305,7 @@ export class CronScheduler {
             prompt: job.prompt,
             delivery: typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery),
             enabled: job.enabled,
+            variety: job.variety ? 1 : 0,
             userId: job.userId ?? null,
           });
         } else {
@@ -317,6 +320,7 @@ export class CronScheduler {
             prompt: job.prompt,
             delivery: typeof job.delivery === 'string' ? job.delivery : JSON.stringify(job.delivery),
             enabled: job.enabled,
+            variety: job.variety ? 1 : 0,
           });
         }
         return;
@@ -356,6 +360,7 @@ export class CronScheduler {
       lastDeliveryChannel: null,
       runCount: row.run_count,
       userId: row.user_id,
+      variety: !!row.variety,
     };
   }
 
@@ -617,6 +622,7 @@ export class CronScheduler {
     payload?: { message?: string };
     delivery?: CronJobDelivery | string;
     enabled?: boolean;
+    variety?: boolean;
     userId?: string | null;
   }): CronJob {
     const schedule = jobSpec.schedule || ({} as any);
@@ -676,6 +682,7 @@ export class CronScheduler {
       lastDelivered: null,
       lastDeliveryChannel: null,
       userId: jobSpec.userId ?? null,
+      variety: jobSpec.variety ?? false,
       runCount: 0,
     };
 
