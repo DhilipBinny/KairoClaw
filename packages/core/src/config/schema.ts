@@ -311,6 +311,7 @@ const agentSchema = z.object({
   maxBackgroundTasks: z.number().int().min(1).default(10),
   budget: withObjectDefault(budgetSchema),
   piiRedaction: z.boolean().default(false),
+  toolTimeout: z.number().int().min(0).default(120),
   debug: withObjectDefault(debugSchema),
 });
 
