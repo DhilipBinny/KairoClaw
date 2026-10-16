@@ -284,6 +284,12 @@
     return (model?.fallback as string) || 'Not set';
   }
 
+  function getBudgetModel(): string {
+    const agent = config?.agent as Record<string, unknown> | undefined;
+    const budget = agent?.budget as Record<string, unknown> | undefined;
+    return (budget?.downgradeModel as string) || '';
+  }
+
   function getProviderConfig(id: string): ProviderConfig | null {
     const prov = config?.providers as Record<string, ProviderConfig> | undefined;
     return prov?.[id] || null;
@@ -354,6 +360,28 @@
       }
       saveMessage = `Fallback model set to ${fullRef}`;
       loadModelInfo();
+    } catch (e: unknown) {
+      saveMessage = `Failed to save: ${e instanceof Error ? e.message : 'Unknown error'}`;
+    } finally {
+      savingModel = '';
+    }
+  }
+
+  async function handleSetBudgetModel(providerId: string, modelId: string) {
+    const fullRef = `${providerId}/${modelId}`;
+    savingModel = modelId;
+    saveMessage = '';
+    try {
+      await updateConfig('agent.budget.downgradeModel', fullRef);
+      if (config) {
+        const agent = (config.agent || {}) as Record<string, unknown>;
+        const budget = (agent.budget || {}) as Record<string, unknown>;
+        budget.downgradeModel = fullRef;
+        agent.budget = budget;
+        config.agent = agent;
+        config = { ...config };
+      }
+      saveMessage = `Budget model set to ${fullRef}`;
     } catch (e: unknown) {
       saveMessage = `Failed to save: ${e instanceof Error ? e.message : 'Unknown error'}`;
     } finally {
@@ -760,6 +788,18 @@
                                 {savingModel === model.id ? 'Saving...' : 'Set as Fallback'}
                               </button>
                             {/if}
+                            {#if getBudgetModel() === `${provider.id}/${model.id}`}
+                              <Badge variant="blue">Budget</Badge>
+                            {:else}
+                              <button
+                                class="btn btn-xs"
+                                aria-label="Set {model.name || model.id} as budget downgrade model"
+                                onclick={() => handleSetBudgetModel(provider.id, model.id)}
+                                disabled={savingModel === model.id}
+                              >
+                                {savingModel === model.id ? 'Saving...' : 'Set as Budget'}
+                              </button>
+                            {/if}
                             <button
                               class="btn btn-xs"
                               aria-label="Edit capabilities for {model.name || model.id}"
@@ -1026,6 +1066,13 @@
                               {#if !isFallback}
                                 <button class="btn btn-xs" onclick={() => handleSetFallback('kairo-premium', model.id)} disabled={savingModel === model.id}>
                                   Set Fallback
+                                </button>
+                              {/if}
+                              {#if getBudgetModel() === fullRef}
+                                <Badge variant="blue">Budget</Badge>
+                              {:else}
+                                <button class="btn btn-xs" onclick={() => handleSetBudgetModel('kairo-premium', model.id)} disabled={savingModel === model.id}>
+                                  Set Budget
                                 </button>
                               {/if}
                             </div>

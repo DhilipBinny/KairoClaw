@@ -21,6 +21,7 @@ function makeConfig(budget: {
   dailyCapUsd?: number;
   monthlyCapUsd?: number;
   enforcement?: string;
+  downgradeModel?: string;
   alertThresholds?: number[];
 }): GatewayConfig {
   return {
@@ -30,6 +31,7 @@ function makeConfig(budget: {
         dailyCapUsd: budget.dailyCapUsd ?? 0,
         monthlyCapUsd: budget.monthlyCapUsd ?? 0,
         enforcement: budget.enforcement ?? 'downgrade',
+        downgradeModel: budget.downgradeModel ?? '',
         alertThresholds: budget.alertThresholds ?? [80, 95],
       },
     },
@@ -55,7 +57,7 @@ describe('budget checker', () => {
     expect(result.allowed).toBe(true);
   });
 
-  it('denies when daily spend hits cap', async () => {
+  it('denies when daily spend hits cap and falls back to block without downgrade model', async () => {
     const result = await checkBudget(
       mockDb(5.01, 0),
       makeConfig({ dailyCapUsd: 5 }),
@@ -63,7 +65,7 @@ describe('budget checker', () => {
     );
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('Daily budget exhausted');
-    expect(result.enforcement).toBe('downgrade');
+    expect(result.enforcement).toBe('block');
   });
 
   it('denies when monthly spend hits cap', async () => {
@@ -118,5 +120,27 @@ describe('budget checker', () => {
     expect(result.dailyCap).toBe(5);
     expect(result.monthlyUsed).toBe(25);
     expect(result.monthlyCap).toBe(50);
+  });
+
+  it('returns downgradeModel when configured', async () => {
+    const result = await checkBudget(
+      mockDb(10, 0),
+      makeConfig({ dailyCapUsd: 5, enforcement: 'downgrade', downgradeModel: 'anthropic/claude-haiku-3-5' }),
+      'tenant-1',
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.enforcement).toBe('downgrade');
+    expect(result.downgradeModel).toBe('anthropic/claude-haiku-3-5');
+  });
+
+  it('falls back to block when downgrade has no model configured', async () => {
+    const result = await checkBudget(
+      mockDb(10, 0),
+      makeConfig({ dailyCapUsd: 5, enforcement: 'downgrade' }),
+      'tenant-1',
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.enforcement).toBe('block');
+    expect(result.downgradeModel).toBeUndefined();
   });
 });
