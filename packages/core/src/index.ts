@@ -850,16 +850,19 @@ async function main(): Promise<void> {
       // Use job owner's userId if set — cron runs with their permissions
       const cronUserId = job.userId || 'system';
 
-      // Register record_theme tool scoped to this cron run
-      const recordThemeTool = createRecordThemeTool(stateDir, job.id);
-      toolRegistry.register(recordThemeTool);
+      // Variety mode: inject theme tracking for creative crons that need diverse output
+      const needsVariety = !!job.variety;
+      let promptWithContext = job.prompt;
 
-      // Inject deduplicated exclusion list from past runs
-      const exclusionList = loadCronOutputHistory(stateDir, job.id);
-      const themeInstruction = '\n\nAfter generating your content, call the record_theme tool with a short description (under 10 words) of the theme you chose.';
-      const promptWithContext = exclusionList
-        ? `${job.prompt}\n\nAlready covered: ${exclusionList}\nDo NOT repeat any topic or theme listed above. Choose something distinctly different.${themeInstruction}`
-        : `${job.prompt}${themeInstruction}`;
+      if (needsVariety) {
+        toolRegistry.register(createRecordThemeTool(stateDir, job.id));
+
+        const exclusionList = loadCronOutputHistory(stateDir, job.id);
+        const themeInstruction = '\n\nAfter generating your content, call the record_theme tool with a short description (under 10 words) of the theme you chose.';
+        promptWithContext = exclusionList
+          ? `${job.prompt}\n\nAlready covered: ${exclusionList}\nDo NOT repeat any topic or theme listed above. Choose something distinctly different.${themeInstruction}`
+          : `${job.prompt}${themeInstruction}`;
+      }
 
       const inbound: InboundMessage = {
         text: promptWithContext,
@@ -874,7 +877,7 @@ async function main(): Promise<void> {
       try {
         result = await createRunner(inbound);
       } finally {
-        toolRegistry.unregister('record_theme');
+        if (needsVariety) toolRegistry.unregister('record_theme');
       }
 
       // Save this run's output for future context injection
