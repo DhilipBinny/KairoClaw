@@ -42,6 +42,16 @@ export interface ToolRegistration {
    */
   interruptBehavior?: 'cancel' | 'block';
 
+  // ── Timeout ─────────────────────────────────────────────
+  /**
+   * Maximum execution time in milliseconds. When exceeded, the tool
+   * is aborted and an error returned to the LLM. Overrides the
+   * registry-wide default. Tools with their own internal timeouts
+   * (exec, web_fetch, MCP) are unaffected — their timeout fires first.
+   * Set to 0 to disable the safety net for this tool.
+   */
+  timeoutMs?: number;
+
   // ── Safety classification ────────────────────────────────
   /** True if this tool never modifies state. UI hint, not an enforced gate. */
   isReadOnly?: boolean;

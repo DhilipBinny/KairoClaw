@@ -11,6 +11,14 @@ import type { ProgressBus } from './progress-bus.js';
 import type { HooksConfig } from './hooks-runner.js';
 import { runPreToolUseHooks, runPostToolUseHooks } from './hooks-runner.js';
 
+function withToolTimeout<T>(promise: Promise<T>, ms: number, toolName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tool "${toolName}" timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
+}
+
 interface Phase6ContextExtensions {
   loopDetector?: LoopDetector;
   resultStorage?: ResultStorage;
@@ -110,6 +118,8 @@ export interface ToolRegistryDeps {
   permissionChecker?: PermissionChecker;
 }
 
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
 export class ToolRegistry {
   private tools = new Map<string, ToolRegistration>();
   private builtinNames = new Set<string>();
@@ -119,11 +129,16 @@ export class ToolRegistry {
   private hooks: HooksConfig = {};
   private loadedBySession = new Map<string, Set<string>>();
   private planModeBySession = new Set<string>();
+  private defaultTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS;
 
   constructor(deps?: ToolRegistryDeps) {
     this.auditLogger = deps?.auditLogger;
     this.toolCallRecorder = deps?.toolCallRecorder;
     this.permissionChecker = deps?.permissionChecker;
+  }
+
+  setDefaultTimeout(ms: number): void {
+    this.defaultTimeoutMs = ms;
   }
 
   setPlanMode(sessionId: string, active: boolean): void {
@@ -464,8 +479,13 @@ export class ToolRegistry {
     let result: ToolResult;
     let status = 'success';
 
+    const timeoutMs = registration.timeoutMs ?? this.defaultTimeoutMs;
+
     try {
-      result = await registration.executor(effectiveArgs, wrappedContext);
+      const executorPromise = registration.executor(effectiveArgs, wrappedContext);
+      result = timeoutMs > 0
+        ? await withToolTimeout(executorPromise, timeoutMs, name)
+        : await executorPromise;
 
       if (typeof result === 'object' && result !== null && 'error' in result) {
         status = 'error';
@@ -473,7 +493,7 @@ export class ToolRegistry {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       result = { error: message };
-      status = 'error';
+      status = message.includes('timed out after') ? 'timeout' : 'error';
     }
 
     if (this.hooks.PostToolUse && this.hooks.PostToolUse.length > 0) {

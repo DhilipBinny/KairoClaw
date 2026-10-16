@@ -432,6 +432,31 @@
             {/if}
           </div>
         </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="agent-toolTimeout">Tool Timeout (seconds)</label>
+            <span class="field-hint">Safety net for tool execution. Tools with their own timeout (exec, web_fetch) are unaffected. 0 = unlimited</span>
+          </div>
+          <div class="field-control">
+            <div class="input-action">
+              <input
+                id="agent-toolTimeout"
+                class="input input-narrow"
+                type="number"
+                min="0"
+                value={getVal('agent.toolTimeout') ?? 120}
+                onblur={(e) => saveNumberField('agent.toolTimeout', e)}
+                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+              {#if saving['agent.toolTimeout']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+            </div>
+            {#if feedback['agent.toolTimeout']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.toolTimeout'].ok} class:err={!feedback['agent.toolTimeout'].ok}>
+                {feedback['agent.toolTimeout'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
       </div>
     </div>
 
