@@ -510,7 +510,7 @@
               value={getVal('agent.budget.enforcement') || 'downgrade'}
               onchange={(e) => saveField('agent.budget.enforcement', (e.target as HTMLSelectElement).value)}
             >
-              <option value="downgrade">Downgrade to cheapest model</option>
+              <option value="downgrade">Downgrade to budget model</option>
               <option value="block">Block with message</option>
               <option value="alert">Alert only (continue serving)</option>
             </select>
@@ -519,6 +519,15 @@
                 {feedback['agent.budget.enforcement'].msg}
               </span>
             {/if}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label">Downgrade Model</label>
+            <span class="field-hint">Model to use when budget is exceeded. Set from <a href="/admin/providers">Providers & Models</a> page. Required for downgrade mode — falls back to block if empty</span>
+          </div>
+          <div class="field-control">
+            <code style="font-size: 13px;">{getVal('agent.budget.downgradeModel') || 'Not set'}</code>
           </div>
         </div>
       </div>

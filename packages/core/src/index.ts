@@ -606,10 +606,8 @@ async function main(): Promise<void> {
         if (budgetResult.enforcement === 'block') {
           return { text: budgetResult.reason ?? 'Budget limit reached. Please try again later.', error: true };
         }
-        if (budgetResult.enforcement === 'downgrade') {
-          const routing = config.agent?.routing;
-          const fastModel = routing?.fastModel?.trim();
-          if (fastModel) budgetModelOverride = fastModel;
+        if (budgetResult.enforcement === 'downgrade' && budgetResult.downgradeModel) {
+          budgetModelOverride = budgetResult.downgradeModel;
         }
       }
     }
