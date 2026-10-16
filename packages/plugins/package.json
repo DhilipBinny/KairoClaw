@@ -4,21 +4,26 @@
   "description": "Plugin coordinator — CLI wrappers, HTTP APIs, OpenAPI auto-discovery, media utils",
   "type": "module",
   "main": "dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agw/types": "workspace:*",
+    "@agw/schemas": "workspace:*",
     "@agw/tool-platform": "workspace:*",
     "@agw/tools-common": "workspace:*",
-    "@agw/schemas": "workspace:*",
-    "undici": "^6.21.0"
+    "@agw/types": "workspace:*",
+    "undici": "^6.29.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
