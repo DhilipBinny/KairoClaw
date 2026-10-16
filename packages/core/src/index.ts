@@ -854,7 +854,7 @@ async function main(): Promise<void> {
       // it already generated (prevents repetitive output for creative tasks)
       const previousOutputs = loadCronOutputHistory(stateDir, job.id);
       const promptWithContext = previousOutputs
-        ? `${job.prompt}\n\n<previous_runs>\n${previousOutputs}\n</previous_runs>\nIMPORTANT: The above shows your previous outputs for this scheduled task. Produce something DIFFERENT and FRESH — do not repeat.`
+        ? `${job.prompt}\n\n<previous_runs>\n${previousOutputs}\n</previous_runs>\nThe above summarizes what you produced in previous runs of this task. Choose a DIFFERENT topic, theme, or angle — do not repeat any of them.`
         : job.prompt;
 
       const inbound: InboundMessage = {
