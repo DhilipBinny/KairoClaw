@@ -9,6 +9,7 @@ function makeEvent(overrides?: Partial<AlertEvent>): AlertEvent {
   return {
     type: 'test_alert',
     severity: 'warning',
+    source: 'test',
     title: 'Test alert',
     message: 'Something happened',
     fingerprint: 'fp-1',
@@ -20,10 +21,20 @@ function makeEvent(overrides?: Partial<AlertEvent>): AlertEvent {
 
 function makeInstance(overrides?: Partial<AlertInstance>): AlertInstance {
   return {
+    fingerprint: 'fp-1',
+    type: 'test_alert',
+    severity: 'warning',
+    state: 'firing',
+    labels: {},
+    title: 'Test alert',
     message: 'Instance detail',
+    failureCount: 1,
+    successCount: 0,
+    pendingSince: null,
     firedAt: Date.now(),
     resolvedAt: null,
-    count: 1,
+    lastNotifiedAt: null,
+    lastEventAt: Date.now(),
     ...overrides,
   } as AlertInstance;
 }
