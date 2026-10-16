@@ -14,6 +14,7 @@ export {
   checkOutputSafety,
   neutralizeToolResultDelimiters,
   sanitizeToolName,
+  enablePiiRedaction,
 } from './output.js';
 
 export {

@@ -62,6 +62,35 @@ const SECRET_PATTERNS: readonly SecretPattern[] = [
   },
 ];
 
+// ── PII Patterns (opt-in) ──────────────────────────────────
+
+function luhnCheck(digits: string): boolean {
+  const nums = digits.replace(/\D/g, '');
+  let sum = 0;
+  let alt = false;
+  for (let i = nums.length - 1; i >= 0; i--) {
+    let n = parseInt(nums[i]!, 10);
+    if (alt) { n *= 2; if (n > 9) n -= 9; }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+const PII_PATTERNS: readonly SecretPattern[] = [
+  { id: 'PII_EMAIL', regex: /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g, label: '***EMAIL_REDACTED***', priority: 30 },
+  { id: 'PII_PHONE', regex: /(?<!\d)(?:\+\d{1,4}[\s.-])?\(?\d{2,4}\)[\s.-]?\d{3,4}[\s.-]\d{4}(?!\d)/g, label: '***PHONE_REDACTED***', priority: 25 },
+  { id: 'PII_SSN', regex: /\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g, label: '***SSN_REDACTED***', priority: 40 },
+  { id: 'PII_CREDIT_CARD', regex: /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g, label: '***CARD_REDACTED***', priority: 45 },
+  { id: 'PII_NRIC', regex: /\b[STFGM]\d{7}[A-Z]\b/g, label: '***NRIC_REDACTED***', priority: 40 },
+];
+
+let _piiEnabled = false;
+
+export function enablePiiRedaction(enabled: boolean): void {
+  _piiEnabled = enabled;
+}
+
 // ── Span Collection & Resolution ────────────────────────────
 
 interface Span {
@@ -74,10 +103,14 @@ interface Span {
 
 function collectSpans(text: string): Span[] {
   const spans: Span[] = [];
-  for (const pattern of SECRET_PATTERNS) {
+  const patterns = _piiEnabled
+    ? [...SECRET_PATTERNS, ...PII_PATTERNS]
+    : SECRET_PATTERNS;
+  for (const pattern of patterns) {
     const re = new RegExp(pattern.regex.source, pattern.regex.flags);
     let match: RegExpExecArray | null;
     while ((match = re.exec(text)) !== null) {
+      if (pattern.id === 'PII_CREDIT_CARD' && !luhnCheck(match[0])) continue;
       const label = pattern.preservePrefix
         ? pattern.preservePrefix(match[0]) + pattern.label
         : pattern.label;

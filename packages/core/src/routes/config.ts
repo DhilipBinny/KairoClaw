@@ -71,6 +71,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.browse.enabled', 'tools.browse.remoteAccess',
       'providers.kairoPremium.enabled', 'providers.kairoPremium.mode', 'providers.kairoPremium.defaultModel',
       'agent.budget.dailyCapUsd', 'agent.budget.monthlyCapUsd', 'agent.budget.enforcement', 'agent.budget.downgradeModel',
+      'agent.piiRedaction',
       'agent.debug.recordPrompt',
       'tools.sandbox.enabled', 'tools.sandbox.image', 'tools.sandbox.dockerSocket',
       'tools.sandbox.defaults.network', 'tools.sandbox.defaults.workspace', 'tools.sandbox.defaults.escalation',
