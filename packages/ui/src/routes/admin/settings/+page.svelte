@@ -533,6 +533,41 @@
       </div>
     </div>
 
+    <!-- Security Settings -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--red, #f43f5e)">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        Security
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="pii-redaction">PII Redaction</label>
+            <span class="field-hint">Detect and redact personally identifiable information (email, phone, SSN, credit card, NRIC) in agent output. Applies to all channels</span>
+          </div>
+          <div class="field-control">
+            <button
+              class="toggle-btn"
+              class:active={!!getVal('agent.piiRedaction')}
+              onclick={() => saveToggle('agent.piiRedaction', !!getVal('agent.piiRedaction'))}
+              disabled={!!saving['agent.piiRedaction']}
+            >
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              <span class="toggle-label">{getVal('agent.piiRedaction') ? 'On' : 'Off'}</span>
+            </button>
+            {#if feedback['agent.piiRedaction']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.piiRedaction'].ok} class:err={!feedback['agent.piiRedaction'].ok}>
+                {feedback['agent.piiRedaction'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Thinking Settings -->
     <div class="section">
       <h2 class="section-title">
