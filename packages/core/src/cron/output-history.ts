@@ -74,7 +74,12 @@ export function recordTheme(stateDir: string, jobId: string, theme: string): voi
   fs.mkdirSync(dir, { recursive: true });
 
   const date = new Date().toISOString().slice(0, 10);
-  const clean = theme.replace(/\n/g, ' ').trim().slice(0, 120);
+  const clean = theme
+    .replace(/[<>]/g, '')
+    .replace(/[\x00-\x1F]/g, '')
+    .replace(/\n/g, ' ')
+    .trim()
+    .slice(0, 120);
   if (!clean) return;
 
   const summaryPath = path.join(dir, SUMMARY_FILE);

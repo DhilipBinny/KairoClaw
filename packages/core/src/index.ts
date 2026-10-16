@@ -850,7 +850,7 @@ async function main(): Promise<void> {
       // Use job owner's userId if set — cron runs with their permissions
       const cronUserId = job.userId || 'system';
 
-      // Register record_theme tool so the agent can declare its chosen theme
+      // Register record_theme tool scoped to this cron run
       const recordThemeTool = createRecordThemeTool(stateDir, job.id);
       toolRegistry.register(recordThemeTool);
 
@@ -858,7 +858,7 @@ async function main(): Promise<void> {
       const exclusionList = loadCronOutputHistory(stateDir, job.id);
       const themeInstruction = '\n\nAfter generating your content, call the record_theme tool with a short description (under 10 words) of the theme you chose.';
       const promptWithContext = exclusionList
-        ? `${job.prompt}\n\n<already_covered>${exclusionList}</already_covered>\nDo NOT repeat any topic or theme listed above. Choose something distinctly different.${themeInstruction}`
+        ? `${job.prompt}\n\nAlready covered: ${exclusionList}\nDo NOT repeat any topic or theme listed above. Choose something distinctly different.${themeInstruction}`
         : `${job.prompt}${themeInstruction}`;
 
       const inbound: InboundMessage = {
@@ -869,10 +869,13 @@ async function main(): Promise<void> {
         userId: cronUserId,
         senderName: 'Cron',
       };
-      const result = await createRunner(inbound);
 
-      // Unregister the cron-specific tool after execution
-      toolRegistry.unregister('record_theme');
+      let result;
+      try {
+        result = await createRunner(inbound);
+      } finally {
+        toolRegistry.unregister('record_theme');
+      }
 
       // Save this run's output for future context injection
       if (result.text) {
