@@ -24,7 +24,7 @@ import type { Channel, AgentRunner } from './types.js';
 import { AgentQueue } from '../queue/index.js';
 import { splitMessage, appendModelIndicator, shouldShowModelIndicator } from './utils.js';
 import { markdownToTelegramHtml, escHtml } from './markdown.js';
-import { createModuleLogger } from '../observability/logger.js';
+import { createModuleLogger, withTraceIdAsync } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 
 const log = createModuleLogger('channel.telegram');
@@ -359,6 +359,7 @@ class TelegramChannel implements Channel {
   // ── Message handling ─────────────────────────────────────
 
   private async handleMessage(ctx: Context, overrideText?: string, images?: Array<{ data: string; mimeType: string; filename?: string }>): Promise<void> {
+    return withTraceIdAsync(async () => {
     if (!ctx.from || !ctx.chat || !ctx.message) return;
     if (!this.runner) return;
 
@@ -631,6 +632,7 @@ class TelegramChannel implements Channel {
     } finally {
       if (typingInterval) clearInterval(typingInterval);
     }
+    }); // withTraceIdAsync
   }
 
   // ── File download ──────────────────────────────────────

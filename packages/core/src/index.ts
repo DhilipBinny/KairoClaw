@@ -57,7 +57,7 @@ import type { WhatsAppChannelInstance } from './channels/whatsapp.js';
 import type { AgentRunner } from './channels/types.js';
 import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
-import { createModuleLogger, toAgwLogger } from './observability/logger.js';
+import { createModuleLogger, toAgwLogger, withTraceIdAsync } from './observability/logger.js';
 import { isSessionExpired } from './agent/session-lifecycle.js';
 
 // Wire loggers for extracted packages that added setters in PR #120
@@ -825,7 +825,7 @@ async function main(): Promise<void> {
     db,
     tenantId,
     logger: (server.log as unknown as Logger).child({ category: 'cron' }),
-    executor: async (job) => {
+    executor: async (job) => withTraceIdAsync(async () => {
       // SECURITY (#179): a user-owned cron must run as its owner. If a job
       // carries an owner id that does not resolve to an active account —
       // deactivated/deleted, or a forged 'system'/other id — DISABLE the job
@@ -891,7 +891,7 @@ async function main(): Promise<void> {
       }
 
       return { text: result.text ?? undefined, media: result.media };
-    },
+    }),
     deliverer: async (text, channel, to, media, ownerId) => {
       // Outbound policy check for cron delivery
       if ((channel === 'whatsapp' || channel === 'telegram') && to) {
