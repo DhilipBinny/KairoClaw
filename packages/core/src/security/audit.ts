@@ -11,7 +11,7 @@ import { AuditRepository } from '../db/repositories/audit.js';
 export class AuditService {
   readonly repo: AuditRepository;
 
-  constructor(private db: DatabaseAdapter) {
+  constructor(db: DatabaseAdapter) {
     this.repo = new AuditRepository(db);
   }
 

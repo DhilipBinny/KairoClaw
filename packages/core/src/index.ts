@@ -39,7 +39,6 @@ import { ProgressBus, ResultBudget, LoopDetector, ResultStorage } from '@agw/too
 import { backgroundTaskRegistry } from './agent/background-task-registry.js';
 import { SessionRepository } from './db/repositories/session.js';
 import { SenderLinkRepository } from './db/repositories/sender-link.js';
-import { UserRepository } from './db/repositories/user.js';
 import { deriveScopeKey, deriveGroupScopeKey, ensureScopeDir, migrateScopesToUserUUID, migrateToSharedDir, setTokenEstimatorLogger } from '@agw/memory-engine';
 import { setMessagesLogger, setPromptLogger } from '@agw/agent-core';
 import { CronScheduler } from './cron/scheduler.js';
@@ -404,7 +403,6 @@ async function main(): Promise<void> {
   // 10. Create the agent runner factory — resolves sessions and builds AgentContext
   const sessionRepo = new SessionRepository(db);
   const senderLinkRepo = new SenderLinkRepository(db);
-  const _userRepo = new UserRepository(db);
 
   // Shared services — populated later, referenced by closures
   const sharedServices: {

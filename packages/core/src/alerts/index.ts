@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
-  AlertEvent, AlertInstance, AlertSeverity, AlertDeliveryChannel,
+  AlertEvent, AlertInstance, AlertDeliveryChannel,
   AlertsConfig, AlertTimingConfig, AlertThresholdsConfig,
   DatabaseAdapter,
 } from '@agw/types';
@@ -183,7 +183,7 @@ export class AlertManager {
     this.pendingTimers.set(fp, timer);
   }
 
-  private scheduleResolution(fp: string, inst: AlertInstance): void {
+  private scheduleResolution(fp: string, _inst: AlertInstance): void {
     this.clearResolutionTimer(fp);
     const timer = setTimeout(() => {
       this.resolutionTimers.delete(fp);
