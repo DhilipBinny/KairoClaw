@@ -3,7 +3,6 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { GatewayConfig } from '@agw/types';

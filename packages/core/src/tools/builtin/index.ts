@@ -1,21 +1,5 @@
 // Generic tools — re-exported from @agw/tools-common
-import {
-  fileTools,
-  execTools,
-  webTools,
-  memoryTools,
-  memoryWriteTools,
-  emailTools,
-  pdfTools,
-  toolSearchTools,
-  grepTools,
-  globTools,
-  todoTools,
-  sleepTools,
-  applyPatchTools,
-  planModeTools,
-  commonTools,
-} from '@agw/tools-common';
+import { commonTools } from '@agw/tools-common';
 
 // Product-specific tools — stay in core
 import { messagingTools } from './messaging.js';

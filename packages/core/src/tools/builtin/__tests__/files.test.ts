@@ -66,7 +66,6 @@ describe('safePath', () => {
 describe('scopedSafePath', () => {
   const adminCtx = { user: { role: 'admin' }, scopeKey: null };
   const userACtx = { user: { role: 'user' }, scopeKey: 'user-a-uuid' };
-  const _userBCtx = { user: { role: 'user' }, scopeKey: 'user-b-uuid' };
   const unscopedCtx = { user: { role: 'user' }, scopeKey: null };
 
   // Admin — unrestricted
