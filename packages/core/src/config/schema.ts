@@ -277,6 +277,7 @@ const budgetSchema = z.object({
   dailyCapUsd: z.number().min(0).default(0),
   monthlyCapUsd: z.number().min(0).default(0),
   enforcement: budgetEnforcementSchema,
+  downgradeModel: z.string().default(''),
   alertThresholds: z.array(z.number().min(0).max(100)).default([80, 95]),
 });
 

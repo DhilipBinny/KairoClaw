@@ -10,6 +10,7 @@ export type BudgetEnforcement = 'block' | 'downgrade' | 'alert';
 export interface BudgetCheckResult {
   allowed: boolean;
   enforcement: BudgetEnforcement;
+  downgradeModel?: string;
   reason?: string;
   dailyUsed?: number;
   dailyCap?: number;
@@ -21,6 +22,7 @@ interface BudgetConfig {
   dailyCapUsd: number;
   monthlyCapUsd: number;
   enforcement: BudgetEnforcement;
+  downgradeModel: string;
   alertThresholds: number[];
 }
 
@@ -30,6 +32,7 @@ function getBudgetConfig(config: GatewayConfig, userSettings?: Record<string, un
     dailyCapUsd: agentBudget.dailyCapUsd ?? 0,
     monthlyCapUsd: agentBudget.monthlyCapUsd ?? 0,
     enforcement: agentBudget.enforcement ?? 'downgrade',
+    downgradeModel: agentBudget.downgradeModel ?? '',
     alertThresholds: agentBudget.alertThresholds ?? [80, 95],
   };
 
@@ -101,7 +104,12 @@ export async function checkBudget(
   }
 
   if (!result.allowed) {
-    log.warn({ userId, tenantId, enforcement: budget.enforcement, reason: result.reason }, 'Budget limit reached');
+    if (budget.enforcement === 'downgrade' && budget.downgradeModel.trim()) {
+      result.downgradeModel = budget.downgradeModel.trim();
+    } else if (budget.enforcement === 'downgrade' && !budget.downgradeModel.trim()) {
+      result.enforcement = 'block';
+    }
+    log.warn({ userId, tenantId, enforcement: result.enforcement, reason: result.reason }, 'Budget limit reached');
   }
 
   return result;

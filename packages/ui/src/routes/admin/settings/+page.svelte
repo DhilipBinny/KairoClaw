@@ -510,13 +510,38 @@
               value={getVal('agent.budget.enforcement') || 'downgrade'}
               onchange={(e) => saveField('agent.budget.enforcement', (e.target as HTMLSelectElement).value)}
             >
-              <option value="downgrade">Downgrade to cheapest model</option>
+              <option value="downgrade">Downgrade to budget model</option>
               <option value="block">Block with message</option>
               <option value="alert">Alert only (continue serving)</option>
             </select>
             {#if feedback['agent.budget.enforcement']?.msg}
               <span class="field-feedback" class:ok={feedback['agent.budget.enforcement'].ok} class:err={!feedback['agent.budget.enforcement'].ok}>
                 {feedback['agent.budget.enforcement'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="budget-downgradeModel">Downgrade Model</label>
+            <span class="field-hint">Model to use when budget is exceeded and enforcement is "downgrade" (e.g. anthropic/claude-haiku-3-5). Required for downgrade mode — falls back to block if empty</span>
+          </div>
+          <div class="field-control">
+            <div class="input-action">
+              <input
+                id="budget-downgradeModel"
+                class="input"
+                type="text"
+                placeholder="anthropic/claude-haiku-3-5"
+                value={getVal('agent.budget.downgradeModel') ?? ''}
+                onblur={(e) => saveStringField('agent.budget.downgradeModel', e)}
+                onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+              />
+              {#if saving['agent.budget.downgradeModel']}<span class="field-spinner"><span class="spinner"></span></span>{/if}
+            </div>
+            {#if feedback['agent.budget.downgradeModel']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.budget.downgradeModel'].ok} class:err={!feedback['agent.budget.downgradeModel'].ok}>
+                {feedback['agent.budget.downgradeModel'].msg}
               </span>
             {/if}
           </div>
