@@ -59,6 +59,7 @@ import { checkOutboundAllowed } from './security/outbound.js';
 import { migrateOutboundAllowlist } from './security/migrate-outbound.js';
 import { createModuleLogger, toAgwLogger, withTraceIdAsync } from './observability/logger.js';
 import { isSessionExpired } from './agent/session-lifecycle.js';
+import { checkBudget } from './agent/budget.js';
 
 // Wire loggers for extracted packages that added setters in PR #120
 const _bootLog = createModuleLogger('system');
@@ -589,6 +590,30 @@ async function main(): Promise<void> {
       : undefined;
 
     const sessionId = sessionRow.id;
+
+    // ── Budget check ──────────────────────────────────────
+    let budgetModelOverride: string | undefined;
+    const budgetCfg = (config.agent as any)?.budget;
+    if (budgetCfg && (budgetCfg.dailyCapUsd > 0 || budgetCfg.monthlyCapUsd > 0)) {
+      const userSettings = resolvedUser
+        ? await db.get<{ settings: string }>('SELECT settings FROM users WHERE id = ?', [resolvedUser.id])
+        : undefined;
+      const parsedSettings = userSettings?.settings ? JSON.parse(userSettings.settings) : undefined;
+      const budgetResult = await checkBudget(
+        db, config, tenantId, validUserId, parsedSettings,
+      );
+      if (!budgetResult.allowed) {
+        if (budgetResult.enforcement === 'block') {
+          return { text: budgetResult.reason ?? 'Budget limit reached. Please try again later.', error: true };
+        }
+        if (budgetResult.enforcement === 'downgrade') {
+          const routing = config.agent?.routing;
+          const fastModel = routing?.fastModel?.trim();
+          if (fastModel) budgetModelOverride = fastModel;
+        }
+      }
+    }
+
     try {
     return await runAgent(inbound, callbacks || {}, {
       db,
@@ -596,6 +621,7 @@ async function main(): Promise<void> {
       session: sessionRow,
       tenantId,
       userId: validUserId,
+      ...(budgetModelOverride ? { model: budgetModelOverride } : {}),
       // User context for tool permissions + scope isolation. Resolved above by
       // resolvePrincipal (#179):
       // - Resolved user → their actual role from DB
