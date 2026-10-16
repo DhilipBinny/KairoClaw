@@ -12,4 +12,7 @@ export {
   searchLogFiles,
   getLogFilePath,
   toAgwLogger,
+  getTraceId,
+  withTraceId,
+  withTraceIdAsync,
 } from '@agw/logger';

@@ -21,6 +21,7 @@ export class WebhookAlertChannel implements AlertDeliveryChannel {
   async send(event: AlertEvent, instance: AlertInstance, kind: 'firing' | 'resolved'): Promise<void> {
     if (this.urls.length === 0) return;
 
+    const sentAt = Math.floor(Date.now() / 1000);
     const payload = JSON.stringify({
       kind,
       type: event.type,
@@ -35,21 +36,24 @@ export class WebhookAlertChannel implements AlertDeliveryChannel {
     });
 
     const signature = this.secret
-      ? createHmac('sha256', this.secret).update(payload).digest('hex')
+      ? createHmac('sha256', this.secret).update(`${sentAt}.${payload}`).digest('hex')
       : '';
 
     for (const url of this.urls) {
-      await this.sendToUrl(url, payload, signature);
+      await this.sendToUrl(url, payload, signature, sentAt);
     }
   }
 
-  private async sendToUrl(url: string, payload: string, signature: string): Promise<void> {
+  private async sendToUrl(url: string, payload: string, signature: string, sentAt: number): Promise<void> {
     const backoffs = [0, 1000, 5000];
     for (let attempt = 0; attempt < ALERT_WEBHOOK_MAX_RETRIES; attempt++) {
       if (backoffs[attempt]) await new Promise(r => setTimeout(r, backoffs[attempt]));
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (signature) headers['X-Webhook-Signature'] = `sha256=${signature}`;
+        if (signature) {
+          headers['X-Webhook-Signature'] = `sha256=${signature}`;
+          headers['X-Webhook-Timestamp'] = String(sentAt);
+        }
 
         const resp = await fetch(url, {
           method: 'POST',

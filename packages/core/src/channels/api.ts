@@ -7,11 +7,10 @@
  * Both endpoints require authentication via Bearer token in the Authorization header.
  */
 
-import crypto from 'node:crypto';
 import type { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import type { InboundMessage, ChatRequest, ChatResponse } from '@agw/types';
 import type { AgentRunner } from './types.js';
-import { createModuleLogger } from '../observability/logger.js';
+import { createModuleLogger, withTraceIdAsync, getTraceId } from '../observability/logger.js';
 import { sanitizeInput, detectPromptInjection, prefixInjectionWarning } from '@agw/security';
 import { AgentQueue } from '../queue/index.js';
 
@@ -91,10 +90,10 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
   app.post(
     '/api/v1/chat',
     { schema: { body: chatBodySchema } },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => withTraceIdAsync(async () => {
       const body = request.body as ChatRequest;
       const userId = request.user?.id || 'anonymous';
-      const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
+      const requestId = getTraceId()!;
 
       // Per-user rate limiting
       const rateCheck = checkRateLimit(userId, request.ip);
@@ -197,17 +196,17 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
           }
         }
       }
-    },
+    }),
   );
 
   // ── POST /api/v1/chat/sync — blocking JSON response ───
   app.post(
     '/api/v1/chat/sync',
     { schema: { body: chatBodySchema } },
-    async (request: FastifyRequest, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => withTraceIdAsync(async () => {
       const body = request.body as ChatRequest;
       const userId = request.user?.id || 'anonymous';
-      const requestId = `api-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 6)}`;
+      const requestId = getTraceId()!;
 
       // Per-user rate limiting
       const rateSyncCheck = checkRateLimit(userId, request.ip);
@@ -262,6 +261,6 @@ export const registerChatRoutes: FastifyPluginAsync<ChatApiOptions> = async (app
         log.error({ err: errMsg, requestId }, 'REST chat sync error');
         return reply.code(500).send({ error: 'Internal server error', statusCode: 500 });
       }
-    },
+    }),
   );
 };

@@ -41,7 +41,7 @@ export class AnthropicProvider implements ProviderInterface {
     const { messages, tools, model, systemPrompt, onDelta, signal } = args;
     const modelId = model || this.defaultModel;
 
-    const anthropicTools = (tools || []).map((t) => ({
+    const anthropicTools: Anthropic.Tool[] = (tools || []).map((t) => ({
       name: t.name,
       description: t.description,
       input_schema: t.parameters as Anthropic.Tool['input_schema'],
@@ -131,6 +131,7 @@ export class AnthropicProvider implements ProviderInterface {
       messages: apiMessages,
     };
     if (anthropicTools.length > 0) {
+      anthropicTools[anthropicTools.length - 1]!.cache_control = { type: 'ephemeral' };
       params.tools = anthropicTools;
     }
 
