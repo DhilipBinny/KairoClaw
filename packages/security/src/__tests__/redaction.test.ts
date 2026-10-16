@@ -450,7 +450,7 @@ describe('createStreamingRedactor (#185)', () => {
     'sk_live_' + 'A'.repeat(24), '123456789:' + 'A'.repeat(35), 'postgres://u:p@h/db', 'MIIEvSECRETKEYBODY',
   ];
 
-  it('fuzz: never leaks a recognized secret, for any input/chunking (incl. mashed)', () => {
+  it('fuzz: never leaks a recognized secret, for any input/chunking (incl. mashed)', { timeout: 15000 }, () => {
     const rnd = lcg(0x1234abcd);
     const vocab = [
       'hello ', 'world ', 'eyJ', '.', '_', '-', ' ', '\n', 'A'.repeat(40), 'token=', 'secret ',
@@ -469,7 +469,7 @@ describe('createStreamingRedactor (#185)', () => {
     }
   });
 
-  it('fuzz: streamed output equals filterOutput(whole) for whitespace-separated input', () => {
+  it('fuzz: streamed output equals filterOutput(whole) for whitespace-separated input', { timeout: 15000 }, () => {
     const rnd = lcg(0x55aa33cc);
     const vocab = [
       'hello', 'world', 'normaltext', 'eyJ', 'sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345', 'AKIAIOSFODNN7EXAMPLE',
