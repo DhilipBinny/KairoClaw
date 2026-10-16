@@ -43,7 +43,7 @@
     "fastify-plugin": "^5.1.0",
     "grammy": "^1.41.1",
     "marked": "^17.0.5",
-    "nodemailer": "^8.0.3",
+    "nodemailer": "^8.0.11",
     "openai": "^4.104.0",
     "pg": "^8.20.0",
     "pino-roll": "^4.0.0",
