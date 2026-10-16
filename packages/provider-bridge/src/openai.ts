@@ -9,12 +9,12 @@ export class OpenAIProvider implements ProviderInterface {
   readonly name: string;
   private client: OpenAI;
   private defaultModel: string;
-  private config?: GatewayConfig;
+  private _config?: GatewayConfig;
   private log: AgwLogger;
 
   constructor(options: ProviderOptions, config?: GatewayConfig, logger?: AgwLogger) {
     const { apiKey, baseUrl, defaultModel } = options;
-    this.config = config;
+    this._config = config;
     this.log = logger ?? noopLogger;
 
     this.client = new OpenAI({

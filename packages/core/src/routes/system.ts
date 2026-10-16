@@ -276,11 +276,6 @@ export const registerSystemRoutes: FastifyPluginAsync<{ providerRegistry?: Provi
         (useExisting && provider === 'openai' ? (secretsStore?.get('providers.openai', 'apiKey') || config.providers.openai?.apiKey) : null) ||
         reqApiKey;
 
-      const _authToken =
-        reqAuthToken ||
-        (useExisting && provider === 'anthropic' ? (secretsStore?.get('providers.anthropic', 'authToken') || (config.providers.anthropic as any)?.authToken) : null) ||
-        reqAuthToken;
-
       if (provider === 'anthropic') {
         if (!apiKey) return reply.code(400).send({ error: 'No API key provided. For OAuth, use the Kairo Premium test.' });
 

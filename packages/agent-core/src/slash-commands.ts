@@ -7,7 +7,7 @@
  */
 
 import type { GatewayConfig } from '@agw/types';
-import type { MessageLister, SessionRow } from '@agw/memory-engine';
+import type { SessionRow } from '@agw/memory-engine';
 import { estimateMessageTokens } from '@agw/memory-engine';
 import {
   needsCompaction,

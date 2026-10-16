@@ -20,7 +20,7 @@ function makeContext() {
     fileState: {
       recordRead: () => {},
       recordWrite: () => {},
-      requireRead: (p: string) => ({ ok: true }),
+      requireRead: (_p: string) => ({ ok: true }),
     },
   } as any;
 }

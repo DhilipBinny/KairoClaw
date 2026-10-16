@@ -31,7 +31,7 @@ import { noopLogger, ALERT_TYPES } from '@agw/types';
 const DAY_NAMES: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const MONTH_NAMES: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 
-function parseFieldValue(s: string, min: number, max: number): number {
+function parseFieldValue(s: string, _min: number, max: number): number {
   const named = DAY_NAMES[s.toLowerCase()] ?? MONTH_NAMES[s.toLowerCase()];
   if (named !== undefined) return named;
   let n = parseInt(s);

@@ -2,7 +2,6 @@ import type { FastifyPluginAsync } from 'fastify';
 import { UserRepository } from '../db/repositories/user.js';
 import { SenderLinkRepository } from '../db/repositories/sender-link.js';
 import { UsageRepository } from '../db/repositories/usage.js';
-import { SessionRepository } from '../db/repositories/session.js';
 import { ToolPermissionRepository } from '../db/repositories/tool-permission.js';
 import { requireRole } from '../auth/middleware.js';
 import { generateApiKey, hashApiKey } from '../auth/keys.js';
@@ -17,7 +16,6 @@ export const registerUserRoutes: FastifyPluginAsync = async (app) => {
     const userRepo = new UserRepository(db);
     const senderLinkRepo = new SenderLinkRepository(db);
     const usageRepo = new UsageRepository(db);
-    const _sessionRepo = new SessionRepository(db);
 
     const users = await userRepo.listByTenant(tenantId);
     const allLinks = await senderLinkRepo.listByTenant(tenantId);

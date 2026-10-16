@@ -2,10 +2,9 @@ import { FILE_MAX_WRITE_SIZE, PERSONA_FILES, DOCUMENTS_DIR, SCOPE_DIR_NAME, SHAR
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolRegistration } from '@agw/tool-platform';
-import type { ToolExecutionContext } from '@agw/types';
 import { getWorkspace } from './utils.js';
 import { textEnvelope } from '@agw/tool-platform';
-import { safePath, scopedSafePath } from './safe-path.js';
+import { scopedSafePath } from './safe-path.js';
 
 /**
  * Enforce workspace file organization with per-user scoping.
