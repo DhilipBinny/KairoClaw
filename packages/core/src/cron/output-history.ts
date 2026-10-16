@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ToolRegistration } from '@agw/tool-platform';
 
 const CRON_OUTPUT_DIR = 'cron-output';
 const MAX_SUMMARY_LINES = 200;
-const MAX_SUMMARY_CHARS = 3_000;
-const SUMMARY_LINE_LENGTH = 80;
+const MAX_EXCLUSION_ITEMS = 100;
 const MAX_OUTPUT_CHARS = 2_000;
 const RETENTION_DAYS = 7;
 const MS_PER_DAY = 86_400_000;
@@ -15,55 +15,124 @@ function outputDir(stateDir: string, jobId: string): string {
 }
 
 /**
- * Load compressed run summaries for context injection.
+ * Load a deduplicated exclusion list from past cron runs.
  *
- * Each run is stored as a single line (~30-80 chars) in summary.log
- * instead of loading full output files. This gives the agent visibility
- * into 200 past runs at ~3K chars — vs the old approach of 30 runs
- * at 6K chars. Works for all cron types:
- *   - Creative: "baby fox in enchanted forest" → agent picks new theme
- *   - News: "Singapore haze PSI 224, India budget" → agent avoids repeating
- *   - Deals: "KFC buffet $25.95, Uniqlo 50% off" → agent finds new deals
+ * Reads summary.log (themes recorded by the agent via record_theme tool),
+ * deduplicates them, and returns a compact list the agent can act on.
+ * Returns null if no history exists.
  */
 export function loadCronOutputHistory(stateDir: string, jobId: string): string | null {
   const summaryPath = path.join(outputDir(stateDir, jobId), SUMMARY_FILE);
 
   if (!fs.existsSync(summaryPath)) {
-    return migrateFromRawFiles(stateDir, jobId);
+    migrateFromRawFiles(stateDir, jobId);
+    if (!fs.existsSync(summaryPath)) return null;
   }
 
   try {
     const content = fs.readFileSync(summaryPath, 'utf8').trim();
     if (!content) return null;
 
-    const lines = content.split('\n');
+    const lines = content.split('\n').filter(l => l.trim());
     const recent = lines.slice(-MAX_SUMMARY_LINES);
 
-    let result = '';
-    for (let i = recent.length - 1; i >= 0; i--) {
-      if (result.length + recent[i].length + 1 > MAX_SUMMARY_CHARS) break;
-      result = recent[i] + '\n' + result;
-    }
+    const themes = recent.map(line => {
+      const colonIdx = line.indexOf(': ');
+      return colonIdx >= 0 ? line.slice(colonIdx + 2).trim() : line.trim();
+    }).filter(Boolean);
 
-    return result.trim() || null;
+    const unique = deduplicateThemes(themes);
+    return unique.slice(-MAX_EXCLUSION_ITEMS).join(', ');
   } catch {
     return null;
   }
 }
 
 /**
- * One-time migration: read existing raw .md files and build summary.log.
- * After migration, future runs use summary.log directly.
+ * Deduplicate themes by lowercased prefix matching.
  */
-function migrateFromRawFiles(stateDir: string, jobId: string): string | null {
+function deduplicateThemes(themes: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const theme of themes) {
+    const key = theme.toLowerCase().trim().slice(0, 25);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(theme);
+  }
+
+  return result;
+}
+
+/**
+ * Record a theme chosen by the agent for this cron run.
+ * Called by the record_theme tool during cron execution.
+ */
+export function recordTheme(stateDir: string, jobId: string, theme: string): void {
   const dir = outputDir(stateDir, jobId);
-  if (!fs.existsSync(dir)) return null;
+  fs.mkdirSync(dir, { recursive: true });
+
+  const date = new Date().toISOString().slice(0, 10);
+  const clean = theme.replace(/\n/g, ' ').trim().slice(0, 120);
+  if (!clean) return;
+
+  const summaryPath = path.join(dir, SUMMARY_FILE);
+  fs.appendFileSync(summaryPath, `${date}: ${clean}\n`);
+  trimSummaryFile(summaryPath);
+}
+
+/**
+ * Create the record_theme tool registration for cron contexts.
+ *
+ * This tool is only injected during cron execution — it lets the agent
+ * declare what theme/topic it chose so future runs can avoid repeating it.
+ */
+export function createRecordThemeTool(stateDir: string, jobId: string): ToolRegistration {
+  return {
+    definition: {
+      name: 'record_theme',
+      description:
+        'Record the theme or topic you chose for this scheduled task run. ' +
+        'Call this ONCE per run with a short description (under 10 words) of your ' +
+        'main theme — e.g. "baby otter floating in moonlit lake" or ' +
+        '"Singapore haze crisis and school closures". Future runs will avoid ' +
+        'repeating themes you have already recorded.',
+      parameters: {
+        type: 'object',
+        properties: {
+          theme: {
+            type: 'string',
+            description: 'Short theme description (under 10 words)',
+          },
+        },
+        required: ['theme'],
+      },
+    },
+    executor: async (args) => {
+      const theme = (args.theme as string || '').trim();
+      if (!theme) return { error: 'theme is required' };
+      recordTheme(stateDir, jobId, theme);
+      return { recorded: theme };
+    },
+    source: 'builtin',
+    category: 'write',
+  };
+}
+
+/**
+ * One-time migration: read existing raw .md files and build summary.log
+ * using a simple heuristic extraction (since no record_theme calls exist yet).
+ */
+function migrateFromRawFiles(stateDir: string, jobId: string): void {
+  const dir = outputDir(stateDir, jobId);
+  if (!fs.existsSync(dir)) return;
 
   const files = fs.readdirSync(dir)
     .filter(f => f.endsWith('.md'))
     .sort();
 
-  if (files.length === 0) return null;
+  if (files.length === 0) return;
 
   const summaryLines: string[] = [];
   for (const file of files) {
@@ -71,56 +140,45 @@ function migrateFromRawFiles(stateDir: string, jobId: string): string | null {
       const content = fs.readFileSync(path.join(dir, file), 'utf8').trim();
       if (!content) continue;
       const date = file.replace('.md', '').slice(0, 10);
-      const summary = extractSummary(content);
+      const summary = extractSummaryFallback(content);
       if (summary) summaryLines.push(`${date}: ${summary}`);
     } catch {
       continue;
     }
   }
 
-  if (summaryLines.length === 0) return null;
+  if (summaryLines.length === 0) return;
 
   const summaryPath = path.join(dir, SUMMARY_FILE);
   try {
     fs.writeFileSync(summaryPath, summaryLines.join('\n') + '\n');
   } catch {
-    // non-fatal — will retry on next run
+    // non-fatal
   }
-
-  const recent = summaryLines.slice(-MAX_SUMMARY_LINES);
-  let result = '';
-  for (let i = recent.length - 1; i >= 0; i--) {
-    if (result.length + recent[i].length + 1 > MAX_SUMMARY_CHARS) break;
-    result = recent[i] + '\n' + result;
-  }
-
-  return result.trim() || null;
 }
 
 /**
- * Extract a compact summary line from a cron output.
- *
- * Strips emojis, formatting, and noise to produce a ~80 char summary
- * that captures the essence of what was generated.
+ * Fallback extraction for migration only — used when no record_theme
+ * data exists. Strips emojis and formatting, takes first 80 chars.
+ * Not used for ongoing runs (the agent records themes via tool call).
  */
-function extractSummary(text: string): string {
+function extractSummaryFallback(text: string): string {
   const cleaned = text
     .replace(/!\[(?:image|[^\]]*)\]\([^)]+\)/g, '')
     .replace(/\[image\]/g, '')
     .replace(/\/api\/v1\/media\/[^\s)]+/g, '')
-    .replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]/gu, '')
+    .replace(/\p{Extended_Pictographic}/gu, '')
+    .replace(/‍/g, '')
+    .replace(/️/g, '')
     .replace(/[*_~`#>]+/g, '')
     .replace(/\n+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
   if (!cleaned) return '';
-
-  const truncated = cleaned.length > SUMMARY_LINE_LENGTH
-    ? cleaned.slice(0, SUMMARY_LINE_LENGTH).replace(/\s\S*$/, '')
+  return cleaned.length > 80
+    ? cleaned.slice(0, 80).replace(/\s\S*$/, '')
     : cleaned;
-
-  return truncated;
 }
 
 /**
@@ -136,14 +194,8 @@ function cleanOutputForHistory(text: string): string {
 }
 
 /**
- * Save a cron run's output.
- *
- * Two storage layers:
- *   1. Raw .md file — full cleaned output for debugging/audit (7-day retention)
- *   2. summary.log — one-line summary appended (rolling 200 entries)
- *
- * The summary.log is what gets injected into the agent's context.
- * The raw files are kept for troubleshooting but never loaded into context.
+ * Save a cron run's raw output for debugging (7-day retention).
+ * Theme tracking is handled separately by the record_theme tool.
  */
 export function saveCronOutput(stateDir: string, jobId: string, output: string): void {
   const dir = outputDir(stateDir, jobId);
@@ -152,28 +204,13 @@ export function saveCronOutput(stateDir: string, jobId: string, output: string):
   const cleaned = cleanOutputForHistory(output);
   if (!cleaned) return;
 
-  const now = new Date();
-  const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const date = now.toISOString().slice(0, 10);
-
-  // Raw file (debugging)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const filePath = path.join(dir, `${timestamp}.md`);
   fs.writeFileSync(filePath, cleaned.slice(0, MAX_OUTPUT_CHARS));
-
-  // Summary line (context injection)
-  const summary = extractSummary(cleaned);
-  if (summary) {
-    const summaryPath = path.join(dir, SUMMARY_FILE);
-    fs.appendFileSync(summaryPath, `${date}: ${summary}\n`);
-    trimSummaryFile(summaryPath);
-  }
 
   cleanupOldOutputs(dir);
 }
 
-/**
- * Keep summary.log under MAX_SUMMARY_LINES by trimming oldest entries.
- */
 function trimSummaryFile(summaryPath: string): void {
   try {
     const content = fs.readFileSync(summaryPath, 'utf8');
