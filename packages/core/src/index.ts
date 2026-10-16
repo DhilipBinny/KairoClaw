@@ -295,6 +295,8 @@ async function main(): Promise<void> {
   // hooks from config. setHooks() can be called again on config reload
   // for hot-reload support; for now it's a startup-only application.
   toolRegistry.setHooks((config as { hooks?: unknown }).hooks as Parameters<typeof toolRegistry.setHooks>[0]);
+  const toolTimeoutSec = (config.agent as any)?.toolTimeout ?? 120;
+  if (toolTimeoutSec > 0) toolRegistry.setDefaultTimeout(toolTimeoutSec * 1000);
   const hasPdftotext = await hasBinary('pdftotext');
   const hasChromium = await hasBinary('chromium') || await hasBinary('chromium-browser');
   if (!hasPdftotext) _bootLog.warn('pdftotext not found — read_pdf tool disabled');
@@ -830,6 +832,11 @@ async function main(): Promise<void> {
       const { enablePiiRedaction } = await import('@agw/security');
       enablePiiRedaction(!!value);
       server.log.info({ enabled: !!value }, 'PII redaction toggled via Settings');
+    }
+    if (dotPath === 'agent.toolTimeout') {
+      const sec = typeof value === 'number' ? value : 120;
+      toolRegistry.setDefaultTimeout(sec * 1000);
+      server.log.info({ timeoutSec: sec }, 'Tool timeout updated via Settings');
     }
   };
 
