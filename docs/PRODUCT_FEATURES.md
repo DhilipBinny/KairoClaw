@@ -598,7 +598,7 @@ Admin dashboard covers full operational control. User portal provides personal d
 ### Delivery Channels
 - **Telegram self-delivery**: alerts sent directly via the bot to admin chat IDs
 - **WebSocket banner**: persistent alert bar in admin UI
-- **Generic webhook**: HTTP POST with HMAC-SHA256 signature (Slack, Discord, PagerDuty)
+- **Generic webhook**: HTTP POST with HMAC-SHA256 signature and replay protection (Slack, Discord, PagerDuty)
 - Circular dependency guard: WhatsApp disconnect alerts never delivered via WhatsApp
 
 ### Monitored Events
@@ -655,9 +655,21 @@ Admin dashboard covers full operational control. User portal provides personal d
 - Key=value catch-all for generic secrets (`password=...`, `token=...`)
 
 ### Prompt Injection Defense
-- 7 detection patterns (instruction override, role reassignment, prompt extraction, jailbreak, mode switch)
+- 11 detection patterns (instruction override, role reassignment, prompt extraction, jailbreak, mode switch, context manipulation, encoding evasion)
+- Homoglyph normalization (Cyrillic → ASCII) before detection
+- 4-layer defense on external tool results: scan → neutralize delimiters → security notice → XML wrapper flags
 - Tool result boundary neutralization (prevents `</tool_result>` escape)
 - Tool name sanitization for MCP servers
+
+### HTTP Security Headers
+- Content-Security-Policy (script, style, font, image, connection restrictions)
+- Cross-Origin-Opener-Policy, X-Frame-Options, Referrer-Policy, Permissions-Policy
+- Strict-Transport-Security (HSTS) in production
+
+### Observability
+- Request trace IDs (AsyncLocalStorage) across all channels: Telegram, WhatsApp, API, WebChat, cron
+- Structured pino logging with per-request correlation
+- Anthropic prompt caching (system prompt + tool definitions) for input cost reduction
 
 ---
 
