@@ -46,7 +46,11 @@ KairoClaw includes multiple security layers:
 - Signed media URLs with time-limited access
 - Docker sandbox with CapDrop ALL, non-root execution, PID/memory limits
 - Span-based secret redaction (22 patterns) on all agent output
-- Prompt injection detection (7 pattern types)
+- Prompt injection detection (11 pattern types) with indirect injection scanning on tool results
 - Tamper-evident audit trail
 - Per-user scope isolation for files, memory, and tool execution
 - Rate limiting on authentication endpoints
+- Content-Security-Policy with script, style, font, image, and connection restrictions
+- Cross-Origin-Opener-Policy, X-Frame-Options, Referrer-Policy, Permissions-Policy headers
+- Webhook replay protection (HMAC-SHA256 over timestamp + payload)
+- Request trace IDs for end-to-end audit correlation across all channels
