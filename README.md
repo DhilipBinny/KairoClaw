@@ -207,7 +207,7 @@ User → Telegram / WhatsApp / WebChat / API
 | [Channels](docs/CHANNELS.md) | Telegram, WhatsApp, Web Chat — setup, features, constraints |
 | [Database](docs/DATABASE.md) | SQLite vs PostgreSQL, migration, Docker Compose |
 | [Memory](docs/MEMORY.md) | Auto-memory system, per-user scoping, consolidation |
-| [Sandbox](docs/SANDBOX.md) | Docker sandbox setup, configuration, security, troubleshooting |
+| [Containers](docs/CONTAINERS.md) | Docker sandbox + cloud desktop setup, auth, security |
 | [Product Features](docs/PRODUCT_FEATURES.md) | Complete feature inventory with metrics |
 
 ---
