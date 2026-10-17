@@ -52,7 +52,7 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
     // workspace-auth: one-time code exchange, workspace/*: proxied HTML/JS,
     // files/*: proxied file operations. Each has its own requireWorkspaceToken.
     const pathname = request.url.split('?')[0];
-    if (/^\/api\/v1\/admin\/desktop\/[A-Za-z0-9_-]+\/(workspace-auth|workspace(\/.*)?|files\/.+)$/.test(pathname)) return;
+    if (/^\/api\/v1\/admin\/desktop\/[A-Za-z0-9_-]+\/(workspace-auth|workspace(\/.*)?|files(\/.*)?|vnc|terminal)$/.test(pathname)) return;
 
     // Media files are loaded by plain <img>/external fetchers that can't send an
     // Authorization header. Grant access only when the request carries a valid,

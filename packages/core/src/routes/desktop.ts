@@ -165,7 +165,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     reply
       .header('set-cookie', parts.join('; '))
       .header('referrer-policy', 'no-referrer')
-      .redirect(`/api/v1/admin/desktop/${userId}/workspace`);
+      .redirect(`/api/v1/admin/desktop/${userId}/workspace/`);
   });
 
   // Validate workspace session cookie
@@ -208,9 +208,15 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
 
   // Proxy workspace static files (HTML, noVNC JS/CSS) from container port 6080
   // CSP sandbox isolates container content from the admin origin's cookies/storage
-  const WORKSPACE_CSP = 'sandbox allow-scripts allow-forms; frame-ancestors \'self\'';
+  const WORKSPACE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-src 'self'; img-src 'self' data:; font-src 'self'";
 
+  // Redirect /workspace to /workspace/ so relative URLs (config.js, vnc_lite.html) resolve correctly
   app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    reply.redirect(`/api/v1/admin/desktop/${userId}/workspace/`);
+  });
+
+  app.get('/api/v1/admin/desktop/:userId/workspace/', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const resp = await fetch(`http://${target.ip}:6080/`);
@@ -234,6 +240,17 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   });
 
   // Proxy file server operations from container port 8090
+  // Root listing (no wildcard — Fastify * requires ≥1 char)
+  app.get('/api/v1/admin/desktop/:userId/files', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const resp = await fetch(`http://${target.ip}:8090/`, {
+      headers: { 'X-Desktop-Token': target.secrets?.sessionToken || '' },
+    });
+    reply.code(resp.status).header('content-type', 'application/json').header('x-content-type-options', 'nosniff');
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
   app.get('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
