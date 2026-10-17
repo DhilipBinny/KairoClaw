@@ -16,6 +16,9 @@ import {
   imageExists,
   getContainerIp,
   getContainerPorts,
+  detectAppNetwork,
+  connectToNetwork,
+  getContainerIpOnNetwork,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
 import { resolveNetworkMode } from './network-policy.js';
@@ -48,11 +51,20 @@ export class ContainerManager {
   private idleCleanupTimer: ReturnType<typeof setInterval> | null = null;
   private maxContainersPerUser = MAX_CONTAINERS_PER_USER;
   private maxContainersTotal = MAX_CONTAINERS_TOTAL;
+  private appNetwork: string | null = null;
 
   constructor(config: SandboxToolConfig, logger?: AgwLogger) {
     this.config = config;
     this.log = (logger ?? noopLogger).child({ category: 'sandbox' });
     this.startIdleCleanup();
+    this.detectNetwork();
+  }
+
+  private detectNetwork(): void {
+    detectAppNetwork(this.config.dockerSocket).then(net => {
+      this.appNetwork = net;
+      if (net) this.log.info({ network: net }, 'Detected app Docker network — desktop containers will join it');
+    }).catch(() => {});
   }
 
   private startIdleCleanup(): void {
@@ -415,10 +427,16 @@ export class ContainerManager {
     let containerIp: string | null = null;
     let hostPorts: Record<string, number> = {};
     try {
-      [containerIp, hostPorts] = await Promise.all([
-        getContainerIp(this.config.dockerSocket, containerId),
-        getContainerPorts(this.config.dockerSocket, containerId),
-      ]);
+      // If the app runs in Docker, connect the desktop container to the
+      // app's network so the proxy can reach it. Without this, containers
+      // on different Docker networks are isolated from each other.
+      if (this.appNetwork) {
+        await connectToNetwork(this.config.dockerSocket, containerId, this.appNetwork);
+        containerIp = await getContainerIpOnNetwork(this.config.dockerSocket, containerId, this.appNetwork);
+      } else {
+        containerIp = await getContainerIp(this.config.dockerSocket, containerId);
+      }
+      hostPorts = await getContainerPorts(this.config.dockerSocket, containerId);
     } catch (err) {
       this.log.warn({ err: (err as Error).message, containerId: containerId.slice(0, 12) }, 'Failed to inspect desktop container — cleaning up');
       await removeContainer(this.config.dockerSocket, containerId).catch(() => {});

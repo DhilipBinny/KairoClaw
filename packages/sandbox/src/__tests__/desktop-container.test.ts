@@ -25,6 +25,9 @@ vi.mock('../docker-client.js', () => ({
   listSandboxContainers: (...args: unknown[]) => mockListSandboxContainers(...args as []),
   getContainerIp: (...args: unknown[]) => mockGetContainerIp(...args as []),
   getContainerPorts: (...args: unknown[]) => mockGetContainerPorts(...args as []),
+  detectAppNetwork: vi.fn().mockResolvedValue(null),
+  connectToNetwork: vi.fn().mockResolvedValue(undefined),
+  getContainerIpOnNetwork: vi.fn().mockResolvedValue(null),
   getDocker: vi.fn(),
   resetDocker: vi.fn(),
 }));
