@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KairoClaw Desktop</title>
+<style>
+:root {
+  --bg: #0f0f17;
+  --surface: #16162a;
+  --border: #2a2a3e;
+  --text: #e2e2f0;
+  --text-dim: #7878a0;
+  --accent: #6c63ff;
+  --green: #4ade80;
+  --red: #f87171;
+  --yellow: #fbbf24;
+  --sidebar-w: 220px;
+  --terminal-h: 180px;
+  --header-h: 38px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ──────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  height: var(--header-h);
+  flex-shrink: 0;
+}
+.header .logo { font-weight: 700; font-size: 13px; color: var(--accent); letter-spacing: 0.5px; }
+.header .status { font-size: 11px; color: var(--text-dim); margin-left: auto; display: flex; align-items: center; gap: 5px; }
+.header .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+/* ── Main layout ─────────────────────── */
+.main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ── Sidebar (file tree) ─────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.sidebar-header {
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.sidebar-actions {
+  display: flex;
+  gap: 2px;
+}
+.sidebar-actions button {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+}
+.sidebar-actions button:hover { background: var(--border); color: var(--text); }
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+.ft-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ft-item:hover { background: rgba(108,99,255,0.1); }
+.ft-item.selected { background: rgba(108,99,255,0.2); }
+.ft-item .ft-icon { width: 14px; text-align: center; flex-shrink: 0; font-size: 12px; }
+.ft-item .ft-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ft-item .ft-size { color: var(--text-dim); font-size: 10px; flex-shrink: 0; }
+.ft-item.dir .ft-icon { color: var(--yellow); }
+.ft-item.file .ft-icon { color: var(--text-dim); }
+.ft-item.up { color: var(--text-dim); }
+.ft-path {
+  padding: 5px 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-footer {
+  border-top: 1px solid var(--border);
+  padding: 4px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.sidebar-footer button {
+  flex: 1;
+  min-width: 40px;
+  background: var(--border);
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.sidebar-footer button:hover { background: var(--accent); color: #fff; }
+.sidebar.collapsed { width: 0; overflow: hidden; border: none; }
+.sidebar.collapsed + .content .toggle-sidebar { left: 0; }
+.toggle-sidebar {
+  position: absolute;
+  top: 50%;
+  left: var(--sidebar-w);
+  transform: translateY(-50%);
+  z-index: 10;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 8px 3px;
+  border-radius: 0 4px 4px 0;
+  font-size: 10px;
+  line-height: 1;
+}
+.toggle-sidebar:hover { color: var(--text); background: var(--border); }
+.sidebar.collapsed ~ .toggle-sidebar { left: 0; }
+.drop-highlight { outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+/* ── Content area ────────────────────── */
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ── Browser panel (noVNC) ───────────── */
+.browser-panel {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: #000;
+}
+.browser-panel iframe {
+  width: 100%;
+  height: calc(100% + 30px);
+  margin-top: -30px;
+  border: none;
+}
+
+/* ── Resize handle ───────────────────── */
+.resize-handle {
+  height: 4px;
+  background: var(--border);
+  cursor: ns-resize;
+  flex-shrink: 0;
+}
+.resize-handle:hover { background: var(--accent); }
+
+/* ── Terminal panel ──────────────────── */
+.terminal-panel {
+  height: var(--terminal-h);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+}
+.terminal-header {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 26px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.terminal-header span { font-size: 11px; color: var(--text-dim); }
+.terminal-panel iframe {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: #000;
+}
+
+/* ── Upload overlay ──────────────────── */
+.upload-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+.upload-overlay.active { display: flex; }
+.upload-box {
+  background: var(--surface);
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  padding: 40px 60px;
+  text-align: center;
+}
+.upload-box p { margin: 8px 0; color: var(--text-dim); font-size: 13px; }
+.upload-box input[type="file"] { display: none; }
+.upload-box button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* Hidden file input for uploads */
+#upload-input { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">KAIROCLAW DESKTOP</span>
+  <span class="status"><span class="dot"></span> Connected</span>
+</div>
+
+<div class="main">
+  <!-- Sidebar: file tree -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Files</span>
+      <div class="sidebar-actions">
+        <button title="Refresh" onclick="loadTree(currentPath)">&#x21BB;</button>
+        <button title="New folder" onclick="createFolder()">&#x2795;</button>
+        <button title="Upload" onclick="triggerUpload()">&#x2B06;</button>
+      </div>
+    </div>
+    <div class="ft-path" id="ft-path">/workspace</div>
+    <div class="file-tree" id="file-tree"></div>
+    <div class="sidebar-footer">
+      <button onclick="downloadSelected()" title="Download selected file">Download</button>
+      <button onclick="deleteSelected()" title="Delete selected">Delete</button>
+    </div>
+  </div>
+
+  <button class="toggle-sidebar" id="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar">&#x25C0;</button>
+
+  <!-- Content: browser + terminal -->
+  <div class="content">
+    <div class="browser-panel" onclick="focusVnc()">
+      <iframe id="vnc-frame" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
+    </div>
+    <div class="resize-handle" id="resize-handle"></div>
+    <div class="terminal-panel" id="terminal-panel">
+      <div class="terminal-header">
+      <span>Terminal</span>
+      <span style="margin-left:auto; display:flex; gap:4px;">
+        <button onclick="terminalMinimize()" title="Minimize" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0 4px;">&#x2581;</button>
+        <button onclick="terminalMaximize()" title="Maximize" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0 4px;">&#x2610;</button>
+      </span>
+    </div>
+      <iframe id="ttyd-frame" src="about:blank"></iframe>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="upload-input" multiple onchange="handleUpload(this.files)">
+
+<script src="config.js"></script>
+<script>
+const loc = window.location;
+const host = loc.hostname;
+const wsPort = loc.port || '6080';
+const cfg = window.DESKTOP_CONFIG || {};
+
+const vncPassword = cfg.vncPassword || '';
+const ttydPort = cfg.ttydPort || 7681;
+const filePort = cfg.filePort || 8090;
+const sessionToken = cfg.sessionToken || '';
+
+const vncUrl = loc.protocol + '//' + host + ':' + wsPort
+  + '/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'
+  + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '');
+const ttydUrl = loc.protocol + '//sandbox:' + encodeURIComponent(sessionToken) + '@' + host + ':' + ttydPort;
+const fileApiUrl = loc.protocol + '//' + host + ':' + filePort;
+
+const fileHeaders = { 'X-Desktop-Token': sessionToken };
+
+// Init VNC + Terminal
+document.getElementById('vnc-frame').src = vncUrl;
+setTimeout(() => { document.getElementById('ttyd-frame').src = ttydUrl; }, 500);
+
+// Focus VNC iframe on click so mouse/keyboard events work
+function focusVnc() {
+  const f = document.getElementById('vnc-frame');
+  f.focus();
+  try { f.contentWindow.focus(); } catch(e) {}
+}
+
+// ── File tree ──────────────────────────
+let currentPath = '/';
+let selectedFile = null;
+
+function loadTree(path) {
+  currentPath = path;
+  document.getElementById('ft-path').textContent = '/workspace' + (path === '/' ? '' : path);
+  const tree = document.getElementById('file-tree');
+  tree.textContent = '';
+  selectedFile = null;
+
+  fetch(fileApiUrl + encodeURI(path), { headers: fileHeaders })
+    .then(r => r.json())
+    .then(entries => {
+      if (path !== '/') {
+        const up = document.createElement('div');
+        up.className = 'ft-item up';
+        up.innerHTML = '<span class="ft-icon">..</span><span class="ft-name">..</span>';
+        const parts = path.split('/').filter(Boolean);
+        const parent = '/' + parts.slice(0, -1).join('/');
+        up.addEventListener('click', () => loadTree(parent || '/'));
+        tree.appendChild(up);
+      }
+
+      for (const e of entries) {
+        const item = document.createElement('div');
+        item.className = 'ft-item ' + e.type;
+
+        const icon = document.createElement('span');
+        icon.className = 'ft-icon';
+        icon.textContent = e.type === 'dir' ? '📁' : '📄';
+        item.appendChild(icon);
+
+        const name = document.createElement('span');
+        name.className = 'ft-name';
+        name.textContent = e.name;
+        item.appendChild(name);
+
+        if (e.type === 'file') {
+          const size = document.createElement('span');
+          size.className = 'ft-size';
+          size.textContent = formatSize(e.size);
+          item.appendChild(size);
+        }
+
+        if (e.type === 'dir') {
+          item.addEventListener('click', () => {
+            loadTree(path.replace(/\/$/, '') + '/' + e.name);
+          });
+        } else {
+          item.addEventListener('click', () => {
+            tree.querySelectorAll('.ft-item').forEach(i => i.classList.remove('selected'));
+            item.classList.add('selected');
+            selectedFile = { name: e.name, path: path.replace(/\/$/, '') + '/' + e.name };
+          });
+        }
+        tree.appendChild(item);
+      }
+
+      if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'ft-item';
+        empty.style.color = 'var(--text-dim)';
+        empty.style.fontStyle = 'italic';
+        empty.textContent = 'Empty';
+        tree.appendChild(empty);
+      }
+    })
+    .catch(() => {
+      tree.textContent = 'Failed to load';
+    });
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' K';
+  return (bytes / 1048576).toFixed(1) + ' M';
+}
+
+// ── File operations ────────────────────
+function downloadSelected() {
+  if (!selectedFile) return;
+  fetch(fileApiUrl + '/download' + encodeURI(selectedFile.path), { headers: fileHeaders })
+    .then(r => r.blob())
+    .then(b => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      a.download = selectedFile.name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    })
+    .catch(e => alert('Download failed: ' + e.message));
+}
+
+function deleteSelected() {
+  if (!selectedFile) return;
+  if (!confirm('Delete ' + selectedFile.name + '?')) return;
+  fetch(fileApiUrl + '/delete' + encodeURI(selectedFile.path), { method: 'DELETE', headers: fileHeaders })
+    .then(() => { selectedFile = null; loadTree(currentPath); })
+    .catch(e => alert('Delete failed: ' + e.message));
+}
+
+function createFolder() {
+  const name = prompt('Folder name:');
+  if (!name || !name.trim()) return;
+  fetch(fileApiUrl + '/mkdir' + encodeURI(currentPath.replace(/\/$/, '') + '/' + name.trim()), { method: 'POST', headers: fileHeaders })
+    .then(() => loadTree(currentPath))
+    .catch(e => alert('Create failed: ' + e.message));
+}
+
+function triggerUpload() {
+  document.getElementById('upload-input').click();
+}
+
+function handleUpload(files) {
+  if (!files || files.length === 0) return;
+  const promises = [];
+  for (const file of files) {
+    const formData = new FormData();
+    formData.append('file', file);
+    promises.push(
+      fetch(fileApiUrl + '/upload' + encodeURI(currentPath), { method: 'POST', body: formData, headers: { 'X-Desktop-Token': sessionToken } })
+    );
+  }
+  Promise.all(promises)
+    .then(() => loadTree(currentPath))
+    .catch(e => alert('Upload failed: ' + e.message));
+  document.getElementById('upload-input').value = '';
+}
+
+// ── Resizable terminal ─────────────────
+const resizeHandle = document.getElementById('resize-handle');
+const terminalPanel = document.getElementById('terminal-panel');
+let isResizing = false;
+
+resizeHandle.addEventListener('mousedown', (e) => {
+  isResizing = true;
+  e.preventDefault();
+  document.addEventListener('mousemove', onResize);
+  document.addEventListener('mouseup', () => {
+    isResizing = false;
+    document.removeEventListener('mousemove', onResize);
+  }, { once: true });
+});
+
+function onResize(e) {
+  if (!isResizing) return;
+  const containerBottom = document.body.getBoundingClientRect().bottom;
+  const newHeight = containerBottom - e.clientY;
+  if (newHeight > 80 && newHeight < window.innerHeight * 0.6) {
+    terminalPanel.style.height = newHeight + 'px';
+  }
+}
+
+// ── Terminal maximize/minimize ──────────
+let termState = 'normal'; // normal | minimized | maximized
+const browserPanel = document.querySelector('.browser-panel');
+const resizeEl = document.getElementById('resize-handle');
+
+function terminalMinimize() {
+  if (termState === 'minimized') {
+    terminalRestore();
+    return;
+  }
+  termState = 'minimized';
+  terminalPanel.style.height = '26px';
+  browserPanel.style.flex = '1';
+  browserPanel.style.display = '';
+  resizeEl.style.display = 'none';
+}
+
+function terminalMaximize() {
+  if (termState === 'maximized') {
+    terminalRestore();
+    return;
+  }
+  termState = 'maximized';
+  terminalPanel.style.height = '100%';
+  terminalPanel.style.flex = '1';
+  browserPanel.style.display = 'none';
+  resizeEl.style.display = 'none';
+}
+
+function terminalRestore() {
+  termState = 'normal';
+  terminalPanel.style.height = 'var(--terminal-h)';
+  terminalPanel.style.flex = '';
+  browserPanel.style.display = '';
+  browserPanel.style.flex = '1';
+  resizeEl.style.display = '';
+}
+
+// ── Toggle sidebar ─────────────────────
+function toggleSidebar() {
+  const sb = document.querySelector('.sidebar');
+  const btn = document.getElementById('toggle-sidebar');
+  sb.classList.toggle('collapsed');
+  btn.innerHTML = sb.classList.contains('collapsed') ? '&#x25B6;' : '&#x25C0;';
+  btn.style.left = sb.classList.contains('collapsed') ? '0' : 'var(--sidebar-w)';
+}
+
+// ── Drag-and-drop upload on sidebar ────
+const fileTree = document.getElementById('file-tree');
+fileTree.addEventListener('dragover', (e) => { e.preventDefault(); fileTree.classList.add('drop-highlight'); });
+fileTree.addEventListener('dragleave', () => fileTree.classList.remove('drop-highlight'));
+fileTree.addEventListener('drop', (e) => {
+  e.preventDefault();
+  fileTree.classList.remove('drop-highlight');
+  if (e.dataTransfer.files.length > 0) handleUpload(e.dataTransfer.files);
+});
+
+// Load file tree on start
+loadTree('/');
+</script>
+</body>
+</html>

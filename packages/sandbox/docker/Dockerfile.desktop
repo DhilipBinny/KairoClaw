@@ -1,0 +1,83 @@
+# kairoclaw-sandbox:desktop
+#
+# Desktop sandbox with browser, terminal, and file browser — all served
+# from a single custom workspace web UI inside the container.
+#
+# Ports (internal only — never published to host):
+#   6080  Workspace UI (custom HTML with noVNC + ttyd + file browser)
+#   9222  Chrome DevTools Protocol (socat → Chrome)
+#
+# Build:
+#   docker build -f packages/sandbox/docker/Dockerfile.desktop \
+#     -t kairoclaw-sandbox:desktop .
+#
+# Uncompressed size: ~1.6GB (Chromium + X11 deps dominate).
+# Agent tools run on KairoClaw, not inside the container.
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── System packages ──────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    chromium \
+    curl \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    novnc \
+    openbox \
+    procps \
+    python3 \
+    scrot \
+    socat \
+    websockify \
+    wmctrl \
+    x11-utils \
+    x11vnc \
+    xdotool \
+    xterm \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── ttyd (web terminal, single binary) ───────────────────
+COPY packages/sandbox/docker/ttyd.x86_64 /usr/local/bin/ttyd
+RUN chmod +x /usr/local/bin/ttyd
+
+# ── Non-root user (uid 1000, matches existing sandbox) ───
+RUN groupadd -g 1000 sandbox \
+    && useradd -m -u 1000 -g sandbox sandbox
+
+# ── Directories ──────────────────────────────────────────
+RUN mkdir -p /workspace /home/sandbox/.vnc /home/sandbox/.chrome \
+    && chown -R sandbox:sandbox /workspace /home/sandbox
+
+# ── Custom workspace UI ──────────────────────────────────
+COPY packages/sandbox/docker/workspace-ui/ /opt/workspace-ui/
+RUN cp -r /usr/share/novnc/app /opt/workspace-ui/app \
+    && cp -r /usr/share/novnc/core /opt/workspace-ui/core \
+    && cp -r /usr/share/novnc/vendor /opt/workspace-ui/vendor \
+    && cp /usr/share/novnc/vnc.html /opt/workspace-ui/vnc.html \
+    && cp /usr/share/novnc/vnc_lite.html /opt/workspace-ui/vnc_lite.html \
+    && cp -r /usr/share/novnc/include /opt/workspace-ui/include 2>/dev/null || true \
+    && cp -r /usr/share/novnc/utils /opt/workspace-ui/utils 2>/dev/null || true \
+    && chown -R sandbox:sandbox /opt/workspace-ui
+
+# ── Entrypoint ───────────────────────────────────────────
+COPY packages/sandbox/docker/desktop-entrypoint.sh /usr/local/bin/desktop-entrypoint
+RUN chmod +x /usr/local/bin/desktop-entrypoint
+
+WORKDIR /workspace
+USER sandbox
+
+ENV DISPLAY=:99
+ENV HOME=/home/sandbox
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD xdpyinfo -display :99 >/dev/null 2>&1 && \
+      curl -sf http://localhost:9222/json/version >/dev/null
+
+EXPOSE 6080 9222
+
+CMD ["desktop-entrypoint"]
