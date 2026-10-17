@@ -107,6 +107,93 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     };
   });
 
+  // ── HTTP proxy routes (workspace + file server) ───────
+
+  function getContainerForHttp(request: FastifyRequest): { ip: string; secrets?: { vncPassword: string; sessionToken: string } } | { error: string } {
+    const { userId } = request.params as { userId: string };
+    const cm = opts.getContainerManager();
+    if (!cm) return { error: 'Sandbox not initialized' };
+    const container = cm.getDesktopContainer(userId);
+    if (!container) return { error: 'No desktop container running' };
+    if (!container.containerIp) return { error: 'Container IP not available' };
+    return { ip: container.containerIp, secrets: container.desktopSecrets };
+  }
+
+  // Serve custom config.js with proxy URLs (secrets via admin auth, not static file)
+  app.get('/api/v1/admin/desktop/:userId/workspace/config.js', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const { userId } = request.params as { userId: string };
+    const proxyBase = `/api/v1/admin/desktop/${userId}`;
+    const js = `window.DESKTOP_CONFIG = {
+  proxyMode: true,
+  proxyBase: "${proxyBase}",
+  vncPassword: "${target.secrets?.vncPassword || ''}",
+  sessionToken: "${target.secrets?.sessionToken || ''}"
+};`;
+    reply.header('content-type', 'application/javascript').send(js);
+  });
+
+  // Proxy workspace static files (HTML, noVNC JS/CSS) from container port 6080
+  app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const resp = await fetch(`http://${target.ip}:6080/`);
+    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'text/html');
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
+  app.get('/api/v1/admin/desktop/:userId/workspace/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const path = (request.params as Record<string, string>)['*'];
+    const resp = await fetch(`http://${target.ip}:6080/${path}`);
+    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'application/octet-stream');
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
+  // Proxy file server operations from container port 8090
+  app.get('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const path = (request.params as Record<string, string>)['*'];
+    const resp = await fetch(`http://${target.ip}:8090/${path}`, {
+      headers: { 'X-Desktop-Token': target.secrets?.sessionToken || '' },
+    });
+    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'application/json');
+    const disposition = resp.headers.get('content-disposition');
+    if (disposition) reply.header('content-disposition', disposition);
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
+  app.post('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const path = (request.params as Record<string, string>)['*'];
+    const headers: Record<string, string> = { 'X-Desktop-Token': target.secrets?.sessionToken || '' };
+    const contentType = request.headers['content-type'];
+    if (contentType) headers['content-type'] = contentType;
+    const resp = await fetch(`http://${target.ip}:8090/${path}`, {
+      method: 'POST',
+      headers,
+      body: request.body as any,
+    });
+    reply.code(resp.status).header('content-type', 'application/json');
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
+  app.delete('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+    const target = getContainerForHttp(request);
+    if ('error' in target) return reply.code(404).send({ error: target.error });
+    const path = (request.params as Record<string, string>)['*'];
+    const resp = await fetch(`http://${target.ip}:8090/${path}`, {
+      method: 'DELETE',
+      headers: { 'X-Desktop-Token': target.secrets?.sessionToken || '' },
+    });
+    reply.code(resp.status).header('content-type', 'application/json');
+    reply.send(Buffer.from(await resp.arrayBuffer()));
+  });
+
   // ── WebSocket proxy routes ────────────────────────────
 
   /**
