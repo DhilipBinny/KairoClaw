@@ -27,8 +27,8 @@
   async function loadData() {
     try {
       const [configRes, listRes] = await Promise.all([
-        fetch('/api/v1/admin/config', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_token')}` } }),
-        fetch('/api/v1/admin/desktop/list', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_token')}` } }),
+        fetch('/api/v1/admin/config', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` } }),
+        fetch('/api/v1/admin/desktop/list', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` } }),
       ]);
       if (configRes.status === 401 || listRes.status === 401) { logout(); goto('/login'); return; }
       const configData = await configRes.json();
@@ -38,7 +38,7 @@
       desktopUsers = ((config as any)?.tools?.sandbox?.desktopUsers || []) as string[];
 
       // Load users list
-      const usersRes = await fetch('/api/v1/admin/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_token')}` } });
+      const usersRes = await fetch('/api/v1/admin/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` } });
       if (usersRes.ok) {
         const usersData = await usersRes.json();
         users = usersData.users || [];
@@ -53,7 +53,7 @@
     try {
       const res = await fetch(`/api/v1/admin/desktop/${userId}/start`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_token')}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` },
       });
       const data = await res.json();
       if (!res.ok) { feedback = data.error || 'Failed'; return; }
@@ -69,7 +69,7 @@
     try {
       await fetch(`/api/v1/admin/desktop/${userId}/stop`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_token')}` },
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` },
       });
       await loadData();
       if (viewingUserId === userId) viewingUserId = null;
@@ -87,7 +87,7 @@
       const res = await fetch('/api/v1/admin/config', {
         method: 'PATCH',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('agw_token')}`,
+          'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ path: 'tools.sandbox.desktopUsers', value: current }),
