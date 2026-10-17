@@ -94,6 +94,19 @@ export interface ToolRegistration {
    */
   validateInput?: (input: unknown) => { ok: true } | { ok: false; error: string };
   /**
+   * Optional result schema for post-execution validation. When set,
+   * the registry parses the tool result as JSON and checks that all
+   * `required` fields exist. A failed check converts the result to an
+   * error visible to the LLM — the tool is NOT re-invoked.
+   *
+   * Lightweight by design: only checks `type: 'object'` and `required`
+   * field presence. No nested schema, no type checking, no Zod.
+   */
+  resultSchema?: {
+    type: 'object';
+    required?: string[];
+  };
+  /**
    * Optional equality check for two argument sets. Used by the loop
    * detector to decide whether two calls are "the same" for loop
    * tripping. Defaults to deep-equal if omitted.
