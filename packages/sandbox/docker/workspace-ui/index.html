@@ -304,12 +304,21 @@ body {
 
 <input type="file" id="upload-input" multiple onchange="handleUpload(this.files)">
 
-<script src="config.js"></script>
+<script>
+// Propagate workspace token to config.js in proxy mode
+(function() {
+  var qs = new URLSearchParams(window.location.search);
+  var wt = qs.get('wt');
+  var src = wt ? 'config.js?wt=' + encodeURIComponent(wt) : 'config.js';
+  document.write('<scr' + 'ipt src="' + src + '"></scr' + 'ipt>');
+})();
+</script>
 <script>
 const loc = window.location;
 const host = loc.hostname;
 const wsPort = loc.port || '6080';
 const cfg = window.DESKTOP_CONFIG || {};
+const workspaceToken = new URLSearchParams(loc.search).get('wt') || '';
 
 // Secrets come from URL hash, config.js (proxy mode), or fallback defaults
 const hashParams = new URLSearchParams(loc.hash.slice(1));
@@ -323,11 +332,13 @@ let vncUrl, ttydUrl, fileApiUrl, fileHeaders;
 if (cfg.proxyMode && cfg.proxyBase) {
   // Proxy mode: everything goes through the admin API (same origin, no extra ports)
   const base = cfg.proxyBase;
-  const vncWsPath = base.replace(/^\//, '') + '/vnc';
+  const wtParam = workspaceToken ? 'wt=' + encodeURIComponent(workspaceToken) : '';
+  const vncWsPath = base.replace(/^\//, '') + '/vnc' + (wtParam ? '?' + wtParam : '');
   vncUrl = loc.protocol + '//' + loc.host + base
     + '/workspace/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'
     + '&path=' + encodeURIComponent(vncWsPath)
-    + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '');
+    + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '')
+    + (wtParam ? '&' + wtParam : '');
   ttydUrl = 'about:blank';
   fileApiUrl = loc.protocol + '//' + loc.host + base + '/files';
   fileHeaders = {};

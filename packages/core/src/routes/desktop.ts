@@ -2,10 +2,22 @@ import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import type { ContainerManager } from '@agw/sandbox';
 import { createRequire } from 'node:module';
+import { randomBytes } from 'node:crypto';
 import { requireRole } from '../auth/middleware.js';
 
 const _require = createRequire(import.meta.url);
 const { WebSocket: WsClient } = _require('ws') as { WebSocket: new (url: string) => WebSocket };
+
+// Short-lived workspace access tokens (5 min expiry, auto-cleanup)
+const WORKSPACE_TOKEN_TTL_MS = 5 * 60 * 1000;
+const workspaceTokens = new Map<string, { userId: string; expiresAt: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of workspaceTokens) {
+    if (now > entry.expiresAt) workspaceTokens.delete(token);
+  }
+}, 60_000).unref();
 
 /**
  * Desktop workspace routes — WebSocket proxy for noVNC, terminal, and file API.
@@ -119,8 +131,31 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     return { ip: container.containerIp, secrets: container.desktopSecrets };
   }
 
-  // Serve custom config.js with proxy URLs (secrets via admin auth, not static file)
-  app.get('/api/v1/admin/desktop/:userId/workspace/config.js', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  // Generate short-lived workspace token (admin-only, 5 min expiry)
+  app.post('/api/v1/admin/desktop/:userId/workspace-token', { preHandler: [requireRole('admin')] }, async (request) => {
+    const { userId } = request.params as { userId: string };
+    const cm = opts.getContainerManager();
+    if (!cm) return { error: 'Sandbox not initialized' };
+    if (!cm.getDesktopContainer(userId)) return { error: 'No desktop container running' };
+    const token = randomBytes(32).toString('base64url');
+    workspaceTokens.set(token, { userId, expiresAt: Date.now() + WORKSPACE_TOKEN_TTL_MS });
+    return { token, expiresIn: WORKSPACE_TOKEN_TTL_MS / 1000 };
+  });
+
+  // Validate workspace token from ?wt= query param (for browser-tab access)
+  async function requireWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
+    const { userId } = request.params as { userId: string };
+    const wt = (request.query as Record<string, string>).wt;
+    if (!wt) { reply.code(401).send({ error: 'Missing workspace token (?wt=)' }); return; }
+    const entry = workspaceTokens.get(wt);
+    if (!entry || entry.userId !== userId || Date.now() > entry.expiresAt) {
+      reply.code(401).send({ error: 'Invalid or expired workspace token' });
+      return;
+    }
+  }
+
+  // Serve custom config.js with proxy URLs (secrets via workspace token, not API key)
+  app.get('/api/v1/admin/desktop/:userId/workspace/config.js', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const { userId } = request.params as { userId: string };
@@ -138,7 +173,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   // CSP sandbox isolates container content from the admin origin's cookies/storage
   const WORKSPACE_CSP = 'sandbox allow-scripts allow-forms; frame-ancestors \'self\'';
 
-  app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const resp = await fetch(`http://${target.ip}:6080/`);
@@ -149,7 +184,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
-  app.get('/api/v1/admin/desktop/:userId/workspace/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.get('/api/v1/admin/desktop/:userId/workspace/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const path = (request.params as Record<string, string>)['*'];
@@ -162,7 +197,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   });
 
   // Proxy file server operations from container port 8090
-  app.get('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.get('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const path = (request.params as Record<string, string>)['*'];
@@ -177,7 +212,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
-  app.post('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.post('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const path = (request.params as Record<string, string>)['*'];
@@ -193,7 +228,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
-  app.delete('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireRole('admin')] }, async (request, reply) => {
+  app.delete('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const path = (request.params as Record<string, string>)['*'];
@@ -248,6 +283,16 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   function getContainerForWs(request: FastifyRequest): { ip: string } | { error: string } {
     if (!validateWsOrigin(request)) return { error: 'Origin not allowed' };
     const { userId } = request.params as { userId: string };
+
+    // Accept workspace token on WS upgrade (noVNC passes it via query)
+    const wt = (request.query as Record<string, string>).wt;
+    if (wt) {
+      const entry = workspaceTokens.get(wt);
+      if (!entry || entry.userId !== userId || Date.now() > entry.expiresAt) {
+        return { error: 'Invalid or expired workspace token' };
+      }
+    }
+
     const cm = opts.getContainerManager();
     if (!cm) return { error: 'Sandbox not initialized' };
 
@@ -258,15 +303,27 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     return { ip: container.containerIp };
   }
 
+  // Accept admin API key OR workspace token for WS routes
+  const adminMiddleware = requireRole('admin');
+  async function requireAdminOrWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
+    const { userId } = request.params as { userId: string };
+    const wt = (request.query as Record<string, string>).wt;
+    if (wt) {
+      const entry = workspaceTokens.get(wt);
+      if (entry && entry.userId === userId && Date.now() <= entry.expiresAt) return;
+    }
+    await adminMiddleware(request, reply);
+  }
+
   // WS /api/v1/admin/desktop/:userId/vnc — noVNC WebSocket proxy
-  app.get('/api/v1/admin/desktop/:userId/vnc', { websocket: true, preHandler: [requireRole('admin')] }, (socket: WebSocket, request: FastifyRequest) => {
+  app.get('/api/v1/admin/desktop/:userId/vnc', { websocket: true, preHandler: [requireAdminOrWorkspaceToken] }, (socket: WebSocket, request: FastifyRequest) => {
     const target = getContainerForWs(request);
     if ('error' in target) { socket.close(1008, target.error); return; }
     proxyWebSocket(socket, target.ip, 6080, '/websockify');
   });
 
   // WS /api/v1/admin/desktop/:userId/terminal — ttyd WebSocket proxy
-  app.get('/api/v1/admin/desktop/:userId/terminal', { websocket: true, preHandler: [requireRole('admin')] }, (socket: WebSocket, request: FastifyRequest) => {
+  app.get('/api/v1/admin/desktop/:userId/terminal', { websocket: true, preHandler: [requireAdminOrWorkspaceToken] }, (socket: WebSocket, request: FastifyRequest) => {
     const target = getContainerForWs(request);
     if ('error' in target) { socket.close(1008, target.error); return; }
     proxyWebSocket(socket, target.ip, 7681, '/ws');

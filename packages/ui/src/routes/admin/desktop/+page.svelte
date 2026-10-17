@@ -94,10 +94,16 @@
     } catch { /* ignore */ }
   }
 
-  function getWorkspaceUrl(userId: string): string | null {
-    const container = getContainerForUser(userId);
-    if (!container) return null;
-    return `/api/v1/admin/desktop/${userId}/workspace`;
+  async function openWorkspace(userId: string) {
+    try {
+      const res = await fetch(`/api/v1/admin/desktop/${userId}/workspace-token`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` },
+      });
+      if (!res.ok) { feedback = 'Failed to get workspace token'; return; }
+      const { token } = await res.json();
+      window.open(`/api/v1/admin/desktop/${userId}/workspace?wt=${encodeURIComponent(token)}`, '_blank');
+    } catch (e: any) { feedback = e.message; }
   }
 
   function getContainerForUser(userId: string) {
@@ -172,7 +178,7 @@
                 <td>{container ? formatUptime(container.uptimeMs) : '—'}</td>
                 <td class="actions">
                   {#if container}
-                    <a class="btn btn-sm btn-primary" href={getWorkspaceUrl(user.id)} target="_blank" rel="noopener">Open</a>
+                    <button class="btn btn-sm btn-primary" onclick={() => openWorkspace(user.id)}>Open</button>
                     <button class="btn btn-sm btn-danger" onclick={() => stopDesktop(user.id)} disabled={actionInProgress === user.id}>Stop</button>
                   {:else if enabled}
                     <button class="btn btn-sm btn-primary" onclick={() => startDesktop(user.id)} disabled={actionInProgress === user.id}>
