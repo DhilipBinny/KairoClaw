@@ -79,3 +79,4 @@ packages/*/test_*.mjs
 packages/*/fuzz_*.mjs
 scratch_*.mjs
 *.scratch.mjs
+packages/sandbox/docker/ttyd.x86_64

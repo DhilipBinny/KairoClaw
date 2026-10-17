@@ -22,7 +22,7 @@ export const registerSandboxRoutes: FastifyPluginAsync<{
     }
 
     const readiness = await cm.isReady();
-    const active = cm.listActive().map(c => ({
+    const active = cm.listActive().filter(c => !c.desktop).map(c => ({
       containerId: c.containerId.slice(0, 12),
       userId: c.userId,
       sessionId: c.sessionId,

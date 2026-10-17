@@ -14,6 +14,8 @@ import {
   listSandboxContainers,
   isDockerAvailable,
   imageExists,
+  getContainerIp,
+  getContainerPorts,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
 import { resolveNetworkMode } from './network-policy.js';
@@ -28,6 +30,13 @@ import {
   IDLE_TIMEOUT_MS,
   MAX_CONTAINERS_PER_USER,
   MAX_CONTAINERS_TOTAL,
+  DEFAULT_DESKTOP_IMAGE,
+  DESKTOP_SHM_SIZE,
+  DESKTOP_MEMORY_MB,
+  DESKTOP_PIDS_LIMIT,
+  DESKTOP_MAX_LIFETIME_MINUTES,
+  DESKTOP_IDLE_TIMEOUT_MS,
+  DESKTOP_LABEL_KEY,
 } from './constants.js';
 
 export class ContainerManager {
@@ -50,8 +59,9 @@ export class ContainerManager {
     this.idleCleanupTimer = setInterval(() => {
       const now = Date.now();
       for (const [key, entry] of this.containers) {
-        if (now - entry.lastExecAt > IDLE_TIMEOUT_MS) {
-          this.log.info({ userId: entry.userId, sessionId: entry.sessionId, idleMinutes: Math.round((now - entry.lastExecAt) / 60000) }, 'Destroying idle sandbox container');
+        const timeout = entry.desktop ? DESKTOP_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS;
+        if (now - entry.lastExecAt > timeout) {
+          this.log.info({ userId: entry.userId, sessionId: entry.sessionId, desktop: !!entry.desktop, idleMinutes: Math.round((now - entry.lastExecAt) / 60000) }, 'Destroying idle sandbox container');
           this.destroyContainer(key).catch(() => {});
         }
       }
@@ -153,6 +163,7 @@ export class ContainerManager {
       socketPath: this.config.dockerSocket,
       name: containerName,
       image: this.config.image,
+      cmd: ['sleep', 'infinity'],
       binds: toDockerBinds(mounts.binds),
       workdir: mounts.workdir,
       networkMode,
@@ -310,6 +321,180 @@ export class ContainerManager {
     );
   }
 
+  // ── Desktop container management ─────────────────────
+
+  /**
+   * Check if a user has desktop mode enabled.
+   */
+  isDesktopEnabled(userId: string): boolean {
+    const desktopUsers = (this.config as any).desktopUsers as string[] | undefined;
+    return Array.isArray(desktopUsers) && desktopUsers.includes(userId);
+  }
+
+  /**
+   * Get or create a persistent desktop container for a user.
+   * Desktop containers are keyed by userId only (not session),
+   * use the desktop image, and have higher resource limits.
+   */
+  async getOrCreateDesktop(opts: {
+    userId: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+  }): Promise<SandboxContainer> {
+    const key = `desktop:${opts.userId}`;
+
+    const existing = this.containers.get(key);
+    if (existing) return existing;
+
+    const pending = this.pendingCreations.get(key);
+    if (pending) return pending;
+
+    const promise = this._doCreateDesktop(key, opts);
+    this.pendingCreations.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.pendingCreations.delete(key);
+    }
+  }
+
+  private async _doCreateDesktop(key: string, opts: {
+    userId: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+  }): Promise<SandboxContainer> {
+    const mounts = resolveMounts({
+      workspacePath: opts.workspacePath,
+      scopeKey: opts.scopeKey,
+      isAdmin: opts.isAdmin,
+      mountMode: 'read-write',
+    });
+
+    const desktopImage = (this.config as any).desktopImage || DEFAULT_DESKTOP_IMAGE;
+    const networkMode = resolveNetworkMode('open');
+    const containerName = `${CONTAINER_PREFIX}-desktop-${sanitize(opts.userId)}`;
+
+    this.log.info({ userId: opts.userId, image: desktopImage }, 'Creating desktop container');
+
+    const userContainers = [...this.containers.values()].filter(c => c.userId === opts.userId);
+    if (userContainers.length >= this.maxContainersPerUser) {
+      throw new Error(`Container limit reached (${this.maxContainersPerUser} per user). Stop an existing container first.`);
+    }
+    if (this.containers.size >= this.maxContainersTotal) {
+      throw new Error(`Global container limit reached (${this.maxContainersTotal}). Stop some containers first.`);
+    }
+
+    const desktopPortBindings: Record<string, { HostIp?: string; HostPort?: string }[]> = {
+      '6080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+      '7681/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+      '8090/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+    };
+
+    const containerId = await createContainer({
+      socketPath: this.config.dockerSocket,
+      name: containerName,
+      image: desktopImage,
+      binds: toDockerBinds(mounts.binds),
+      workdir: mounts.workdir,
+      networkMode,
+      labels: {
+        [CONTAINER_LABEL_KEY]: 'true',
+        [CONTAINER_USER_LABEL]: opts.userId,
+        [CONTAINER_SESSION_LABEL]: 'desktop',
+        [DESKTOP_LABEL_KEY]: 'true',
+      },
+      cpu: this.config.defaults.cpu,
+      memoryMb: DESKTOP_MEMORY_MB,
+      pidsLimit: DESKTOP_PIDS_LIMIT,
+      shmSize: DESKTOP_SHM_SIZE,
+      portBindings: desktopPortBindings,
+    });
+
+    let containerIp: string | null = null;
+    let hostPorts: Record<string, number> = {};
+    try {
+      [containerIp, hostPorts] = await Promise.all([
+        getContainerIp(this.config.dockerSocket, containerId),
+        getContainerPorts(this.config.dockerSocket, containerId),
+      ]);
+    } catch (err) {
+      this.log.warn({ err: (err as Error).message, containerId: containerId.slice(0, 12) }, 'Failed to inspect desktop container — cleaning up');
+      await removeContainer(this.config.dockerSocket, containerId).catch(() => {});
+      throw new Error('Desktop container started but inspection failed — removed to avoid orphan');
+    }
+
+    this.log.debug({ containerId: containerId.slice(0, 12), containerName, containerIp, hostPorts }, 'Desktop container started');
+
+    // Wait for desktop-entrypoint to write secrets file (retries for up to 15s)
+    let desktopSecrets: { vncPassword: string; sessionToken: string } | undefined;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const result = await execInContainer(this.config.dockerSocket, containerId, 'cat /tmp/desktop-secrets.json', '/', 3000);
+        if (result.exitCode === 0 && result.stdout.trim()) {
+          desktopSecrets = JSON.parse(result.stdout.trim());
+          break;
+        }
+      } catch { /* retry */ }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (!desktopSecrets) {
+      this.log.warn({ userId: opts.userId }, 'Could not read desktop secrets from container');
+    }
+
+    const now = Date.now();
+    const maxLifetimeMs = DESKTOP_MAX_LIFETIME_MINUTES * 60 * 1000;
+    const entry: SandboxContainer = {
+      containerId,
+      userId: opts.userId,
+      sessionId: 'desktop',
+      image: desktopImage,
+      network: 'open',
+      workspace: 'read-write',
+      createdAt: now,
+      lastExecAt: now,
+      maxLifetimeMs,
+      desktop: true,
+      containerIp: containerIp || undefined,
+      hostPorts: Object.keys(hostPorts).length > 0 ? hostPorts : undefined,
+      desktopSecrets,
+    };
+
+    this.containers.set(key, entry);
+
+    const timer = setTimeout(() => {
+      this.destroyContainer(key).catch(() => {});
+    }, maxLifetimeMs);
+    timer.unref();
+    this.lifetimeTimers.set(key, timer);
+
+    return entry;
+  }
+
+  /**
+   * Get an existing desktop container for a user (without creating).
+   */
+  getDesktopContainer(userId: string): SandboxContainer | null {
+    return this.containers.get(`desktop:${userId}`) || null;
+  }
+
+  /**
+   * Execute a command inside the user's desktop container.
+   */
+  async desktopExec(userId: string, command: string, timeoutSec = 10): Promise<import('@agw/types').SandboxExecResult> {
+    const container = this.getDesktopContainer(userId);
+    if (!container) throw new Error('No desktop container running');
+    container.lastExecAt = Date.now();
+    return execInContainer(
+      this.config.dockerSocket,
+      container.containerId,
+      command,
+      CONTAINER_WORKSPACE_PATH,
+      timeoutSec * 1000,
+    );
+  }
+
   getCapabilities(role: string, userId?: string): SandboxCapabilities {
     return resolveCapabilities(this.config, role, userId);
   }
@@ -333,7 +518,9 @@ export class ContainerManager {
   }
 
   async destroyForUser(userId: string): Promise<void> {
-    const keysToRemove = [...this.containers.keys()].filter(k => k.startsWith(`${userId}:`));
+    const keysToRemove = [...this.containers.keys()].filter(k =>
+      k.startsWith(`${userId}:`) || k === `desktop:${userId}`,
+    );
     await Promise.allSettled(keysToRemove.map(k => this.destroyContainer(k)));
   }
 

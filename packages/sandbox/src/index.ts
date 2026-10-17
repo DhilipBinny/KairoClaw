@@ -3,5 +3,5 @@ export { resolveCapabilities, canEscalate, isNetworkUpgrade, isWorkspaceUpgrade,
 export { resolveMounts, toDockerBinds } from './mount-resolver.js';
 export type { MountBind, ResolvedMounts } from './mount-resolver.js';
 export { resolveNetworkMode, buildAllowlistScript, needsIptables, isValidDomain } from './network-policy.js';
-export { isDockerAvailable, imageExists } from './docker-client.js';
+export { isDockerAvailable, imageExists, getContainerIp, getContainerPorts } from './docker-client.js';
 export * from './constants.js';

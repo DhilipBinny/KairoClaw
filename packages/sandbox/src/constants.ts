@@ -30,6 +30,15 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
 export const MAX_CONTAINERS_PER_USER = 5;
 export const MAX_CONTAINERS_TOTAL = 30;
 
+// ── Desktop mode defaults ──────────────────────
+export const DEFAULT_DESKTOP_IMAGE = 'kairoclaw-sandbox:desktop';
+export const DESKTOP_SHM_SIZE = 256 * 1024 * 1024; // 256MB for Chrome
+export const DESKTOP_MEMORY_MB = 1024;
+export const DESKTOP_PIDS_LIMIT = 512;
+export const DESKTOP_MAX_LIFETIME_MINUTES = 480; // 8 hours
+export const DESKTOP_IDLE_TIMEOUT_MS = 60 * 60_000; // 1 hour (persistent, longer idle)
+export const DESKTOP_LABEL_KEY = 'kairoclaw.sandbox.desktop';
+
 // ── Mount resolver ──────────────────────────────
 export const PERSONA_FILES = ['IDENTITY.md', 'SOUL.md', 'RULES.md'];
 

@@ -6,6 +6,7 @@ import { messagingTools } from './messaging.js';
 import { pluginTools } from './plugins.js';
 import { subagentTools } from './subagent.js';
 import { browseTools } from './browse.js';
+import { desktopTools } from './desktop.js';
 import type { ToolRegistration } from '@agw/tool-platform';
 
 export const builtinTools: ToolRegistration[] = [
@@ -14,6 +15,7 @@ export const builtinTools: ToolRegistration[] = [
   ...pluginTools,
   ...subagentTools,
   ...browseTools,
+  ...desktopTools,
 ];
 
 // Re-exports for backward compatibility
@@ -39,3 +41,4 @@ export { messagingTools } from './messaging.js';
 export { pluginTools } from './plugins.js';
 export { subagentTools } from './subagent.js';
 export { browseTools } from './browse.js';
+export { desktopTools, setDesktopManager } from './desktop.js';

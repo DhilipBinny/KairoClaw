@@ -20,7 +20,7 @@ import { authPlugin, requireRole } from './auth/middleware.js';
 import { resolvePrincipal } from './auth/principal.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { ToolRegistry } from './tools/registry.js';
-import { builtinTools } from './tools/builtin/index.js';
+import { builtinTools, setDesktopManager } from './tools/builtin/index.js';
 import { setMemorySystem, setSandboxManager } from '@agw/tools-common';
 import { ContainerManager, isDockerAvailable, imageExists } from '@agw/sandbox';
 import { MemorySystem } from './memory/index.js';
@@ -81,6 +81,7 @@ import { registerAuditRoutes } from './routes/audit.js';
 import { registerMCPRoutes } from './routes/mcp.js';
 import { chatRoutes } from './routes/chat.js';
 import { registerSandboxRoutes } from './routes/sandbox.js';
+import { registerDesktopRoutes } from './routes/desktop.js';
 import { registerWorkspaceRoutes } from './routes/workspace.js';
 import { registerCronRoutes } from './routes/cron.js';
 import { registerSystemRoutes } from './routes/system.js';
@@ -302,6 +303,7 @@ async function main(): Promise<void> {
   if (!hasPdftotext) _bootLog.warn('pdftotext not found — read_pdf tool disabled');
   if (!hasChromium) _bootLog.warn('chromium not found — browse tool disabled');
 
+  const sandboxEnabled = !!config.tools?.sandbox?.enabled;
   const toolEnabledMap: Record<string, boolean> = {
     exec: config.tools?.exec?.enabled !== false,
     web_search: config.tools?.webSearch?.enabled !== false,
@@ -309,10 +311,17 @@ async function main(): Promise<void> {
     send_email: !!config.tools?.email?.enabled,
     browse: (config.tools?.browse?.enabled !== false) && hasChromium,
     read_pdf: hasPdftotext,
-    sandbox_exec: !!config.tools?.sandbox?.enabled,
-    sandbox_read_file: !!config.tools?.sandbox?.enabled,
-    sandbox_write_file: !!config.tools?.sandbox?.enabled,
-    sandbox_list_files: !!config.tools?.sandbox?.enabled,
+    sandbox_exec: sandboxEnabled,
+    sandbox_read_file: sandboxEnabled,
+    sandbox_write_file: sandboxEnabled,
+    sandbox_list_files: sandboxEnabled,
+    desktop_navigate: sandboxEnabled,
+    desktop_screenshot: sandboxEnabled,
+    desktop_read_page: sandboxEnabled,
+    desktop_click_xy: sandboxEnabled,
+    desktop_type_raw: sandboxEnabled,
+    desktop_key: sandboxEnabled,
+    desktop_scroll: sandboxEnabled,
   };
   for (const tool of builtinTools) {
     const name = tool.definition.name;
@@ -383,6 +392,7 @@ async function main(): Promise<void> {
         const sandboxLog = toAgwLogger(createModuleLogger('sandbox'));
         sandboxManager = new ContainerManager(sandboxConfig, sandboxLog);
         setSandboxManager(sandboxManager);
+        setDesktopManager(sandboxManager);
         _bootLog.info({ image: sandboxConfig.image }, 'Sandbox: enabled');
       } else {
         console.warn(`  Sandbox: image '${sandboxConfig.image}' not found — sandbox_exec disabled`);
@@ -775,10 +785,13 @@ async function main(): Promise<void> {
               const sbLog = toAgwLogger(createModuleLogger('sandbox'));
               sandboxManager = new ContainerManager(sbConfig, sbLog);
               setSandboxManager(sandboxManager);
-              // Register sandbox tools
+              setDesktopManager(sandboxManager);
+              // Register sandbox + desktop tools
               const sandboxToolNames = ['sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files'];
+              const desktopToolNames = ['desktop_navigate', 'desktop_screenshot', 'desktop_read_page', 'desktop_click_xy', 'desktop_type_raw', 'desktop_key', 'desktop_scroll'];
+              const allToolNames = [...sandboxToolNames, ...desktopToolNames];
               for (const tool of builtinTools) {
-                if (sandboxToolNames.includes(tool.definition.name) && !toolRegistry.has(tool.definition.name)) {
+                if (allToolNames.includes(tool.definition.name) && !toolRegistry.has(tool.definition.name)) {
                   toolRegistry.register(tool, { builtin: true });
                 }
               }
@@ -793,9 +806,15 @@ async function main(): Promise<void> {
       } else if (!value && sandboxManager) {
         await sandboxManager.destroyAll();
         setSandboxManager(null);
+        setDesktopManager(null);
         sandboxManager = null;
-        // Unregister sandbox tools
-        for (const name of ['sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files']) {
+        // Unregister sandbox + desktop tools
+        const toolsToRemove = [
+          'sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files',
+          'desktop_navigate', 'desktop_screenshot', 'desktop_read_page', 'desktop_click_xy',
+          'desktop_type_raw', 'desktop_key', 'desktop_scroll',
+        ];
+        for (const name of toolsToRemove) {
           if (toolRegistry.has(name)) toolRegistry.unregister(name);
         }
         server.log.info('Sandbox disabled via Settings');
@@ -848,6 +867,7 @@ async function main(): Promise<void> {
 
   await server.register(registerConfigRoutes, { auditService, onConfigChange });
   await server.register(registerSandboxRoutes, { getContainerManager: () => sandboxManager });
+  await server.register(registerDesktopRoutes, { getContainerManager: () => sandboxManager });
   await server.register(registerUsageRoutes);
   await server.register(registerUserRoutes);
   await server.register(registerLogRoutes);

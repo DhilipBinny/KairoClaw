@@ -1,0 +1,127 @@
+# KairoClaw Sandbox — multi-target build
+#
+# Two images from one Dockerfile:
+#   docker build --target full    -t kairoclaw-sandbox:full    .
+#   docker build --target desktop -t kairoclaw-sandbox:desktop .
+#
+# :full    — code execution only (Node, Python, git, build tools). ~800MB.
+# :desktop — full + browser workspace (Chromium, Xvfb, noVNC, ttyd). ~2.5GB.
+#
+# Build from repo root:
+#   docker build --target full -f packages/sandbox/docker/Dockerfile.sandbox \
+#     -t kairoclaw-sandbox:full .
+#   docker build --target desktop -f packages/sandbox/docker/Dockerfile.sandbox \
+#     -t kairoclaw-sandbox:desktop .
+
+# ═════════════════════════════════════════════════════════
+# Stage 1: full — code execution sandbox
+# ═════════════════════════════════════════════════════════
+
+FROM debian:bookworm-slim AS full
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System packages: core utilities + build essentials for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    git \
+    jq \
+    ca-certificates \
+    gnupg \
+    build-essential \
+    procps \
+    iptables \
+    dnsutils \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 22 LTS via NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# pnpm via corepack
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+# Python 3.12 (bookworm default)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python
+
+# Non-root user (uid 1000)
+RUN groupadd -g 1000 sandbox && useradd -m -u 1000 -g sandbox sandbox
+
+# Workspace directories
+RUN mkdir -p /workspace /shared /persona && chown -R sandbox:sandbox /workspace /shared /persona
+
+WORKDIR /workspace
+SHELL ["/bin/sh", "-c"]
+USER sandbox
+
+CMD ["sleep", "infinity"]
+
+# ═════════════════════════════════════════════════════════
+# Stage 2: desktop — full + browser workspace
+# ═════════════════════════════════════════════════════════
+
+FROM full AS desktop
+
+USER root
+
+# Display server + browser + automation tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    novnc \
+    openbox \
+    scrot \
+    socat \
+    websockify \
+    wmctrl \
+    x11-utils \
+    x11vnc \
+    xdotool \
+    xterm \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+# ttyd (web terminal, single binary)
+COPY packages/sandbox/docker/ttyd.x86_64 /usr/local/bin/ttyd
+RUN chmod +x /usr/local/bin/ttyd
+
+# Workspace UI + noVNC assets (copied at build time)
+COPY packages/sandbox/docker/workspace-ui/ /opt/workspace-ui/
+RUN cp -r /usr/share/novnc/app /opt/workspace-ui/app \
+    && cp -r /usr/share/novnc/core /opt/workspace-ui/core \
+    && cp -r /usr/share/novnc/vendor /opt/workspace-ui/vendor \
+    && cp /usr/share/novnc/vnc.html /opt/workspace-ui/vnc.html \
+    && cp /usr/share/novnc/vnc_lite.html /opt/workspace-ui/vnc_lite.html \
+    && cp -r /usr/share/novnc/include /opt/workspace-ui/include 2>/dev/null || true \
+    && cp -r /usr/share/novnc/utils /opt/workspace-ui/utils 2>/dev/null || true \
+    && chown -R sandbox:sandbox /opt/workspace-ui
+
+# Desktop directories
+RUN mkdir -p /home/sandbox/.vnc /home/sandbox/.chrome \
+    && chown -R sandbox:sandbox /home/sandbox
+
+# Entrypoint
+COPY packages/sandbox/docker/desktop-entrypoint.sh /usr/local/bin/desktop-entrypoint
+RUN chmod +x /usr/local/bin/desktop-entrypoint
+
+USER sandbox
+
+ENV DISPLAY=:99
+ENV HOME=/home/sandbox
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD xdpyinfo -display :99 >/dev/null 2>&1 && \
+      curl -sf http://localhost:9222/json/version >/dev/null
+
+EXPOSE 6080 9222
+
+CMD ["desktop-entrypoint"]

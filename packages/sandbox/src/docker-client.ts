@@ -50,6 +50,12 @@ export interface CreateContainerOpts {
   cpu: number;
   memoryMb: number;
   pidsLimit: number;
+  /** /dev/shm size in bytes. Desktop containers need 256MB+ for Chrome. */
+  shmSize?: number;
+  /** Override the image's CMD. If omitted, the image's default CMD is used. */
+  cmd?: string[];
+  /** Port bindings for host access. Keys are container ports like '6080/tcp'. */
+  portBindings?: Record<string, { HostIp?: string; HostPort?: string }[]>;
 }
 
 export async function createContainer(opts: CreateContainerOpts): Promise<string> {
@@ -57,10 +63,16 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
 
   const memBytes = opts.memoryMb * 1024 * 1024;
 
-  const container = await docker.createContainer({
+  const exposedPorts: Record<string, Record<string, never>> = {};
+  if (opts.portBindings) {
+    for (const port of Object.keys(opts.portBindings)) {
+      exposedPorts[port] = {};
+    }
+  }
+
+  const containerConfig: Record<string, unknown> = {
     name: opts.name,
     Image: opts.image,
-    Cmd: ['sleep', 'infinity'],
     WorkingDir: opts.workdir,
     Labels: opts.labels,
     Tty: false,
@@ -93,12 +105,57 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
         { Name: 'nofile', Soft: 1024, Hard: 4096 },
         { Name: 'core', Soft: 0, Hard: 0 },
       ],
+      ...(opts.shmSize ? { ShmSize: opts.shmSize } : {}),
+      ...(opts.portBindings ? { PortBindings: opts.portBindings } : {}),
     },
     User: '1000:1000',
-  });
+  };
+
+  if (opts.cmd) {
+    containerConfig.Cmd = opts.cmd;
+  }
+  if (Object.keys(exposedPorts).length > 0) {
+    containerConfig.ExposedPorts = exposedPorts;
+  }
+
+  const container = await docker.createContainer(containerConfig as any);
 
   await container.start();
   return container.id;
+}
+
+export async function getContainerPorts(socketPath: string, containerId: string): Promise<Record<string, number>> {
+  const docker = getDocker(socketPath);
+  const container = docker.getContainer(containerId);
+  const info = await container.inspect();
+  const ports = info.NetworkSettings?.Ports || {};
+  const result: Record<string, number> = {};
+  for (const [containerPort, bindings] of Object.entries(ports)) {
+    if (Array.isArray(bindings) && bindings.length > 0) {
+      const hostPort = parseInt((bindings[0] as any).HostPort, 10);
+      if (!isNaN(hostPort)) {
+        result[containerPort] = hostPort;
+      }
+    }
+  }
+  return result;
+}
+
+export async function getContainerIp(socketPath: string, containerId: string): Promise<string | null> {
+  try {
+    const docker = getDocker(socketPath);
+    const container = docker.getContainer(containerId);
+    const info = await container.inspect();
+    const networks = info.NetworkSettings?.Networks;
+    if (networks) {
+      for (const net of Object.values(networks)) {
+        if ((net as any).IPAddress) return (net as any).IPAddress;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function execInContainer(
