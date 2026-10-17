@@ -14,6 +14,7 @@ import {
   listSandboxContainers,
   isDockerAvailable,
   imageExists,
+  getContainerIp,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
 import { resolveNetworkMode } from './network-policy.js';
@@ -28,6 +29,12 @@ import {
   IDLE_TIMEOUT_MS,
   MAX_CONTAINERS_PER_USER,
   MAX_CONTAINERS_TOTAL,
+  DEFAULT_DESKTOP_IMAGE,
+  DESKTOP_SHM_SIZE,
+  DESKTOP_MEMORY_MB,
+  DESKTOP_PIDS_LIMIT,
+  DESKTOP_MAX_LIFETIME_MINUTES,
+  DESKTOP_LABEL_KEY,
 } from './constants.js';
 
 export class ContainerManager {
@@ -308,6 +315,120 @@ export class ContainerManager {
       '/',
       10000,
     );
+  }
+
+  // ── Desktop container management ─────────────────────
+
+  /**
+   * Check if a user has desktop mode enabled.
+   */
+  isDesktopEnabled(userId: string): boolean {
+    const desktopUsers = (this.config as any).desktopUsers as string[] | undefined;
+    return Array.isArray(desktopUsers) && desktopUsers.includes(userId);
+  }
+
+  /**
+   * Get or create a persistent desktop container for a user.
+   * Desktop containers are keyed by userId only (not session),
+   * use the desktop image, and have higher resource limits.
+   */
+  async getOrCreateDesktop(opts: {
+    userId: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+  }): Promise<SandboxContainer> {
+    const key = `desktop:${opts.userId}`;
+
+    const existing = this.containers.get(key);
+    if (existing) return existing;
+
+    const pending = this.pendingCreations.get(key);
+    if (pending) return pending;
+
+    const promise = this._doCreateDesktop(key, opts);
+    this.pendingCreations.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      this.pendingCreations.delete(key);
+    }
+  }
+
+  private async _doCreateDesktop(key: string, opts: {
+    userId: string;
+    workspacePath: string;
+    scopeKey: string | null;
+    isAdmin: boolean;
+  }): Promise<SandboxContainer> {
+    const mounts = resolveMounts({
+      workspacePath: opts.workspacePath,
+      scopeKey: opts.scopeKey,
+      isAdmin: opts.isAdmin,
+      mountMode: 'read-write',
+    });
+
+    const desktopImage = (this.config as any).desktopImage || DEFAULT_DESKTOP_IMAGE;
+    const networkMode = resolveNetworkMode('open');
+    const containerName = `${CONTAINER_PREFIX}-desktop-${sanitize(opts.userId)}`;
+
+    this.log.info({ userId: opts.userId, image: desktopImage }, 'Creating desktop container');
+
+    const containerId = await createContainer({
+      socketPath: this.config.dockerSocket,
+      name: containerName,
+      image: desktopImage,
+      binds: toDockerBinds(mounts.binds),
+      workdir: mounts.workdir,
+      networkMode,
+      labels: {
+        [CONTAINER_LABEL_KEY]: 'true',
+        [CONTAINER_USER_LABEL]: opts.userId,
+        [CONTAINER_SESSION_LABEL]: 'desktop',
+        [DESKTOP_LABEL_KEY]: 'true',
+      },
+      cpu: this.config.defaults.cpu,
+      memoryMb: DESKTOP_MEMORY_MB,
+      pidsLimit: DESKTOP_PIDS_LIMIT,
+      shmSize: DESKTOP_SHM_SIZE,
+    });
+
+    const containerIp = await getContainerIp(this.config.dockerSocket, containerId);
+
+    this.log.debug({ containerId: containerId.slice(0, 12), containerName, containerIp }, 'Desktop container started');
+
+    const now = Date.now();
+    const maxLifetimeMs = DESKTOP_MAX_LIFETIME_MINUTES * 60 * 1000;
+    const entry: SandboxContainer = {
+      containerId,
+      userId: opts.userId,
+      sessionId: 'desktop',
+      image: desktopImage,
+      network: 'open',
+      workspace: 'read-write',
+      createdAt: now,
+      lastExecAt: now,
+      maxLifetimeMs,
+      desktop: true,
+      containerIp: containerIp || undefined,
+    };
+
+    this.containers.set(key, entry);
+
+    const timer = setTimeout(() => {
+      this.destroyContainer(key).catch(() => {});
+    }, maxLifetimeMs);
+    timer.unref();
+    this.lifetimeTimers.set(key, timer);
+
+    return entry;
+  }
+
+  /**
+   * Get an existing desktop container for a user (without creating).
+   */
+  getDesktopContainer(userId: string): SandboxContainer | null {
+    return this.containers.get(`desktop:${userId}`) || null;
   }
 
   getCapabilities(role: string, userId?: string): SandboxCapabilities {

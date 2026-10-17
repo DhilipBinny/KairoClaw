@@ -145,6 +145,8 @@ const safeDomainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$/;
 const sandboxToolSchema = z.object({
   enabled: z.boolean().default(false),
   image: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*$/).default('kairoclaw-sandbox:full'),
+  desktopImage: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-/:]*$/).default('kairoclaw-sandbox:desktop'),
+  desktopUsers: z.array(z.string()).default([]),
   dockerSocket: z.string().default('/var/run/docker.sock'),
   defaults: withObjectDefault(z.object({
     network: z.enum(['open', 'balanced', 'locked']).default('balanced'),

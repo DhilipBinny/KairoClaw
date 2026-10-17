@@ -46,11 +46,15 @@ export interface SandboxDefaults {
 export interface SandboxToolConfig {
   enabled: boolean;
   image: string;
+  /** Docker image for desktop mode (includes browser + VNC). */
+  desktopImage?: string;
   dockerSocket: string;
   defaults: SandboxDefaults;
   networkAllowlist: string[];
   roles: Record<string, Partial<SandboxCapabilities>>;
   userOverrides: Record<string, Partial<SandboxCapabilities>>;
+  /** User IDs that have desktop mode enabled. */
+  desktopUsers?: string[];
 }
 
 // ──────────────────────────────────────────────
@@ -67,6 +71,10 @@ export interface SandboxContainer {
   createdAt: number;
   lastExecAt: number;
   maxLifetimeMs: number;
+  /** Whether this is a desktop container with browser + VNC. */
+  desktop?: boolean;
+  /** Container's internal IP on the Docker bridge network (for WebSocket proxy). */
+  containerIp?: string;
 }
 
 export interface SandboxExecResult {

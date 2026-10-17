@@ -50,6 +50,8 @@ export interface CreateContainerOpts {
   cpu: number;
   memoryMb: number;
   pidsLimit: number;
+  /** /dev/shm size in bytes. Desktop containers need 256MB+ for Chrome. */
+  shmSize?: number;
 }
 
 export async function createContainer(opts: CreateContainerOpts): Promise<string> {
@@ -93,12 +95,30 @@ export async function createContainer(opts: CreateContainerOpts): Promise<string
         { Name: 'nofile', Soft: 1024, Hard: 4096 },
         { Name: 'core', Soft: 0, Hard: 0 },
       ],
+      ...(opts.shmSize ? { ShmSize: opts.shmSize } : {}),
     },
     User: '1000:1000',
   });
 
   await container.start();
   return container.id;
+}
+
+export async function getContainerIp(socketPath: string, containerId: string): Promise<string | null> {
+  try {
+    const docker = getDocker(socketPath);
+    const container = docker.getContainer(containerId);
+    const info = await container.inspect();
+    const networks = info.NetworkSettings?.Networks;
+    if (networks) {
+      for (const net of Object.values(networks)) {
+        if ((net as any).IPAddress) return (net as any).IPAddress;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function execInContainer(

@@ -79,6 +79,7 @@ export const registerConfigRoutes: FastifyPluginAsync<{
       'tools.sandbox.defaults.maxLifetimeMinutes', 'tools.sandbox.defaults.pidsLimit',
       'tools.sandbox.networkAllowlist',
       'tools.sandbox.roles', 'tools.sandbox.userOverrides',
+      'tools.sandbox.desktopImage', 'tools.sandbox.desktopUsers',
     ];
     if (!allowedPaths.includes(dotPath)) {
       return reply.code(400).send({ error: `Path "${dotPath}" is not allowed` });
