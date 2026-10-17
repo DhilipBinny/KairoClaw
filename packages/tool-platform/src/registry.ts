@@ -19,6 +19,34 @@ function withToolTimeout<T>(promise: Promise<T>, ms: number, toolName: string): 
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
 }
 
+function validateResultSchema(
+  result: ToolResult,
+  schema: { type: 'object'; required?: string[] },
+): string | null {
+  let parsed: unknown;
+  if (typeof result === 'string') {
+    try { parsed = JSON.parse(result); } catch { return 'Result is not valid JSON'; }
+  } else if (isToolResultEnvelope(result)) {
+    const textParts = (result.content as Array<{ type: string; text?: string }>)
+      .filter(c => c.type === 'text' && c.text)
+      .map(c => c.text!);
+    const joined = textParts.join('');
+    if (!joined) return 'Result envelope contains no text content';
+    try { parsed = JSON.parse(joined); } catch { return 'Result envelope text is not valid JSON'; }
+  } else {
+    parsed = result;
+  }
+  if (schema.type === 'object' && (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))) {
+    return 'Result is not a JSON object';
+  }
+  if (schema.required) {
+    const obj = parsed as Record<string, unknown>;
+    const missing = schema.required.filter(k => !(k in obj));
+    if (missing.length > 0) return `Missing required fields: ${missing.join(', ')}`;
+  }
+  return null;
+}
+
 interface Phase6ContextExtensions {
   loopDetector?: LoopDetector;
   resultStorage?: ResultStorage;
@@ -489,6 +517,12 @@ export class ToolRegistry {
 
       if (typeof result === 'object' && result !== null && 'error' in result) {
         status = 'error';
+      } else if (registration.resultSchema && status === 'success') {
+        const schemaError = validateResultSchema(result, registration.resultSchema);
+        if (schemaError) {
+          result = { error: `Result validation failed for "${name}": ${schemaError}` };
+          status = 'error';
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
