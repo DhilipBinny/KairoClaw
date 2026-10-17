@@ -12,4 +12,6 @@ export {
   computeToolHash,
   detectToolSetChange,
   validateServerEnv,
+  validateMcpUrl,
+  validateResolvedMcpIP,
 } from './security.js';

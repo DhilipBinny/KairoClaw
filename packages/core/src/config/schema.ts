@@ -341,7 +341,7 @@ const modelsCatalogSchema = z.object({
 
 const mcpServerConfigSchema = z.object({
   enabled: z.boolean().default(true),
-  transport: z.enum(['stdio', 'sse']).default('stdio'),
+  transport: z.enum(['stdio', 'sse', 'streamable-http']).default('stdio'),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   url: z.string().optional(),
