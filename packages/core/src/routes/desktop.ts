@@ -353,12 +353,15 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   // Accept admin API key OR workspace session cookie for WS routes
   const adminMiddleware = requireRole('admin');
   async function requireAdminOrWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
-    const { userId } = request.params as { userId: string };
-    const cookies = parseCookies(request.headers.cookie || '');
-    const sessionId = cookies[WS_COOKIE];
-    if (sessionId) {
-      const session = workspaceSessions.get(sessionId);
-      if (session && session.userId === userId && Date.now() <= session.expiresAt) return;
+    const params = (request.params || {}) as Record<string, string>;
+    const userId = params.userId;
+    if (userId) {
+      const cookies = parseCookies(request.headers.cookie || '');
+      const sessionId = cookies[WS_COOKIE];
+      if (sessionId) {
+        const session = workspaceSessions.get(sessionId);
+        if (session && session.userId === userId && Date.now() <= session.expiresAt) return;
+      }
     }
     await adminMiddleware(request, reply);
   }
