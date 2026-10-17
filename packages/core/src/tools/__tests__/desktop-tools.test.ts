@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ToolExecutionContext, SandboxExecResult } from '@agw/types';
 
-const mockDesktopExec = vi.fn<() => Promise<SandboxExecResult>>().mockResolvedValue({
+const mockDesktopExec = vi.fn<(userId: string, command: string, timeoutSec?: number) => Promise<SandboxExecResult>>().mockResolvedValue({
   exitCode: 0, stdout: '{}', stderr: '',
 });
 const mockGetDesktopContainer = vi.fn().mockReturnValue({
