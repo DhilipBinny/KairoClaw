@@ -208,7 +208,7 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
 
   // Proxy workspace static files (HTML, noVNC JS/CSS) from container port 6080
   // CSP sandbox isolates container content from the admin origin's cookies/storage
-  const WORKSPACE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-src 'self'; img-src 'self' data:; font-src 'self'";
+  const WORKSPACE_CSP = "sandbox allow-scripts allow-same-origin allow-forms; default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'self'";
 
   // Redirect /workspace to /workspace/ so relative URLs (config.js, vnc_lite.html) resolve correctly
   app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
@@ -240,8 +240,9 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   });
 
   // Proxy file server operations from container port 8090
-  // Root listing (no wildcard — Fastify * requires ≥1 char)
-  app.get('/api/v1/admin/desktop/:userId/files', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
+  // Root listing — registered at both /files and /files/ since Fastify's
+  // wildcard /files/* requires ≥1 char and won't match the trailing slash
+  const fileRootHandler = async (request: FastifyRequest, reply: import('fastify').FastifyReply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const resp = await fetch(`http://${target.ip}:8090/`, {
@@ -249,7 +250,9 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     });
     reply.code(resp.status).header('content-type', 'application/json').header('x-content-type-options', 'nosniff');
     reply.send(Buffer.from(await resp.arrayBuffer()));
-  });
+  };
+  app.get('/api/v1/admin/desktop/:userId/files', { preHandler: [requireWorkspaceToken] }, fileRootHandler);
+  app.get('/api/v1/admin/desktop/:userId/files/', { preHandler: [requireWorkspaceToken] }, fileRootHandler);
 
   app.get('/api/v1/admin/desktop/:userId/files/*', { preHandler: [requireWorkspaceToken] }, async (request, reply) => {
     const target = getContainerForHttp(request);

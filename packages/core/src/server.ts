@@ -80,24 +80,32 @@ export async function createServer(context: ServerContext): Promise<FastifyInsta
   });
 
   // Security headers
-  app.addHook('onSend', async (_request, reply) => {
+  const DESKTOP_PROXY_RE = /^\/api\/v1\/admin\/desktop\/[^/]+\/(workspace|files)/;
+  app.addHook('onSend', async (request, reply) => {
     reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), payment=()');
     reply.header('Cross-Origin-Opener-Policy', 'same-origin');
-    reply.header('Content-Security-Policy', [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      "font-src 'self' https://fonts.gstatic.com",
-      "img-src 'self' data: blob:",
-      "connect-src 'self' ws: wss:",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "object-src 'none'",
-    ].join('; '));
+
+    // Workspace proxy routes set their own CSP — don't override with the
+    // global policy that blocks iframes (frame-ancestors 'none') and framing
+    // (X-Frame-Options: DENY), which would break the VNC viewer iframe.
+    const pathname = request.url.split('?')[0];
+    if (!DESKTOP_PROXY_RE.test(pathname)) {
+      reply.header('X-Frame-Options', 'DENY');
+      reply.header('Content-Security-Policy', [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: blob:",
+        "connect-src 'self' ws: wss:",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "object-src 'none'",
+      ].join('; '));
+    }
     if (process.env.NODE_ENV === 'production') {
       reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     }
