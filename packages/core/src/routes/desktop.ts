@@ -328,11 +328,12 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   }
 
   function validateWsOrigin(request: FastifyRequest): boolean {
-    const origin = request.headers.origin;
-    if (!origin) return true; // Non-browser clients (curl, agents) don't send Origin
+    const headers = request.headers || (request.raw?.headers) || {};
+    const origin = headers.origin as string | undefined;
+    if (!origin) return true;
     try {
       const parsed = new URL(origin);
-      const host = request.headers.host || '';
+      const host = (headers.host as string) || '';
       return parsed.host === host;
     } catch { return false; }
   }
@@ -341,7 +342,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   function extractUserId(request: FastifyRequest): string | null {
     const params = (request.params || {}) as Record<string, string>;
     if (params.userId) return params.userId;
-    const match = request.url.match(/\/desktop\/([A-Za-z0-9_-]+)\//);
+    const url = request.url || (request.raw?.url) || '';
+    const match = url.match(/\/desktop\/([A-Za-z0-9_-]+)\//);
     return match?.[1] ?? null;
   }
 
@@ -351,7 +353,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     if (!userId) return { error: 'Missing userId parameter' };
 
     // Auth: require workspace session cookie OR admin user (set by global auth)
-    const cookies = parseCookies(request.headers.cookie || '');
+    const headers = request.headers || (request.raw?.headers) || {};
+    const cookies = parseCookies((headers.cookie as string) || '');
     const sessionId = cookies[WS_COOKIE];
     const hasValidCookie = sessionId ? (() => {
       const s = workspaceSessions.get(sessionId);
