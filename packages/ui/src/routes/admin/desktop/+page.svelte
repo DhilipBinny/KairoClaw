@@ -41,7 +41,7 @@
       const usersRes = await fetch('/api/v1/admin/users', { headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` } });
       if (usersRes.ok) {
         const usersData = await usersRes.json();
-        users = usersData.users || [];
+        users = Array.isArray(usersData) ? usersData : (usersData.users || []);
       }
     } catch { /* ignore */ }
     finally { loading = false; }
