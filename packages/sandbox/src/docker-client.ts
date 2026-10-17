@@ -1,5 +1,7 @@
 import Docker from 'dockerode';
 import { PassThrough } from 'node:stream';
+import { existsSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { CONTAINER_LABEL_KEY, MAX_STDOUT, MAX_STDERR } from './constants.js';
 import type { SandboxExecResult } from '@agw/types';
 
@@ -139,6 +141,43 @@ export async function getContainerPorts(socketPath: string, containerId: string)
     }
   }
   return result;
+}
+
+export async function detectAppNetwork(socketPath: string): Promise<string | null> {
+  try {
+    if (!existsSync('/.dockerenv')) return null;
+    const docker = getDocker(socketPath);
+    const hn = hostname();
+    const container = docker.getContainer(hn);
+    const info = await container.inspect();
+    const networks = info.NetworkSettings?.Networks;
+    if (networks) {
+      for (const name of Object.keys(networks)) {
+        if (name !== 'bridge' && name !== 'host' && name !== 'none') return name;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function connectToNetwork(socketPath: string, containerId: string, networkName: string): Promise<void> {
+  const docker = getDocker(socketPath);
+  const network = docker.getNetwork(networkName);
+  await network.connect({ Container: containerId });
+}
+
+export async function getContainerIpOnNetwork(socketPath: string, containerId: string, networkName: string): Promise<string | null> {
+  try {
+    const docker = getDocker(socketPath);
+    const container = docker.getContainer(containerId);
+    const info = await container.inspect();
+    const net = info.NetworkSettings?.Networks?.[networkName];
+    return (net as any)?.IPAddress || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getContainerIp(socketPath: string, containerId: string): Promise<string | null> {
