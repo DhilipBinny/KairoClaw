@@ -1,10 +1,11 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { WebSocket } from '@fastify/websocket';
 import type { ContainerManager } from '@agw/sandbox';
+import { createRequire } from 'node:module';
 import { requireRole } from '../auth/middleware.js';
 
-// ws is a transitive dependency via @fastify/websocket — used for upstream proxy connections.
-const { WebSocket: WsClient } = require('ws') as { WebSocket: new (url: string) => WebSocket };
+const _require = createRequire(import.meta.url);
+const { WebSocket: WsClient } = _require('ws') as { WebSocket: new (url: string) => WebSocket };
 
 /**
  * Desktop workspace routes — WebSocket proxy for noVNC, terminal, and file API.
