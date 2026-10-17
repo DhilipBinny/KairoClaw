@@ -593,6 +593,42 @@
       </div>
     </div>
 
+    <!-- Response Format Settings -->
+    <div class="section">
+      <h2 class="section-title">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent)">
+          <polyline points="16 18 22 12 16 6"></polyline>
+          <polyline points="8 6 2 12 8 18"></polyline>
+        </svg>
+        Response Format
+      </h2>
+      <div class="card settings-card">
+        <div class="field-row">
+          <div class="field-info">
+            <label class="field-label" for="response-format-type">Output Mode</label>
+            <span class="field-hint">Force the LLM to produce structured output. "JSON Object" requires all responses to be valid JSON — use only with API consumers, not chat channels</span>
+          </div>
+          <div class="field-control">
+            <select
+              id="response-format-type"
+              class="select-input"
+              disabled={!!saving['agent.responseFormat.type']}
+              value={getVal('agent.responseFormat.type') || 'none'}
+              onchange={(e) => saveField('agent.responseFormat.type', (e.target as HTMLSelectElement).value)}
+            >
+              <option value="none">None (default)</option>
+              <option value="json_object">JSON Object</option>
+            </select>
+            {#if feedback['agent.responseFormat.type']?.msg}
+              <span class="field-feedback" class:ok={feedback['agent.responseFormat.type'].ok} class:err={!feedback['agent.responseFormat.type'].ok}>
+                {feedback['agent.responseFormat.type'].msg}
+              </span>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Thinking Settings -->
     <div class="section">
       <h2 class="section-title">
