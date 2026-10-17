@@ -6,7 +6,15 @@
 
   let loading = $state(true);
   let config: Record<string, unknown> | null = $state(null);
-  let containers: Array<{ userId: string; containerId: string; containerIp: string; createdAt: number; uptimeMs: number }> = $state([]);
+  let containers: Array<{
+    userId: string;
+    containerId: string;
+    containerIp: string;
+    hostPorts?: Record<string, number>;
+    desktopSecrets?: { vncPassword: string; sessionToken: string };
+    createdAt: number;
+    uptimeMs: number;
+  }> = $state([]);
   let users: Array<{ id: string; name: string }> = $state([]);
   let desktopUsers: string[] = $state([]);
   let actionInProgress = $state('');
@@ -94,10 +102,17 @@
     viewingUserId = userId;
   }
 
-  function getVncUrl(userId: string): string {
-    const token = localStorage.getItem('agw_token') || '';
-    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProtocol}//${location.host}/api/v1/admin/desktop/${userId}/vnc`;
+  function getWorkspaceUrl(userId: string): string | null {
+    const container = getContainerForUser(userId);
+    if (!container?.hostPorts) return null;
+    const port = container.hostPorts['6080/tcp'];
+    if (!port) return null;
+    const secrets = container.desktopSecrets;
+    let url = `${location.protocol}//${location.hostname}:${port}`;
+    if (secrets) {
+      url += `#vncPassword=${encodeURIComponent(secrets.vncPassword)}&sessionToken=${encodeURIComponent(secrets.sessionToken)}`;
+    }
+    return url;
   }
 
   function getContainerForUser(userId: string) {
@@ -141,19 +156,17 @@
         </div>
         <div class="viewer">
           <p class="viewer-hint">
-            The desktop workspace is served directly from the container.
-            Open it in a new tab for full interaction:
+            Open the workspace in a new tab for full interaction (browser, terminal, file manager):
           </p>
-          {#if getContainerForUser(viewingUserId)?.containerIp}
+          {#if getWorkspaceUrl(viewingUserId)}
             <div class="viewer-actions">
-              <a class="btn btn-primary" href="http://{getContainerForUser(viewingUserId)?.containerIp}:6080" target="_blank" rel="noopener">
+              <a class="btn btn-primary" href={getWorkspaceUrl(viewingUserId)} target="_blank" rel="noopener">
                 Open Workspace
               </a>
-              <span class="viewer-detail">Container IP: {getContainerForUser(viewingUserId)?.containerIp}</span>
               <span class="viewer-detail">Uptime: {formatUptime(getContainerForUser(viewingUserId)?.uptimeMs ?? 0)}</span>
             </div>
           {:else}
-            <p class="viewer-hint">Container IP not available</p>
+            <p class="viewer-hint">Workspace port not available — container may still be starting</p>
           {/if}
         </div>
       </div>

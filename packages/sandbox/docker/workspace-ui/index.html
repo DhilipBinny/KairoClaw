@@ -311,10 +311,12 @@ const host = loc.hostname;
 const wsPort = loc.port || '6080';
 const cfg = window.DESKTOP_CONFIG || {};
 
-const vncPassword = cfg.vncPassword || '';
+// Secrets come from URL hash (never served statically), fallback to config for direct container access
+const hashParams = new URLSearchParams(loc.hash.slice(1));
+const vncPassword = hashParams.get('vncPassword') || cfg.vncPassword || '';
+const sessionToken = hashParams.get('sessionToken') || cfg.sessionToken || '';
 const ttydPort = cfg.ttydPort || 7681;
 const filePort = cfg.filePort || 8090;
-const sessionToken = cfg.sessionToken || '';
 
 const vncUrl = loc.protocol + '//' + host + ':' + wsPort
   + '/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'

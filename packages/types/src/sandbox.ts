@@ -75,6 +75,10 @@ export interface SandboxContainer {
   desktop?: boolean;
   /** Container's internal IP on the Docker bridge network (for WebSocket proxy). */
   containerIp?: string;
+  /** Mapped host ports for desktop containers. Keys are container ports like '6080/tcp'. */
+  hostPorts?: Record<string, number>;
+  /** Desktop workspace secrets, read from container after startup. */
+  desktopSecrets?: { vncPassword: string; sessionToken: string };
 }
 
 export interface SandboxExecResult {

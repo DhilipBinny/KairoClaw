@@ -70,16 +70,20 @@ chmod 600 "${VNC_PASSWD_FILE}"
 # Generate per-session token for file server auth
 SESSION_TOKEN="$(head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"
 
-# Write runtime config for the workspace UI (injected at startup, served as JS)
+# Write runtime config for the workspace UI (no secrets — those come via URL hash)
 cat > /opt/workspace-ui/config.js << CFGEOF
 window.DESKTOP_CONFIG = {
-  vncPassword: "${VNC_PASSWORD}",
   ttydPort: ${TTYD_PORT},
   filePort: ${FILE_SERVER_PORT},
-  cdpPort: ${CDP_PORT},
-  sessionToken: "${SESSION_TOKEN}"
+  cdpPort: ${CDP_PORT}
 };
 CFGEOF
+
+# Write secrets to a file readable only by admin API (not served over HTTP)
+cat > /tmp/desktop-secrets.json << SECEOF
+{"vncPassword":"${VNC_PASSWORD}","sessionToken":"${SESSION_TOKEN}"}
+SECEOF
+chmod 600 /tmp/desktop-secrets.json
 
 x11vnc \
     -display ":${DISPLAY_NUM}" \
@@ -158,6 +162,7 @@ sleep 0.5
     sleep 1
 done) &
 CHROME_LOOP_PID=$!
+PIDS+=($CHROME_LOOP_PID)
 
 for _ in $(seq 1 50); do
     if curl -sf "http://127.0.0.1:${CDP_INTERNAL_PORT}/json/version" >/dev/null 2>&1; then break; fi
@@ -190,7 +195,8 @@ ttyd \
 PIDS+=($!)
 
 # ── 7. File server (Python, serves /workspace with CRUD) ─
-export BIND_ADDR FILE_SERVER_PORT SESSION_TOKEN
+WORKSPACE_ORIGIN="http://${BIND_ADDR}:${NOVNC_PORT}"
+export BIND_ADDR FILE_SERVER_PORT SESSION_TOKEN WORKSPACE_ORIGIN
 python3 << 'PYEOF' &
 import http.server, json, os, shutil, socketserver, re
 
@@ -200,16 +206,24 @@ PORT = int(os.environ.get('FILE_SERVER_PORT', '8090'))
 TOKEN = os.environ.get('SESSION_TOKEN', '')
 
 def safe_path(path):
-    rel = path.replace('..', '').lstrip('/')
-    target = os.path.join(BASE, rel) if rel else BASE
+    rel = os.path.normpath(path).lstrip('/')
+    if rel == '.' or not rel:
+        return os.path.realpath(BASE)
+    target = os.path.join(BASE, rel)
     real = os.path.realpath(target)
     if not real.startswith(os.path.realpath(BASE)):
         return None
     return real
 
+WORKSPACE_ORIGIN = os.environ.get('WORKSPACE_ORIGIN', '')
+
 class FileHandler(http.server.BaseHTTPRequestHandler):
     def cors(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self.headers.get('Origin', '')
+        if WORKSPACE_ORIGIN and origin == WORKSPACE_ORIGIN:
+            self.send_header('Access-Control-Allow-Origin', origin)
+        elif not WORKSPACE_ORIGIN:
+            self.send_header('Access-Control-Allow-Origin', origin or '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'X-Desktop-Token')
 

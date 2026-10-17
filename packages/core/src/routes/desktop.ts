@@ -34,6 +34,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
       desktop: true,
       containerId: container.containerId.slice(0, 12),
       containerIp: container.containerIp,
+      hostPorts: container.hostPorts,
+      desktopSecrets: container.desktopSecrets,
       createdAt: container.createdAt,
       uptimeMs: Date.now() - container.createdAt,
     };
@@ -60,6 +62,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
         status: 'running',
         containerId: container.containerId.slice(0, 12),
         containerIp: container.containerIp,
+        hostPorts: container.hostPorts,
+        desktopSecrets: container.desktopSecrets,
       };
     } catch (err) {
       return reply.code(500).send({ error: (err as Error).message });
@@ -90,6 +94,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
         userId: c.userId,
         containerId: c.containerId.slice(0, 12),
         containerIp: c.containerIp,
+        hostPorts: c.hostPorts,
+        desktopSecrets: c.desktopSecrets,
         createdAt: c.createdAt,
         uptimeMs: Date.now() - c.createdAt,
       })),

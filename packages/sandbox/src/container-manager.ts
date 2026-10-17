@@ -15,6 +15,7 @@ import {
   isDockerAvailable,
   imageExists,
   getContainerIp,
+  getContainerPorts,
 } from './docker-client.js';
 import { resolveMounts, toDockerBinds } from './mount-resolver.js';
 import { resolveNetworkMode } from './network-policy.js';
@@ -160,6 +161,7 @@ export class ContainerManager {
       socketPath: this.config.dockerSocket,
       name: containerName,
       image: this.config.image,
+      cmd: ['sleep', 'infinity'],
       binds: toDockerBinds(mounts.binds),
       workdir: mounts.workdir,
       networkMode,
@@ -374,6 +376,12 @@ export class ContainerManager {
 
     this.log.info({ userId: opts.userId, image: desktopImage }, 'Creating desktop container');
 
+    const desktopPortBindings: Record<string, { HostIp?: string; HostPort?: string }[]> = {
+      '6080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+      '7681/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+      '8090/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
+    };
+
     const containerId = await createContainer({
       socketPath: this.config.dockerSocket,
       name: containerName,
@@ -391,11 +399,31 @@ export class ContainerManager {
       memoryMb: DESKTOP_MEMORY_MB,
       pidsLimit: DESKTOP_PIDS_LIMIT,
       shmSize: DESKTOP_SHM_SIZE,
+      portBindings: desktopPortBindings,
     });
 
-    const containerIp = await getContainerIp(this.config.dockerSocket, containerId);
+    const [containerIp, hostPorts] = await Promise.all([
+      getContainerIp(this.config.dockerSocket, containerId),
+      getContainerPorts(this.config.dockerSocket, containerId),
+    ]);
 
-    this.log.debug({ containerId: containerId.slice(0, 12), containerName, containerIp }, 'Desktop container started');
+    this.log.debug({ containerId: containerId.slice(0, 12), containerName, containerIp, hostPorts }, 'Desktop container started');
+
+    // Wait for desktop-entrypoint to write secrets file (retries for up to 15s)
+    let desktopSecrets: { vncPassword: string; sessionToken: string } | undefined;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const result = await execInContainer(this.config.dockerSocket, containerId, 'cat /tmp/desktop-secrets.json', '/', 3000);
+        if (result.exitCode === 0 && result.stdout.trim()) {
+          desktopSecrets = JSON.parse(result.stdout.trim());
+          break;
+        }
+      } catch { /* retry */ }
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (!desktopSecrets) {
+      this.log.warn({ userId: opts.userId }, 'Could not read desktop secrets from container');
+    }
 
     const now = Date.now();
     const maxLifetimeMs = DESKTOP_MAX_LIFETIME_MINUTES * 60 * 1000;
@@ -411,6 +439,8 @@ export class ContainerManager {
       maxLifetimeMs,
       desktop: true,
       containerIp: containerIp || undefined,
+      hostPorts: Object.keys(hostPorts).length > 0 ? hostPorts : undefined,
+      desktopSecrets,
     };
 
     this.containers.set(key, entry);
