@@ -337,10 +337,29 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     } catch { return false; }
   }
 
+  // Extract userId from URL path (request.params may be empty in WS handlers)
+  function extractUserId(request: FastifyRequest): string | null {
+    const params = (request.params || {}) as Record<string, string>;
+    if (params.userId) return params.userId;
+    const match = request.url.match(/\/desktop\/([A-Za-z0-9_-]+)\//);
+    return match?.[1] ?? null;
+  }
+
   function getContainerForWs(request: FastifyRequest): { ip: string } | { error: string } {
     if (!validateWsOrigin(request)) return { error: 'Origin not allowed' };
-    const userId = (request.params as Record<string, string>)?.userId;
+    const userId = extractUserId(request);
     if (!userId) return { error: 'Missing userId parameter' };
+
+    // Auth: require workspace session cookie OR admin user (set by global auth)
+    const cookies = parseCookies(request.headers.cookie || '');
+    const sessionId = cookies[WS_COOKIE];
+    const hasValidCookie = sessionId ? (() => {
+      const s = workspaceSessions.get(sessionId);
+      return s && s.userId === userId && Date.now() <= s.expiresAt;
+    })() : false;
+    const hasAdminAuth = !!(request as any).user?.role && (request as any).user.role === 'admin';
+    if (!hasValidCookie && !hasAdminAuth) return { error: 'Unauthorized' };
+
     const cm = opts.getContainerManager();
     if (!cm) return { error: 'Sandbox not initialized' };
 
@@ -351,31 +370,15 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     return { ip: container.containerIp };
   }
 
-  // Accept admin API key OR workspace session cookie for WS routes
-  const adminMiddleware = requireRole('admin');
-  async function requireAdminOrWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
-    const params = (request.params || {}) as Record<string, string>;
-    const userId = params.userId;
-    if (userId) {
-      const cookies = parseCookies(request.headers.cookie || '');
-      const sessionId = cookies[WS_COOKIE];
-      if (sessionId) {
-        const session = workspaceSessions.get(sessionId);
-        if (session && session.userId === userId && Date.now() <= session.expiresAt) return;
-      }
-    }
-    await adminMiddleware(request, reply);
-  }
-
   // WS /api/v1/admin/desktop/:userId/vnc — noVNC WebSocket proxy
-  app.get('/api/v1/admin/desktop/:userId/vnc', { websocket: true, preHandler: [requireAdminOrWorkspaceToken] }, (socket: WebSocket, request: FastifyRequest) => {
+  app.get('/api/v1/admin/desktop/:userId/vnc', { websocket: true }, (socket: WebSocket, request: FastifyRequest) => {
     const target = getContainerForWs(request);
     if ('error' in target) { socket.close(1008, target.error); return; }
     proxyWebSocket(socket, target.ip, 6080, '/websockify');
   });
 
   // WS /api/v1/admin/desktop/:userId/terminal — ttyd WebSocket proxy
-  app.get('/api/v1/admin/desktop/:userId/terminal', { websocket: true, preHandler: [requireAdminOrWorkspaceToken] }, (socket: WebSocket, request: FastifyRequest) => {
+  app.get('/api/v1/admin/desktop/:userId/terminal', { websocket: true }, (socket: WebSocket, request: FastifyRequest) => {
     const target = getContainerForWs(request);
     if ('error' in target) { socket.close(1008, target.error); return; }
     proxyWebSocket(socket, target.ip, 7681, '/ws');
