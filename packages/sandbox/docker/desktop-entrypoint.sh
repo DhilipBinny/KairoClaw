@@ -19,9 +19,9 @@ FILE_SERVER_PORT="${KAIRO_FILE_SERVER_PORT:-8090}"
 export DISPLAY=":${DISPLAY_NUM}"
 export HOME=/home/sandbox
 
-# Container's bridge IP — used to bind services instead of 0.0.0.0
-BIND_ADDR="$(hostname -i 2>/dev/null | awk '{print $1}')"
-BIND_ADDR="${BIND_ADDR:-0.0.0.0}"
+# Bind to all interfaces — the container may be on multiple Docker networks
+# (e.g., bridge + app network). Security comes from Docker network isolation.
+BIND_ADDR="0.0.0.0"
 
 PIDS=()
 
