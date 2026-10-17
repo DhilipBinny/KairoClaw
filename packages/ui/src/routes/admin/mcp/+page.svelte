@@ -80,10 +80,11 @@
   // Manual add form state
   let showManualForm = $state(false);
   let manualId = $state('');
-  let manualTransport = $state<'stdio' | 'sse'>('stdio');
+  let manualTransport = $state<'stdio' | 'sse' | 'streamable-http'>('stdio');
   let manualCommand = $state('npx');
   let manualArgs = $state('');
   let manualUrl = $state('');
+  let manualHeaderRows = $state<Array<{ key: string; value: string }>>([{ key: '', value: '' }]);
   let manualEnvRows = $state<Array<{ key: string; value: string }>>([{ key: '', value: '' }]);
   let manualError = $state('');
 
@@ -262,6 +263,7 @@
     showManualForm = true;
     manualId = ''; manualTransport = 'stdio'; manualCommand = 'npx';
     manualArgs = ''; manualUrl = ''; manualError = '';
+    manualHeaderRows = [{ key: '', value: '' }];
     manualEnvRows = [{ key: '', value: '' }];
   }
 
@@ -273,7 +275,7 @@
   async function handleManualInstall() {
     if (!manualId.trim()) { manualError = 'Server ID is required'; return; }
     if (manualTransport === 'stdio' && !manualCommand.trim()) { manualError = 'Command is required'; return; }
-    if (manualTransport === 'sse' && !manualUrl.trim()) { manualError = 'URL is required'; return; }
+    if ((manualTransport === 'sse' || manualTransport === 'streamable-http') && !manualUrl.trim()) { manualError = 'URL is required'; return; }
 
     actionInProgress = manualId;
     manualError = '';
@@ -288,7 +290,8 @@
         transport: manualTransport,
         command: manualTransport === 'stdio' ? manualCommand.trim() : undefined,
         args: manualTransport === 'stdio' ? args : undefined,
-        url: manualTransport === 'sse' ? manualUrl.trim() : undefined,
+        url: manualTransport !== 'stdio' ? manualUrl.trim() : undefined,
+        headers: manualTransport !== 'stdio' ? Object.fromEntries(manualHeaderRows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value.trim()])) : undefined,
         env,
       });
       closeManualForm();
@@ -424,7 +427,8 @@
         <span class="env-label">Transport</span>
         <select class="input input-sm" bind:value={manualTransport}>
           <option value="stdio">stdio (local command)</option>
-          <option value="sse">SSE (remote URL)</option>
+          <option value="streamable-http">Streamable HTTP (remote URL)</option>
+          <option value="sse">SSE (legacy remote URL)</option>
         </select>
       </div>
       {#if manualTransport === 'stdio'}
@@ -441,8 +445,20 @@
       {:else}
         <div class="env-field">
           <span class="env-label">URL <span class="required">*</span></span>
-          <input class="input input-sm" type="text" placeholder="https://my-server.example.com/sse" bind:value={manualUrl} />
+          <input class="input input-sm" type="text" placeholder="https://my-server.example.com/mcp" bind:value={manualUrl} />
         </div>
+        <span class="env-label" style="margin-top:8px">HTTP Headers</span>
+        {#each manualHeaderRows as row, i}
+          <div class="env-fields">
+            <div class="env-field">
+              <input class="input input-sm" type="text" placeholder="Header-Name" bind:value={manualHeaderRows[i].key} />
+            </div>
+            <div class="env-field">
+              <input class="input input-sm" type="password" placeholder="value" bind:value={manualHeaderRows[i].value} />
+            </div>
+          </div>
+        {/each}
+        <button class="btn btn-sm btn-ghost" type="button" onclick={() => manualHeaderRows = [...manualHeaderRows, { key: '', value: '' }]}>+ Add header</button>
       {/if}
       <span class="env-label" style="margin-top:8px">Environment Variables</span>
       {#each manualEnvRows as row, i}

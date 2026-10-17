@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns';
 import type { MCPToolDefinition } from '@agw/types';
 
 /**
@@ -89,4 +90,83 @@ export function validateServerEnv(env: Record<string, string>): { safe: boolean;
     }
   }
   return { safe: warnings.length === 0, warnings };
+}
+
+// ── MCP URL SSRF validation ──────────────────────────────
+
+function isPrivateIP(ip: string): boolean {
+  const v4Match = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4Match) {
+    const [, aStr, bStr] = v4Match;
+    const a = Number(aStr);
+    const b = Number(bStr);
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT (100.64.0.0/10)
+    return false;
+  }
+  const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+  if (lower === '::1' || lower === '::') return true;
+  if (lower.startsWith('fe80:')) return true;
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true;
+  const v4Mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (v4Mapped) return isPrivateIP(v4Mapped[1]);
+  return false;
+}
+
+/**
+ * Validate a URL for MCP streamable-http transport.
+ * Blocks private IPs, loopback, link-local, and cloud metadata endpoints.
+ * An optional allowlist lets admins explicitly permit specific local servers.
+ */
+export function validateMcpUrl(urlStr: string, allowPrivate?: string[]): URL {
+  let parsed: URL;
+  try { parsed = new URL(urlStr); } catch { throw new Error('Invalid URL'); }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error(`Blocked URL scheme: ${parsed.protocol} — only http/https allowed`);
+  }
+
+  if (allowPrivate && allowPrivate.length > 0) {
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const hostPort = parsed.port ? `${host}:${parsed.port}` : host;
+    for (const raw of allowPrivate) {
+      const entry = raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '').replace(/^\[|\]$/g, '');
+      if (entry === host || entry === hostPort) return parsed;
+    }
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(hostname)) {
+    throw new Error('Blocked: localhost/loopback URLs not allowed (add to mcp.allowPrivate to override)');
+  }
+  if (isPrivateIP(hostname)) {
+    throw new Error('Blocked: private/reserved IP address');
+  }
+  const blockedHosts = ['metadata.google.internal', 'metadata.google.com', 'instance-data'];
+  if (blockedHosts.some(h => hostname === h || hostname.endsWith('.' + h))) {
+    throw new Error('Blocked: cloud metadata endpoint');
+  }
+  return parsed;
+}
+
+/**
+ * DNS rebinding protection — resolve hostname and verify the IP isn't private.
+ */
+export async function validateResolvedMcpIP(hostname: string): Promise<void> {
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname) || hostname.includes(':')) return;
+  try {
+    const results = await dns.promises.lookup(hostname, { all: true });
+    for (const { address } of results) {
+      if (isPrivateIP(address)) {
+        throw new Error(`Blocked: hostname "${hostname}" resolves to private IP ${address}`);
+      }
+    }
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('Blocked:')) throw e;
+  }
 }

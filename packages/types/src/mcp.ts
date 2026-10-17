@@ -6,7 +6,7 @@
  */
 
 /** Supported MCP transport types. */
-export type MCPTransportType = 'stdio' | 'sse';
+export type MCPTransportType = 'stdio' | 'sse' | 'streamable-http';
 
 /** MCP server connection status. */
 export type MCPServerStatusValue =
@@ -32,11 +32,11 @@ export interface MCPServerConfig {
   command?: string;
   /** Arguments for the command (stdio transport). */
   args?: string[];
-  /** Server URL (SSE transport). */
+  /** Server URL (SSE or streamable-http transport). */
   url?: string;
   /** Environment variables to pass to the server process. */
   env?: Record<string, string>;
-  /** HTTP headers for SSE connections. */
+  /** HTTP headers for SSE and streamable-http connections. */
   headers?: Record<string, string>;
   /** Pinned content hash for integrity verification. */
   pinnedHash?: string;

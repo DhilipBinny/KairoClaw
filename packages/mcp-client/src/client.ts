@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { AgwLogger } from '@agw/types';
 import { noopLogger } from '@agw/types';
-import { validateServerEnv } from './security.js';
+import { validateServerEnv, validateMcpUrl, validateResolvedMcpIP } from './security.js';
 import type {
   MCPServerConfig,
   MCPServerStatus,
@@ -352,7 +352,167 @@ class SSETransport {
   }
 }
 
-type Transport = StdioTransport | SSETransport;
+class StreamableHTTPTransport {
+  private url: string;
+  private headers: Record<string, string>;
+  private sessionId: string | null = null;
+  private notificationHandlers = new Map<string, (params: Record<string, unknown> | undefined) => void>();
+  private _connected = false;
+  private _abortController: AbortController | null = null;
+  private _log: AgwLogger;
+  private allowPrivate?: string[];
+
+  constructor(url: string, headers: Record<string, string>, log: AgwLogger, allowPrivate?: string[]) {
+    this.url = url;
+    this.headers = headers;
+    this._log = log;
+    this.allowPrivate = allowPrivate;
+  }
+
+  async connect(): Promise<void> {
+    const parsed = validateMcpUrl(this.url, this.allowPrivate);
+    await validateResolvedMcpIP(parsed.hostname);
+    this._abortController = new AbortController();
+    this._connected = true;
+  }
+
+  async send(method: string, params: Record<string, unknown>, timeoutMs = 30000): Promise<unknown> {
+    if (!this._connected) throw new Error('Transport not connected');
+
+    const id = randomUUID();
+    const body = jsonrpcRequest(method, params, id);
+    const reqHeaders: Record<string, string> = {
+      ...this.headers,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+    };
+    if (this.sessionId) reqHeaders['Mcp-Session-Id'] = this.sessionId;
+
+    if (this._abortController?.signal.aborted) throw new Error('Transport closed');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onParentAbort = () => controller.abort();
+    this._abortController?.signal.addEventListener('abort', onParentAbort, { once: true });
+
+    try {
+      const response = await fetch(this.url, {
+        method: 'POST',
+        headers: reqHeaders,
+        body,
+        signal: controller.signal,
+        redirect: 'error',
+      });
+      clearTimeout(timer);
+
+      const newSessionId = response.headers.get('mcp-session-id');
+      if (newSessionId) this.sessionId = newSessionId;
+
+      if (!response.ok) {
+        if (response.status === 404 && this.sessionId) {
+          this.sessionId = null;
+          throw new Error('MCP session expired — reinitialize required');
+        }
+        throw new Error(`MCP HTTP ${response.status}: ${await response.text().catch(() => '')}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+
+      if (contentType.includes('text/event-stream')) {
+        return this._readSSEResponse(response.body!, id);
+      }
+
+      this._abortController?.signal.removeEventListener('abort', onParentAbort);
+
+      if (!contentType.includes('application/json')) {
+        return undefined;
+      }
+
+      const json = await response.json() as JsonRpcResponse;
+      if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+      return json.result;
+    } catch (e: unknown) {
+      clearTimeout(timer);
+      this._abortController?.signal.removeEventListener('abort', onParentAbort);
+      if ((e as Error).name === 'AbortError') {
+        throw new Error(`MCP request timed out: ${method} (${timeoutMs}ms)`);
+      }
+      throw e;
+    }
+  }
+
+  private async _readSSEResponse(body: ReadableStream<Uint8Array>, requestId: string): Promise<unknown> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    return new Promise<unknown>((resolve, reject) => {
+      const done = (fn: (v: unknown) => void, val: unknown) => {
+        reader.cancel().catch(() => {});
+        fn(val);
+      };
+      const processStream = async () => {
+        try {
+          while (true) {
+            const { done: streamDone, value } = await reader.read();
+            if (streamDone) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            let eventData = '';
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                eventData += (eventData ? '\n' : '') + line.slice(6);
+              } else if (line === '' && eventData) {
+                const msg = parseJsonrpcResponse(eventData);
+                eventData = '';
+                if (!msg) continue;
+                if (msg.id === requestId) {
+                  if (msg.error) done(reject, new Error(msg.error.message || JSON.stringify(msg.error)));
+                  else done(resolve, msg.result);
+                  return;
+                }
+                if (msg.method) {
+                  const handler = this.notificationHandlers.get(msg.method);
+                  if (handler) handler(msg.params);
+                }
+              }
+            }
+          }
+          done(reject, new Error('SSE stream ended without response'));
+        } catch (err) {
+          done(reject, err);
+        }
+      };
+      processStream();
+    });
+  }
+
+  onNotification(method: string, handler: (params: Record<string, unknown> | undefined) => void): void {
+    this.notificationHandlers.set(method, handler);
+  }
+
+  async close(): Promise<void> {
+    if (this.sessionId) {
+      try {
+        await fetch(this.url, {
+          method: 'DELETE',
+          headers: { ...this.headers, 'Mcp-Session-Id': this.sessionId },
+          redirect: 'error',
+        });
+      } catch (err) { this._log.debug({ err: (err as Error).message }, 'MCP session termination failed (best-effort)'); }
+    }
+    if (this._abortController) this._abortController.abort();
+    this._connected = false;
+    this.sessionId = null;
+  }
+
+  get connected(): boolean {
+    return this._connected;
+  }
+}
+
+type Transport = StdioTransport | SSETransport | StreamableHTTPTransport;
 
 export class MCPClient {
   readonly name: string;
@@ -379,7 +539,13 @@ export class MCPClient {
       this._error = null;
       this._statusMessage = 'Starting process...';
 
-      if (this.config.transport === 'sse') {
+      if (this.config.transport === 'streamable-http') {
+        this.transport = new StreamableHTTPTransport(
+          this.config.url!,
+          this.config.headers || {},
+          this.log,
+        );
+      } else if (this.config.transport === 'sse') {
         this.transport = new SSETransport(
           this.config.url!,
           this.config.headers || {},
@@ -397,21 +563,22 @@ export class MCPClient {
       await this.transport.connect();
       this._statusMessage = 'Handshaking...';
 
+      const protocolVersion = this.config.transport === 'streamable-http' ? '2025-03-26' : '2024-11-05';
       const initResult = await this.transport.send('initialize', {
-        protocolVersion: '2024-11-05',
+        protocolVersion,
         capabilities: {
           tools: {},
         },
         clientInfo: {
           name: 'agentic-gateway',
-          version: '0.2.0',
+          version: '0.3.0',
         },
       }) as { serverInfo?: Record<string, unknown> } | null;
 
       this.serverInfo = initResult?.serverInfo || {};
       this.log.info({ server: this.name, info: this.serverInfo }, 'MCP server initialized');
 
-      if (this.transport instanceof StdioTransport && this.transport.connected) {
+      if ((this.transport instanceof StdioTransport || this.transport instanceof StreamableHTTPTransport) && this.transport.connected) {
         void this.transport.send('notifications/initialized', {}, 5000).catch(err => {
           this.log.warn({ err: (err as Error).message, serverId: this.name }, 'Failed to send initialized notification');
         });
