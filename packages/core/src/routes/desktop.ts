@@ -339,7 +339,8 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
 
   function getContainerForWs(request: FastifyRequest): { ip: string } | { error: string } {
     if (!validateWsOrigin(request)) return { error: 'Origin not allowed' };
-    const { userId } = request.params as { userId: string };
+    const userId = (request.params as Record<string, string>)?.userId;
+    if (!userId) return { error: 'Missing userId parameter' };
     const cm = opts.getContainerManager();
     if (!cm) return { error: 'Sandbox not initialized' };
 
