@@ -311,24 +311,41 @@ const host = loc.hostname;
 const wsPort = loc.port || '6080';
 const cfg = window.DESKTOP_CONFIG || {};
 
-// Secrets come from URL hash (never served statically), fallback to config for direct container access
+// Secrets come from URL hash, config.js (proxy mode), or fallback defaults
 const hashParams = new URLSearchParams(loc.hash.slice(1));
 const vncPassword = hashParams.get('vncPassword') || cfg.vncPassword || '';
 const sessionToken = hashParams.get('sessionToken') || cfg.sessionToken || '';
 const ttydPort = cfg.ttydPort || 7681;
 const filePort = cfg.filePort || 8090;
 
-const vncUrl = loc.protocol + '//' + host + ':' + wsPort
-  + '/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'
-  + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '');
-const ttydUrl = loc.protocol + '//sandbox:' + encodeURIComponent(sessionToken) + '@' + host + ':' + ttydPort;
-const fileApiUrl = loc.protocol + '//' + host + ':' + filePort;
+let vncUrl, ttydUrl, fileApiUrl, fileHeaders;
 
-const fileHeaders = { 'X-Desktop-Token': sessionToken };
+if (cfg.proxyMode && cfg.proxyBase) {
+  // Proxy mode: everything goes through the admin API (same origin, no extra ports)
+  const base = cfg.proxyBase;
+  const vncWsPath = base.replace(/^\//, '') + '/vnc';
+  vncUrl = loc.protocol + '//' + loc.host + base
+    + '/workspace/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'
+    + '&path=' + encodeURIComponent(vncWsPath)
+    + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '');
+  ttydUrl = 'about:blank';
+  fileApiUrl = loc.protocol + '//' + loc.host + base + '/files';
+  fileHeaders = {};
+} else {
+  // Direct mode: connect to container ports directly
+  vncUrl = loc.protocol + '//' + host + ':' + wsPort
+    + '/vnc_lite.html?autoconnect=true&resize=scale&reconnect=true&reconnect_delay=1000'
+    + (vncPassword ? '&password=' + encodeURIComponent(vncPassword) : '');
+  ttydUrl = loc.protocol + '//sandbox:' + encodeURIComponent(sessionToken) + '@' + host + ':' + ttydPort;
+  fileApiUrl = loc.protocol + '//' + host + ':' + filePort;
+  fileHeaders = { 'X-Desktop-Token': sessionToken };
+}
 
 // Init VNC + Terminal
 document.getElementById('vnc-frame').src = vncUrl;
-setTimeout(() => { document.getElementById('ttyd-frame').src = ttydUrl; }, 500);
+if (ttydUrl !== 'about:blank') {
+  setTimeout(() => { document.getElementById('ttyd-frame').src = ttydUrl; }, 500);
+}
 
 // Focus VNC iframe on click so mouse/keyboard events work
 function focusVnc() {

@@ -21,9 +21,6 @@
   let feedback = $state('');
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Selected user for viewing desktop
-  let viewingUserId = $state<string | null>(null);
-
   async function loadData() {
     try {
       const [configRes, listRes] = await Promise.all([
@@ -72,7 +69,6 @@
         headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` },
       });
       await loadData();
-      if (viewingUserId === userId) viewingUserId = null;
     } catch { /* ignore */ }
     finally { actionInProgress = ''; }
   }
@@ -98,21 +94,10 @@
     } catch { /* ignore */ }
   }
 
-  function viewDesktop(userId: string) {
-    viewingUserId = userId;
-  }
-
   function getWorkspaceUrl(userId: string): string | null {
     const container = getContainerForUser(userId);
-    if (!container?.hostPorts) return null;
-    const port = container.hostPorts['6080/tcp'];
-    if (!port) return null;
-    const secrets = container.desktopSecrets;
-    let url = `${location.protocol}//${location.hostname}:${port}`;
-    if (secrets) {
-      url += `#vncPassword=${encodeURIComponent(secrets.vncPassword)}&sessionToken=${encodeURIComponent(secrets.sessionToken)}`;
-    }
-    return url;
+    if (!container) return null;
+    return `/api/v1/admin/desktop/${userId}/workspace`;
   }
 
   function getContainerForUser(userId: string) {
@@ -146,31 +131,6 @@
   {#if loading}
     <div class="loading">Loading...</div>
   {:else}
-
-    <!-- Active Desktops -->
-    {#if viewingUserId}
-      <div class="section">
-        <div class="viewer-header">
-          <h2>Desktop — {viewingUserId}</h2>
-          <button class="btn btn-sm" onclick={() => viewingUserId = null}>Close</button>
-        </div>
-        <div class="viewer">
-          <p class="viewer-hint">
-            Open the workspace in a new tab for full interaction (browser, terminal, file manager):
-          </p>
-          {#if getWorkspaceUrl(viewingUserId)}
-            <div class="viewer-actions">
-              <a class="btn btn-primary" href={getWorkspaceUrl(viewingUserId)} target="_blank" rel="noopener">
-                Open Workspace
-              </a>
-              <span class="viewer-detail">Uptime: {formatUptime(getContainerForUser(viewingUserId)?.uptimeMs ?? 0)}</span>
-            </div>
-          {:else}
-            <p class="viewer-hint">Workspace port not available — container may still be starting</p>
-          {/if}
-        </div>
-      </div>
-    {/if}
 
     <!-- Users Table -->
     <div class="section">
@@ -212,7 +172,7 @@
                 <td>{container ? formatUptime(container.uptimeMs) : '—'}</td>
                 <td class="actions">
                   {#if container}
-                    <button class="btn btn-sm btn-primary" onclick={() => viewDesktop(user.id)} disabled={actionInProgress === user.id}>View</button>
+                    <a class="btn btn-sm btn-primary" href={getWorkspaceUrl(user.id)} target="_blank" rel="noopener">Open</a>
                     <button class="btn btn-sm btn-danger" onclick={() => stopDesktop(user.id)} disabled={actionInProgress === user.id}>Stop</button>
                   {:else if enabled}
                     <button class="btn btn-sm btn-primary" onclick={() => startDesktop(user.id)} disabled={actionInProgress === user.id}>
@@ -275,12 +235,6 @@
   .toggle-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; position: absolute; top: 2px; left: 2px; transition: left 0.2s; }
   .toggle-btn.active .toggle-thumb { left: 16px; }
   .toggle-label { font-size: 12px; color: var(--text-dim, #888); }
-
-  .viewer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .viewer { background: var(--card-bg, #1a1a2e); border: 1px solid var(--border, #2a2a3e); border-radius: 8px; padding: 16px; }
-  .viewer-hint { color: var(--text-dim, #888); font-size: 13px; margin: 0 0 12px; }
-  .viewer-actions { display: flex; align-items: center; gap: 12px; }
-  .viewer-detail { font-size: 12px; color: var(--text-dim, #888); }
 
   .feedback { position: fixed; bottom: 20px; right: 20px; background: var(--accent, #6c63ff); color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 13px; }
 </style>
