@@ -24,8 +24,9 @@ function getUserId(context: ToolExecutionContext): string | null {
 async function execDesktop(userId: string, command: string, timeoutSec = 10): Promise<string> {
   if (!containerManager) throw new Error('Desktop is not available');
   const result = await containerManager.desktopExec(userId, command, timeoutSec);
-  if (result.exitCode !== 0 && result.stderr) {
-    throw new Error(result.stderr.trim());
+  if (result.exitCode !== 0) {
+    const msg = (result.stderr || result.stdout || 'Command failed').trim();
+    throw new Error(msg);
   }
   return result.stdout;
 }
@@ -197,7 +198,7 @@ else:
       const check = checkDesktop(context);
       if ('error' in check) return { error: check.error };
       const { key } = args as { key: string };
-      const safeKey = key.replace(/[^a-zA-Z0-9+_]/g, '');
+      const safeKey = key.replace(/[^a-zA-Z0-9+_\-.]/g, '');
       await execDesktop(check.userId, `export DISPLAY=:99 && xdotool key ${safeKey}`);
       return JSON.stringify({ pressed: true, key: safeKey });
     },
@@ -224,10 +225,9 @@ else:
       const check = checkDesktop(context);
       if ('error' in check) return { error: check.error };
       const { direction, amount } = args as { direction: string; amount?: number };
-      const clicks = amount ?? 3;
+      const clicks = Math.min(Math.max(amount ?? 3, 1), 20);
       const button = direction === 'up' ? '4' : '5';
-      const cmds = Array(clicks).fill(`xdotool click ${button}`).join(' && ');
-      await execDesktop(check.userId, `export DISPLAY=:99 && ${cmds}`);
+      await execDesktop(check.userId, `export DISPLAY=:99 && xdotool click --repeat ${clicks} --delay 50 ${button}`);
       return JSON.stringify({ scrolled: true, direction, clicks });
     },
     source: 'builtin',

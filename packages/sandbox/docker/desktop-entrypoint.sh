@@ -177,8 +177,8 @@ for wid in $(xdotool search --name "Chromium" 2>/dev/null); do
     xdotool windowsize "${wid}" 1280 720 windowmove "${wid}" 0 0 2>/dev/null || true
 done
 
-# ── 5. socat (CDP proxy) ─────────────────────────────────
-socat "TCP-LISTEN:${CDP_PORT},fork,reuseaddr,bind=${BIND_ADDR}" "TCP:127.0.0.1:${CDP_INTERNAL_PORT}" &
+# ── 5. socat (CDP proxy, localhost only — no auth on CDP) ─
+socat "TCP-LISTEN:${CDP_PORT},fork,reuseaddr,bind=127.0.0.1" "TCP:127.0.0.1:${CDP_INTERNAL_PORT}" &
 PIDS+=($!)
 
 # ── 6. ttyd (web terminal) ───────────────────────────────
@@ -248,7 +248,8 @@ class FileHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(404); return
             self.send_response(200)
             self.send_header('Content-Type', 'application/octet-stream')
-            self.send_header('Content-Disposition', 'attachment; filename="' + os.path.basename(target) + '"')
+            safe_name = os.path.basename(target).replace('"', '_').replace('\n', '_').replace('\r', '_')
+            self.send_header('Content-Disposition', 'attachment; filename="' + safe_name + '"')
             self.cors()
             self.end_headers()
             with open(target, 'rb') as f:
@@ -297,6 +298,9 @@ class FileHandler(http.server.BaseHTTPRequestHandler):
             content_type = self.headers.get('Content-Type', '')
             if 'multipart/form-data' in content_type:
                 length = int(self.headers.get('Content-Length', 0))
+                max_upload = 100 * 1024 * 1024
+                if length > max_upload:
+                    self.send_error(413, 'Upload too large (max 100MB)'); return
                 body = self.rfile.read(length)
                 boundary = re.search(r'boundary=([^\s;]+)', content_type)
                 if boundary:

@@ -35,6 +35,7 @@ import {
   DESKTOP_MEMORY_MB,
   DESKTOP_PIDS_LIMIT,
   DESKTOP_MAX_LIFETIME_MINUTES,
+  DESKTOP_IDLE_TIMEOUT_MS,
   DESKTOP_LABEL_KEY,
 } from './constants.js';
 
@@ -58,8 +59,9 @@ export class ContainerManager {
     this.idleCleanupTimer = setInterval(() => {
       const now = Date.now();
       for (const [key, entry] of this.containers) {
-        if (now - entry.lastExecAt > IDLE_TIMEOUT_MS) {
-          this.log.info({ userId: entry.userId, sessionId: entry.sessionId, idleMinutes: Math.round((now - entry.lastExecAt) / 60000) }, 'Destroying idle sandbox container');
+        const timeout = entry.desktop ? DESKTOP_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS;
+        if (now - entry.lastExecAt > timeout) {
+          this.log.info({ userId: entry.userId, sessionId: entry.sessionId, desktop: !!entry.desktop, idleMinutes: Math.round((now - entry.lastExecAt) / 60000) }, 'Destroying idle sandbox container');
           this.destroyContainer(key).catch(() => {});
         }
       }
@@ -376,6 +378,14 @@ export class ContainerManager {
 
     this.log.info({ userId: opts.userId, image: desktopImage }, 'Creating desktop container');
 
+    const userContainers = [...this.containers.values()].filter(c => c.userId === opts.userId);
+    if (userContainers.length >= this.maxContainersPerUser) {
+      throw new Error(`Container limit reached (${this.maxContainersPerUser} per user). Stop an existing container first.`);
+    }
+    if (this.containers.size >= this.maxContainersTotal) {
+      throw new Error(`Global container limit reached (${this.maxContainersTotal}). Stop some containers first.`);
+    }
+
     const desktopPortBindings: Record<string, { HostIp?: string; HostPort?: string }[]> = {
       '6080/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
       '7681/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }],
@@ -402,10 +412,18 @@ export class ContainerManager {
       portBindings: desktopPortBindings,
     });
 
-    const [containerIp, hostPorts] = await Promise.all([
-      getContainerIp(this.config.dockerSocket, containerId),
-      getContainerPorts(this.config.dockerSocket, containerId),
-    ]);
+    let containerIp: string | null = null;
+    let hostPorts: Record<string, number> = {};
+    try {
+      [containerIp, hostPorts] = await Promise.all([
+        getContainerIp(this.config.dockerSocket, containerId),
+        getContainerPorts(this.config.dockerSocket, containerId),
+      ]);
+    } catch (err) {
+      this.log.warn({ err: (err as Error).message, containerId: containerId.slice(0, 12) }, 'Failed to inspect desktop container — cleaning up');
+      await removeContainer(this.config.dockerSocket, containerId).catch(() => {});
+      throw new Error('Desktop container started but inspection failed — removed to avoid orphan');
+    }
 
     this.log.debug({ containerId: containerId.slice(0, 12), containerName, containerIp, hostPorts }, 'Desktop container started');
 
@@ -500,7 +518,9 @@ export class ContainerManager {
   }
 
   async destroyForUser(userId: string): Promise<void> {
-    const keysToRemove = [...this.containers.keys()].filter(k => k.startsWith(`${userId}:`));
+    const keysToRemove = [...this.containers.keys()].filter(k =>
+      k.startsWith(`${userId}:`) || k === `desktop:${userId}`,
+    );
     await Promise.allSettled(keysToRemove.map(k => this.destroyContainer(k)));
   }
 

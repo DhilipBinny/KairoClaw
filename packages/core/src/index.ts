@@ -806,9 +806,15 @@ async function main(): Promise<void> {
       } else if (!value && sandboxManager) {
         await sandboxManager.destroyAll();
         setSandboxManager(null);
+        setDesktopManager(null);
         sandboxManager = null;
-        // Unregister sandbox tools
-        for (const name of ['sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files']) {
+        // Unregister sandbox + desktop tools
+        const toolsToRemove = [
+          'sandbox_exec', 'sandbox_read_file', 'sandbox_write_file', 'sandbox_list_files',
+          'desktop_navigate', 'desktop_screenshot', 'desktop_read_page', 'desktop_click_xy',
+          'desktop_type_raw', 'desktop_key', 'desktop_scroll',
+        ];
+        for (const name of toolsToRemove) {
           if (toolRegistry.has(name)) toolRegistry.unregister(name);
         }
         server.log.info('Sandbox disabled via Settings');

@@ -18,10 +18,10 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
 }> = async (app, opts) => {
 
   // GET /api/v1/admin/desktop/:userId/status
-  app.get('/api/v1/admin/desktop/:userId/status', { preHandler: [requireRole('admin')] }, async (request) => {
+  app.get('/api/v1/admin/desktop/:userId/status', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const { userId } = request.params as { userId: string };
     const cm = opts.getContainerManager();
-    if (!cm) return { error: 'Sandbox not initialized' };
+    if (!cm) return reply.code(503).send({ error: 'Sandbox not initialized' });
 
     const container = cm.getDesktopContainer(userId);
     if (!container) {
@@ -46,6 +46,10 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     const { userId } = request.params as { userId: string };
     const cm = opts.getContainerManager();
     if (!cm) return reply.code(500).send({ error: 'Sandbox not initialized' });
+
+    if (!cm.isDesktopEnabled(userId)) {
+      return reply.code(403).send({ error: 'Desktop not enabled for this user. Enable it in the user list first.' });
+    }
 
     const config = (request as any).ctx?.config;
     const workspacePath = config?._stateDir ? `${config._stateDir}/workspace` : '/data/workspace';
