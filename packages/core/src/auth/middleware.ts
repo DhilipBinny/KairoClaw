@@ -44,9 +44,15 @@ export const authPlugin = fp<{ db: DatabaseAdapter; auditService?: AuditService;
   app.decorateRequest('tenantId', undefined);
 
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
-    // Skip auth for health check and public routes
+    // Skip auth for health check and login
     const publicPaths = ['/api/v1/health', '/api/v1/auth/login'];
     if (publicPaths.some(p => request.url === p || request.url.startsWith(p + '?'))) return;
+
+    // Desktop workspace proxy routes use HttpOnly cookie auth (not API key).
+    // workspace-auth: one-time code exchange, workspace/*: proxied HTML/JS,
+    // files/*: proxied file operations. Each has its own requireWorkspaceToken.
+    const pathname = request.url.split('?')[0];
+    if (/^\/api\/v1\/admin\/desktop\/[A-Za-z0-9_-]+\/(workspace-auth|workspace(\/.*)?|files\/.+)$/.test(pathname)) return;
 
     // Media files are loaded by plain <img>/external fetchers that can't send an
     // Authorization header. Grant access only when the request carries a valid,
