@@ -203,7 +203,7 @@ Docker-based isolated code execution. Regular users run code in sandboxed contai
 - **File tools**: sandbox_read_file (with offset/limit), sandbox_write_file (base64 safe), sandbox_list_files
 - **Permission enforcement**: regular users get sandbox_exec only, exec denied. Admin gets both.
 
-See [docs/SANDBOX.md](SANDBOX.md) for setup and configuration.
+See [docs/CONTAINERS.md](CONTAINERS.md) for setup and configuration.
 
 ### MCP (Model Context Protocol)
 - Install tool servers from curated catalog or custom config
