@@ -135,11 +135,17 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   });
 
   // Proxy workspace static files (HTML, noVNC JS/CSS) from container port 6080
+  // CSP sandbox isolates container content from the admin origin's cookies/storage
+  const WORKSPACE_CSP = 'sandbox allow-scripts allow-forms; frame-ancestors \'self\'';
+
   app.get('/api/v1/admin/desktop/:userId/workspace', { preHandler: [requireRole('admin')] }, async (request, reply) => {
     const target = getContainerForHttp(request);
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const resp = await fetch(`http://${target.ip}:6080/`);
-    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'text/html');
+    reply.code(resp.status)
+      .header('content-type', resp.headers.get('content-type') || 'text/html')
+      .header('content-security-policy', WORKSPACE_CSP)
+      .header('x-content-type-options', 'nosniff');
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
@@ -148,7 +154,10 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     if ('error' in target) return reply.code(404).send({ error: target.error });
     const path = (request.params as Record<string, string>)['*'];
     const resp = await fetch(`http://${target.ip}:6080/${path}`);
-    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'application/octet-stream');
+    reply.code(resp.status)
+      .header('content-type', resp.headers.get('content-type') || 'application/octet-stream')
+      .header('content-security-policy', WORKSPACE_CSP)
+      .header('x-content-type-options', 'nosniff');
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
@@ -160,9 +169,11 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     const resp = await fetch(`http://${target.ip}:8090/${path}`, {
       headers: { 'X-Desktop-Token': target.secrets?.sessionToken || '' },
     });
-    reply.code(resp.status).header('content-type', resp.headers.get('content-type') || 'application/json');
-    const disposition = resp.headers.get('content-disposition');
-    if (disposition) reply.header('content-disposition', disposition);
+    const isDownload = path.startsWith('download/');
+    reply.code(resp.status)
+      .header('content-type', isDownload ? 'application/octet-stream' : 'application/json')
+      .header('x-content-type-options', 'nosniff');
+    if (isDownload) reply.header('content-disposition', 'attachment');
     reply.send(Buffer.from(await resp.arrayBuffer()));
   });
 
