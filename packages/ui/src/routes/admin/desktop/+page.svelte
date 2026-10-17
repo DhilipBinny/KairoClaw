@@ -100,9 +100,9 @@
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('agw_api_key')}` },
       });
-      if (!res.ok) { feedback = 'Failed to get workspace token'; return; }
+      if (!res.ok) { feedback = 'Failed to get workspace access'; return; }
       const { token } = await res.json();
-      window.open(`/api/v1/admin/desktop/${userId}/workspace?wt=${encodeURIComponent(token)}`, '_blank');
+      window.open(`/api/v1/admin/desktop/${userId}/workspace-auth?code=${encodeURIComponent(token)}`, '_blank');
     } catch (e: any) { feedback = e.message; }
   }
 

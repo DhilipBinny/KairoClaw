@@ -8,15 +8,16 @@ import { requireRole } from '../auth/middleware.js';
 const _require = createRequire(import.meta.url);
 const { WebSocket: WsClient } = _require('ws') as { WebSocket: new (url: string) => WebSocket };
 
-// Short-lived workspace access tokens (5 min expiry, auto-cleanup)
-const WORKSPACE_TOKEN_TTL_MS = 5 * 60 * 1000;
-const workspaceTokens = new Map<string, { userId: string; expiresAt: number }>();
+// Workspace auth: one-time codes (exchanged for cookies) + session cookies
+const WS_TTL_MS = 5 * 60 * 1000;
+const WS_COOKIE = 'kairo_ws';
+const workspaceCodes = new Map<string, { userId: string; expiresAt: number }>();
+const workspaceSessions = new Map<string, { userId: string; expiresAt: number }>();
 
 setInterval(() => {
   const now = Date.now();
-  for (const [token, entry] of workspaceTokens) {
-    if (now > entry.expiresAt) workspaceTokens.delete(token);
-  }
+  for (const [k, v] of workspaceCodes) { if (now > v.expiresAt) workspaceCodes.delete(k); }
+  for (const [k, v] of workspaceSessions) { if (now > v.expiresAt) workspaceSessions.delete(k); }
 }, 60_000).unref();
 
 /**
@@ -131,27 +132,63 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     return { ip: container.containerIp, secrets: container.desktopSecrets };
   }
 
-  // Generate short-lived workspace token (admin-only, 5 min expiry)
+  // Generate one-time workspace code (admin-only, exchanged for cookie on first use)
   app.post('/api/v1/admin/desktop/:userId/workspace-token', { preHandler: [requireRole('admin')] }, async (request) => {
     const { userId } = request.params as { userId: string };
     const cm = opts.getContainerManager();
     if (!cm) return { error: 'Sandbox not initialized' };
     if (!cm.getDesktopContainer(userId)) return { error: 'No desktop container running' };
-    const token = randomBytes(32).toString('base64url');
-    workspaceTokens.set(token, { userId, expiresAt: Date.now() + WORKSPACE_TOKEN_TTL_MS });
-    return { token, expiresIn: WORKSPACE_TOKEN_TTL_MS / 1000 };
+    const code = randomBytes(32).toString('base64url');
+    workspaceCodes.set(code, { userId, expiresAt: Date.now() + 60_000 });
+    return { token: code, expiresIn: 60 };
   });
 
-  // Validate workspace token from ?wt= query param (for browser-tab access)
+  // Exchange one-time code for HttpOnly session cookie, then redirect to clean URL
+  app.get('/api/v1/admin/desktop/:userId/workspace-auth', async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    const code = (request.query as Record<string, string>).code;
+    if (!code) return reply.code(401).send({ error: 'Missing code' });
+    const entry = workspaceCodes.get(code);
+    if (!entry || entry.userId !== userId || Date.now() > entry.expiresAt) {
+      return reply.code(401).send({ error: 'Invalid or expired code' });
+    }
+    workspaceCodes.delete(code);
+
+    const sessionId = randomBytes(32).toString('base64url');
+    workspaceSessions.set(sessionId, { userId, expiresAt: Date.now() + WS_TTL_MS });
+
+    const cookiePath = `/api/v1/admin/desktop/${userId}/`;
+    const isSecure = request.headers['x-forwarded-proto'] === 'https' || request.protocol === 'https';
+    const maxAge = Math.floor(WS_TTL_MS / 1000);
+    const parts = [`${WS_COOKIE}=${sessionId}`, `Path=${cookiePath}`, 'HttpOnly', 'SameSite=Strict', `Max-Age=${maxAge}`];
+    if (isSecure) parts.push('Secure');
+    reply
+      .header('set-cookie', parts.join('; '))
+      .header('referrer-policy', 'no-referrer')
+      .redirect(`/api/v1/admin/desktop/${userId}/workspace`);
+  });
+
+  // Validate workspace session cookie
   async function requireWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
     const { userId } = request.params as { userId: string };
-    const wt = (request.query as Record<string, string>).wt;
-    if (!wt) { reply.code(401).send({ error: 'Missing workspace token (?wt=)' }); return; }
-    const entry = workspaceTokens.get(wt);
-    if (!entry || entry.userId !== userId || Date.now() > entry.expiresAt) {
-      reply.code(401).send({ error: 'Invalid or expired workspace token' });
+    const cookies = parseCookies(request.headers.cookie || '');
+    const sessionId = cookies[WS_COOKIE];
+    if (!sessionId) { reply.code(401).send({ error: 'Workspace session required. Open from the admin Desktop page.' }); return; }
+    const session = workspaceSessions.get(sessionId);
+    if (!session || session.userId !== userId || Date.now() > session.expiresAt) {
+      reply.code(401).send({ error: 'Workspace session expired. Go back to the admin Desktop page and click Open again.' });
       return;
     }
+  }
+
+  function parseCookies(header: string): Record<string, string> {
+    const result: Record<string, string> = {};
+    for (const pair of header.split(';')) {
+      const eq = pair.indexOf('=');
+      if (eq < 0) continue;
+      result[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+    }
+    return result;
   }
 
   // Serve custom config.js with proxy URLs (secrets via workspace token, not API key)
@@ -283,16 +320,6 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
   function getContainerForWs(request: FastifyRequest): { ip: string } | { error: string } {
     if (!validateWsOrigin(request)) return { error: 'Origin not allowed' };
     const { userId } = request.params as { userId: string };
-
-    // Accept workspace token on WS upgrade (noVNC passes it via query)
-    const wt = (request.query as Record<string, string>).wt;
-    if (wt) {
-      const entry = workspaceTokens.get(wt);
-      if (!entry || entry.userId !== userId || Date.now() > entry.expiresAt) {
-        return { error: 'Invalid or expired workspace token' };
-      }
-    }
-
     const cm = opts.getContainerManager();
     if (!cm) return { error: 'Sandbox not initialized' };
 
@@ -303,14 +330,15 @@ export const registerDesktopRoutes: FastifyPluginAsync<{
     return { ip: container.containerIp };
   }
 
-  // Accept admin API key OR workspace token for WS routes
+  // Accept admin API key OR workspace session cookie for WS routes
   const adminMiddleware = requireRole('admin');
   async function requireAdminOrWorkspaceToken(request: FastifyRequest, reply: import('fastify').FastifyReply) {
     const { userId } = request.params as { userId: string };
-    const wt = (request.query as Record<string, string>).wt;
-    if (wt) {
-      const entry = workspaceTokens.get(wt);
-      if (entry && entry.userId === userId && Date.now() <= entry.expiresAt) return;
+    const cookies = parseCookies(request.headers.cookie || '');
+    const sessionId = cookies[WS_COOKIE];
+    if (sessionId) {
+      const session = workspaceSessions.get(sessionId);
+      if (session && session.userId === userId && Date.now() <= session.expiresAt) return;
     }
     await adminMiddleware(request, reply);
   }
