@@ -431,6 +431,22 @@ export class ContainerManager {
     return this.containers.get(`desktop:${userId}`) || null;
   }
 
+  /**
+   * Execute a command inside the user's desktop container.
+   */
+  async desktopExec(userId: string, command: string, timeoutSec = 10): Promise<import('@agw/types').SandboxExecResult> {
+    const container = this.getDesktopContainer(userId);
+    if (!container) throw new Error('No desktop container running');
+    container.lastExecAt = Date.now();
+    return execInContainer(
+      this.config.dockerSocket,
+      container.containerId,
+      command,
+      CONTAINER_WORKSPACE_PATH,
+      timeoutSec * 1000,
+    );
+  }
+
   getCapabilities(role: string, userId?: string): SandboxCapabilities {
     return resolveCapabilities(this.config, role, userId);
   }
