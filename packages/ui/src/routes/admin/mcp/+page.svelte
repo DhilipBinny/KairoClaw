@@ -476,8 +476,8 @@
         <div class="install-error">{manualError}</div>
       {/if}
       <div class="install-actions">
-        <button class="btn btn-sm btn-primary" onclick={handleManualInstall} disabled={actionInProgress === manualId}>
-          {actionInProgress === manualId ? 'Installing...' : 'Add & Connect'}
+        <button class="btn btn-sm btn-primary" onclick={handleManualInstall} disabled={!!(manualId && actionInProgress === manualId)}>
+          {manualId && actionInProgress === manualId ? 'Installing...' : 'Add & Connect'}
         </button>
         <button class="btn btn-sm" onclick={closeManualForm}>Cancel</button>
       </div>
