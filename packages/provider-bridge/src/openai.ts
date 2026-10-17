@@ -91,6 +91,21 @@ export class OpenAIProvider implements ProviderInterface {
       params.tools = openaiTools;
     }
 
+    if (args.responseFormat) {
+      if (args.responseFormat.type === 'json_schema') {
+        (params as any).response_format = {
+          type: 'json_schema',
+          json_schema: {
+            name: args.responseFormat.name,
+            schema: args.responseFormat.schema,
+            strict: args.responseFormat.strict !== false,
+          },
+        };
+      } else if (args.responseFormat.type === 'json_object') {
+        (params as any).response_format = { type: 'json_object' };
+      }
+    }
+
     const streamTimeout = createStreamingTimeout({ signal });
 
     try {
@@ -140,11 +155,17 @@ export class OpenAIProvider implements ProviderInterface {
 
       streamTimeout.clear();
 
+      let parsedOutput: unknown;
+      if (args.responseFormat && text) {
+        try { parsedOutput = JSON.parse(text); } catch { /* raw text preserved */ }
+      }
+
       return {
         text: text || null,
         toolCalls: toolCalls.length > 0 ? toolCalls : null,
         usage: { inputTokens, outputTokens },
         thinkingText: thinkingText || null,
+        ...(parsedOutput !== undefined ? { parsedOutput } : {}),
       };
     } catch (e: unknown) {
       streamTimeout.clear();

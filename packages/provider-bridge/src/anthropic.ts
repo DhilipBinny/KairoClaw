@@ -143,6 +143,14 @@ export class AnthropicProvider implements ProviderInterface {
       }
     }
 
+    if (args.responseFormat) {
+      if (args.responseFormat.type === 'json_schema') {
+        (params as any).output_config = { format: { type: 'json_schema', schema: args.responseFormat.schema } };
+      } else if (args.responseFormat.type === 'json_object') {
+        this.log.warn('Anthropic does not support json_object mode natively — ignoring responseFormat');
+      }
+    }
+
     const systemLen = structured
       ? structured.cached.length + structured.dynamic.length
       : (typeof systemPrompt === 'string' ? systemPrompt.length : 0);
@@ -229,12 +237,18 @@ export class AnthropicProvider implements ProviderInterface {
 
       streamTimeout.clear();
 
+      let parsedOutput: unknown;
+      if (args.responseFormat && text) {
+        try { parsedOutput = JSON.parse(text); } catch { /* raw text preserved */ }
+      }
+
       return {
         text: text || null,
         toolCalls: toolCalls.length > 0 ? toolCalls : null,
         usage: { inputTokens, outputTokens },
         thinkingText: thinkingText || null,
         thinkingBlocks: thinkingBlocks.length > 0 ? thinkingBlocks : undefined,
+        ...(parsedOutput !== undefined ? { parsedOutput } : {}),
       };
     } catch (e: unknown) {
       streamTimeout.clear();

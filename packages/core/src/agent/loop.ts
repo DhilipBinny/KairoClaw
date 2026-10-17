@@ -21,6 +21,7 @@ import type {
   MessageContentPart,
   ToolCall,
   MediaAttachment,
+  ResponseFormat,
 } from '@agw/types';
 import type { DatabaseAdapter } from '../db/index.js';
 import type { SessionRow } from '../db/repositories/session.js';
@@ -784,6 +785,12 @@ export async function runAgent(
     ? { enabled: true as const, mode: thinkingCfg.mode || ('adaptive' as const), budgetTokens: thinkingCfg.budgetTokens }
     : undefined;
 
+  // ── Response format (structured output / JSON mode) ────
+  const rfCfg = (config.agent as any)?.responseFormat as { type?: string } | undefined;
+  const responseFormat: ResponseFormat | undefined = rfCfg?.type === 'json_object'
+    ? { type: 'json_object' }
+    : undefined;
+
   // ── Shared state for the ReAct loop ─────────────────────
   const initialContentSize = messages.reduce((sum, m) => sum + contentLen(m.content), 0);
   const s: RunState = {
@@ -841,7 +848,7 @@ export async function runAgent(
       response = await context.callLLM({
         messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
         model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
-        signal: context.signal,
+        signal: context.signal, responseFormat,
         _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
       });
     } catch (e: unknown) {
@@ -894,7 +901,7 @@ export async function runAgent(
           response = await context.callLLM({
             messages: s.messages, tools: s.tools.length > 0 ? s.tools : undefined,
             model, systemPrompt: s.systemPrompt, onDelta, onThinkingDelta, thinkingConfig,
-            signal: context.signal,
+            signal: context.signal, responseFormat,
             _executeTool: s.sdkToolExecutor, _maxToolRounds: maxToolRounds,
           });
           reqLog.info({ round: s.round, attempt: s.reactiveCompactFailures }, 'LLM call succeeded after reactive compact');

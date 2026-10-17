@@ -37,6 +37,11 @@ export interface ProviderResponse {
   /** Structured thinking blocks with signatures (Anthropic only). */
   thinkingBlocks?: import('./message.js').ThinkingBlock[];
   /**
+   * Parsed JSON output when responseFormat was requested. Set to the parsed
+   * object if the response text is valid JSON, undefined otherwise.
+   */
+  parsedOutput?: unknown;
+  /**
    * The provider/model that actually served this response (e.g. "openai/gpt-4o"),
    * which may differ from the requested model after a failover. Used to attribute
    * usage and cost to the provider that did the work.
@@ -67,6 +72,36 @@ export interface StructuredSystemPrompt {
   dynamic: string;
 }
 
+// ── Structured output / JSON mode ───────────────────────
+
+/** Forces the model to produce valid JSON matching a specific schema. */
+export interface JsonSchemaResponseFormat {
+  type: 'json_schema';
+  /** Schema name used by the provider (required by OpenAI, optional for Anthropic). */
+  name: string;
+  /** Optional description of what the schema represents. */
+  description?: string;
+  /** The JSON Schema the model's output must conform to. */
+  schema: Record<string, unknown>;
+  /** Whether to enforce strict schema adherence (OpenAI strict mode). Defaults to true. */
+  strict?: boolean;
+}
+
+/** Forces the model to produce valid JSON (no specific schema). */
+export interface JsonObjectResponseFormat {
+  type: 'json_object';
+}
+
+/**
+ * Response format constraint for structured output.
+ *
+ * - `json_schema`: model output must conform to the provided schema.
+ *   Supported by Anthropic (via output_config) and OpenAI (via response_format).
+ * - `json_object`: model output must be valid JSON (no schema enforcement).
+ *   Supported by OpenAI only — Anthropic ignores this with a warning.
+ */
+export type ResponseFormat = JsonSchemaResponseFormat | JsonObjectResponseFormat;
+
 export interface ChatArgs {
   /** Conversation messages (history + current user message). */
   messages: Message[];
@@ -88,6 +123,11 @@ export interface ChatArgs {
   thinkingConfig?: ThinkingConfig;
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
+  /**
+   * Structured output format constraint. When set, the provider maps it to
+   * the appropriate API parameter (Anthropic output_config, OpenAI response_format).
+   */
+  responseFormat?: ResponseFormat;
   /**
    * Tool executor function — used by SDK/CLI providers to execute tools in-process.
    * OAuth providers ignore this (tool calls are returned to the agent loop).
@@ -133,6 +173,8 @@ export interface ModelCapabilities {
   supportsStreaming: boolean;
   /** Whether the model supports extended thinking / chain-of-thought. */
   supportsThinking: boolean;
+  /** Whether the model supports structured output (json_schema / json_object). */
+  supportsStructuredOutput?: boolean;
   /** Human-readable display name (e.g. "Claude Opus 4.7"). */
   displayName?: string;
   /** How this entry was created: 'auto' (fetched from API) or 'manual' (admin edit). */
