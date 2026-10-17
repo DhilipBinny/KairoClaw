@@ -267,6 +267,10 @@ const modelIndicatorSchema = z.object({
   web: modelIndicatorVisibility,
 });
 
+const responseFormatSchema = z.object({
+  type: z.enum(['none', 'json_object']).default('none'),
+});
+
 const debugSchema = z.object({
   recordPrompt: z.boolean().default(false),
 });
@@ -312,6 +316,7 @@ const agentSchema = z.object({
   budget: withObjectDefault(budgetSchema),
   piiRedaction: z.boolean().default(false),
   toolTimeout: z.number().int().min(0).default(120),
+  responseFormat: withObjectDefault(responseFormatSchema),
   debug: withObjectDefault(debugSchema),
 });
 
@@ -325,6 +330,7 @@ const modelCapabilityEntrySchema = z.object({
   supportsToolCalling: z.boolean().default(true),
   supportsStreaming: z.boolean().default(true),
   supportsThinking: z.boolean().default(false),
+  supportsStructuredOutput: z.boolean().default(false),
   displayName: z.string().optional(),
   source: z.enum(['auto', 'manual']).default('auto'),
 }).partial();

@@ -18,6 +18,7 @@ const MODEL_DEFAULTS: ModelCapabilities = {
   supportsToolCalling: true,
   supportsStreaming: true,
   supportsThinking: false,
+  supportsStructuredOutput: false,
 };
 
 /**
